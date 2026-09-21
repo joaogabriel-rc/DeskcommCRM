@@ -9350,6 +9350,215 @@ export const DICIONARIO: Traducoes = {
   'A origem aparece na ficha do contato e no filtro "Site (landing page)" da lista de contatos.': {
     es: 'El origen aparece en la ficha del contacto y en el filtro "Sitio (landing page)" de la lista de contactos.',
   },
+
+  // ── Fluxos, Disparos, Tags e Campos do Usuário ───────────────────────────
+  //
+  // As telas de automação (migrations 0311 e 0312). A chave continua sendo o
+  // texto em português, como todo o resto deste arquivo.
+  //
+  // ⚠️ O que NÃO está aqui, e por quê: os rótulos dos CATÁLOGOS
+  // (`lib/flows/triggers.ts`, `lib/flows/acoes.ts`) chegam à tela por `t(x.label)`
+  // — argumento dinâmico, que o guarda de i18n não consegue cobrar e que este
+  // arquivo não teria como listar sem duplicar o catálogo. Eles degradam para o
+  // português, que é o comportamento documentado para chave sem tradução.
+  "A chave não muda depois de criada: ela está escrita dentro das mensagens que a citam. Renomeie o campo à vontade.":
+    { es: "La clave no cambia después de creada: está escrita dentro de los mensajes que la citan. Renombre el campo a voluntad." },
+  "A tag descreve uma característica do contato. Depois de criada, ela pode iniciar um fluxo, ser aplicada por uma ação e filtrar o público de um disparo.":
+    { es: "La etiqueta describe una característica del contacto. Después de creada, puede iniciar un flujo, ser aplicada por una acción y filtrar el público de un envío masivo." },
+  "Adicionar critério de campo": { es: "Agregar criterio de campo" },
+  "Adicionar espaço": { es: "Agregar espacio" },
+  "Adicionar passo": { es: "Agregar paso" },
+  "Agendar envio": { es: "Programar envío" },
+  "Andamento": { es: "Progreso" },
+  "Assina o corpo enviado, para o outro lado conferir que a chamada veio daqui.":
+    { es: "Firma el cuerpo enviado, para que el otro lado compruebe que la llamada vino de aquí." },
+  "Automações visuais de WhatsApp: você escolhe o gatilho que inicia o fluxo e monta os passos — mensagens, botões que abrem caminhos, ações, esperas e webhooks.":
+    { es: "Automatizaciones visuales de WhatsApp: usted elige el disparador que inicia el flujo y arma los pasos — mensajes, botones que abren caminos, acciones, esperas y webhooks." },
+  "Boas-vindas": { es: "Bienvenida" },
+  "Botões": { es: "Botones" },
+  "Cada botão vira uma saída do passo: ligue cada um ao caminho que ele deve seguir.":
+    { es: "Cada botón se convierte en una salida del paso: conecte cada uno al camino que debe seguir." },
+  "Cada espaço do template aprovado ({{1}}, {{2}}…) recebe um valor. Use variáveis para personalizar com o que as ações gravaram antes deste passo.":
+    { es: "Cada espacio de la plantilla aprobada ({{1}}, {{2}}…) recibe un valor. Use variables para personalizar con lo que las acciones guardaron antes de este paso." },
+  "Campos arquivados": { es: "Campos archivados" },
+  "Campos do Usuário": { es: "Campos del Usuario" },
+  "Campos do usuário": { es: "Campos del usuario" },
+  "Começar em (vazio = assim que agendar)": { es: "Comenzar en (vacío = apenas se programe)" },
+  "Como enviar": { es: "Cómo enviar" },
+  "Condições (todas precisam ser verdadeiras)": { es: "Condiciones (todas deben ser verdaderas)" },
+  "Contando…": { es: "Contando…" },
+  "Contatos bloqueados, anonimizados, mesclados ou sem telefone nunca entram — isso não é um filtro que dê para desligar.":
+    { es: "Los contactos bloqueados, anonimizados, fusionados o sin teléfono nunca entran — no es un filtro que se pueda desactivar." },
+  "Copiar a variável pronta para colar na mensagem": { es: "Copiar la variable lista para pegar en el mensaje" },
+  "Copiar identificador (é ele que a API e o N8N usam)": { es: "Copiar identificador (es el que usan la API y N8N)" },
+  "Cor (opcional)": { es: "Color (opcional)" },
+  "Criar e abrir": { es: "Crear y abrir" },
+  "Criar novo campo do usuário": { es: "Crear nuevo campo del usuario" },
+  "Criar tag": { es: "Crear etiqueta" },
+  "Dentro da janela de 24 horas": { es: "Dentro de la ventana de 24 horas" },
+  "Dentro da janela de 24h: texto livre, para quem falou com você recentemente.":
+    { es: "Dentro de la ventana de 24 h: texto libre, para quien habló con usted recientemente." },
+  "Desarquivar": { es: "Desarchivar" },
+  "Descer ação": { es: "Bajar acción" },
+  "Descrição (opcional)": { es: "Descripción (opcional)" },
+  "Disparos": { es: "Envíos masivos" },
+  "Do contato": { es: "Del contacto" },
+  "Dê um nome e escolha o que inicia a automação. Você monta os passos no canvas depois.":
+    { es: "Dele un nombre y elija qué inicia la automatización. Los pasos se arman en el lienzo después." },
+  "Dê um nome para reconhecer depois. Na tela seguinte você escolhe o público e a mensagem — o disparo nasce como rascunho e nada sai até você agendar.":
+    { es: "Dele un nombre para reconocerlo después. En la pantalla siguiente elige el público y el mensaje — el envío nace como borrador y nada sale hasta que lo programe." },
+  "Editar campo do usuário": { es: "Editar campo del usuario" },
+  "Editar tag": { es: "Editar etiqueta" },
+  "Encerra a execução do flow para este contato.": { es: "Termina la ejecución del flujo para este contacto." },
+  "Envio de WhatsApp em massa para um público filtrado por tag e por campo do usuário. O envio sai aos poucos, no ritmo que protege o número — e ninguém recebe duas vezes.":
+    { es: "Envío masivo de WhatsApp a un público filtrado por etiqueta y por campo del usuario. El envío sale de a poco, al ritmo que protege el número — y nadie recibe dos veces." },
+  "Escolha ao menos um critério": { es: "Elija al menos un criterio" },
+  "Escolher gatilho": { es: "Elegir disparador" },
+  "Esperando:": { es: "Esperando:" },
+  "Esperar quanto tempo": { es: "Esperar cuánto tiempo" },
+  "Esta chave não está no registro de campos. Ela funciona, mas não aparece nos seletores das outras telas.":
+    { es: "Esta clave no está en el registro de campos. Funciona, pero no aparece en los selectores de las otras pantallas." },
+  "Excluir passo": { es: "Eliminar paso" },
+  "Executadas de cima para baixo. Se uma falhar, as seguintes não rodam — e a mensagem depois deste passo também não sai.":
+    { es: "Se ejecutan de arriba hacia abajo. Si una falla, las siguientes no corren — y el mensaje posterior a este paso tampoco sale." },
+  "Fora da janela de 24 horas (template)": { es: "Fuera de la ventana de 24 horas (plantilla)" },
+  "Fora da janela, a plataforma só aceita template aprovado — e só pelo canal oficial.":
+    { es: "Fuera de la ventana, la plataforma solo acepta plantilla aprobada — y solo por el canal oficial." },
+  "Identificador copiado.": { es: "Identificador copiado." },
+  "Idioma do template": { es: "Idioma de la plantilla" },
+  "Inclui também as etiquetas que os agentes e a importação escreveram sem passar por cadastro. É aqui que se vê o peso de cada uma antes de mexer.":
+    { es: "Incluye también las etiquetas que los agentes y la importación escribieron sin pasar por un registro. Aquí se ve el peso de cada una antes de tocarla." },
+  "Iniciado em": { es: "Iniciado el" },
+  "Iniciar automação quando…": { es: "Iniciar automatización cuando…" },
+  "Inserir nome da tag": { es: "Ingresar nombre de la etiqueta" },
+  "Inserir variável": { es: "Insertar variable" },
+  "Nenhum campo arquivado.": { es: "Ningún campo archivado." },
+  "Nenhum campo cadastrado ainda. Crie em Configurações › Campos do Usuário para escolher de uma lista em vez de digitar.":
+    { es: "Aún no hay campos registrados. Créelos en Configuración › Campos del Usuario para elegir de una lista en vez de escribir." },
+  "Nenhum campo cadastrado. Crie em Configurações › Campos do Usuário.":
+    { es: "Ningún campo registrado. Créelo en Configuración › Campos del Usuario." },
+  "Nenhum campo com esse nome.": { es: "Ningún campo con ese nombre." },
+  "Nenhum campo criado ainda. Crie o primeiro para poder preenchê-lo numa ação de fluxo e usá-lo como variável dentro da mensagem.":
+    { es: "Aún no se creó ningún campo. Cree el primero para poder completarlo en una acción de flujo y usarlo como variable dentro del mensaje." },
+  "Nenhum disparo ainda": { es: "Ningún envío masivo todavía" },
+  "Nenhum flow ainda": { es: "Ningún flujo todavía" },
+  "Nenhum gatilho com esse nome.": { es: "Ningún disparador con ese nombre." },
+  "Nenhuma tag com esse nome.": { es: "Ninguna etiqueta con ese nombre." },
+  "Nenhuma tag declarada ainda. Crie a primeira para poder usá-la como gatilho de fluxo, em ações e na segmentação de disparos.":
+    { es: "Aún no hay etiquetas declaradas. Cree la primera para poder usarla como disparador de flujo, en acciones y en la segmentación de envíos." },
+  "Nome do disparo": { es: "Nombre del envío" },
+  "Nome do passo (só pra você — não sai na mensagem)": { es: "Nombre del paso (solo para usted — no sale en el mensaje)" },
+  "Nome do template aprovado": { es: "Nombre de la plantilla aprobada" },
+  "Nova tag": { es: "Nueva etiqueta" },
+  "Novo disparo": { es: "Nuevo envío masivo" },
+  "Novo flow": { es: "Nuevo flujo" },
+  "NÃO tem nenhuma destas tags": { es: "NO tiene ninguna de estas etiquetas" },
+  "Não consegui montar uma chave a partir desse nome. Digite a chave à mão.":
+    { es: "No fue posible armar una clave a partir de ese nombre. Escriba la clave a mano." },
+  "Não foi possível carregar os campos agora. Recarregue a página.":
+    { es: "No fue posible cargar los campos ahora. Recargue la página." },
+  "Não foi possível copiar. A variável é": { es: "No fue posible copiar. La variable es" },
+  "Não foi possível copiar. Selecione o identificador na tela.":
+    { es: "No fue posible copiar. Seleccione el identificador en la pantalla." },
+  "O botão ao lado insere a variável certa — inclusive os campos do usuário que você cadastrou.":
+    { es: "El botón de al lado inserta la variable correcta — incluidos los campos del usuario que usted registró." },
+  "O envio sai aos poucos, cerca de uma mensagem a cada cinco segundos, para proteger o número. Um público de 600 pessoas leva cerca de 50 minutos.":
+    { es: "El envío sale de a poco, cerca de un mensaje cada cinco segundos, para proteger el número. Un público de 600 personas lleva unos 50 minutos." },
+  "O gatilho decide o que coloca um contato dentro deste fluxo. Tag é um deles — não o único.":
+    { es: "El disparador decide qué pone a un contacto dentro de este flujo. La etiqueta es uno de ellos — no el único." },
+  "O que acontece depois? Escolha o tipo de passo ou uma ação pronta.":
+    { es: "¿Qué pasa después? Elija el tipo de paso o una acción lista." },
+  "Ocultar arquivados": { es: "Ocultar archivados" },
+  "Onde cada etiqueta está": { es: "Dónde está cada etiqueta" },
+  "Opção": { es: "Opción" },
+  "Os campos personalizados guardam informações sobre seus contatos — produto de interesse, origem, matrícula, o que a sua operação pedir. Depois você segmenta e personaliza mensagens com base neles.":
+    { es: "Los campos personalizados guardan información sobre sus contactos — producto de interés, origen, matrícula, lo que su operación necesite. Después segmenta y personaliza mensajes con base en ellos." },
+  "Os campos personalizados que você guarda sobre cada contato. Depois de criados, eles podem ser preenchidos por uma ação de fluxo, lidos como variável dentro de uma mensagem, testados numa condição e usados para segmentar um disparo.":
+    { es: "Los campos personalizados que usted guarda sobre cada contacto. Una vez creados, pueden ser completados por una acción de flujo, leídos como variable dentro de un mensaje, evaluados en una condición y usados para segmentar un envío." },
+  "Os nós, conexões e o histórico de execuções deste flow são apagados junto. Não é possível desfazer.":
+    { es: "Los nodos, las conexiones y el historial de ejecuciones de este flujo se borran junto. No se puede deshacer." },
+  "Pasta": { es: "Carpeta" },
+  "Pesquisar campo": { es: "Buscar campo" },
+  "Pesquisar por evento": { es: "Buscar por evento" },
+  "Pesquisar por nome da tag": { es: "Buscar por nombre de la etiqueta" },
+  "Pesquisar por nome ou chave do campo": { es: "Buscar por nombre o clave del campo" },
+  "Público": { es: "Público" },
+  "Quando enviar": { es: "Cuándo enviar" },
+  "Quando isto acontecer": { es: "Cuando esto ocurra" },
+  "Reagendar": { es: "Reprogramar" },
+  "Realize as seguintes ações": { es: "Realice las siguientes acciones" },
+  "Realize as seguintes ações…": { es: "Realice las siguientes acciones…" },
+  "Reativação de agosto": { es: "Reactivación de agosto" },
+  "Remover critério": { es: "Quitar criterio" },
+  "Remover do vocabulário": { es: "Quitar del vocabulario" },
+  "Remover espaço": { es: "Quitar espacio" },
+  "Renomear aqui corrige também os contatos, os negócios, as conversas e as regras de agente que já usam este nome — na mesma operação. O identificador não muda.":
+    { es: "Renombrar aquí corrige también los contactos, los negocios, las conversaciones y las reglas de agente que ya usan este nombre — en la misma operación. El identificador no cambia." },
+  "Segredo HMAC (opcional)": { es: "Secreto HMAC (opcional)" },
+  "Separe por vírgula. As tags cadastradas aparecem como sugestão ao digitar.":
+    { es: "Separe por coma. Las etiquetas registradas aparecen como sugerencia al escribir." },
+  "Somem dos seletores; o valor gravado em cada contato continua lá.":
+    { es: "Desaparecen de los selectores; el valor guardado en cada contacto sigue ahí." },
+  "Subir ação": { es: "Subir acción" },
+  "Tem TODAS estas tags": { es: "Tiene TODAS estas etiquetas" },
+  "Tem ao menos UMA destas tags": { es: "Tiene al menos UNA de estas etiquetas" },
+  "Template aprovado (fora da janela de 24h)": { es: "Plantilla aprobada (fuera de la ventana de 24 h)" },
+  "Texto": { es: "Texto" },
+  "Texto livre (só dentro da janela de 24h)": { es: "Texto libre (solo dentro de la ventana de 24 h)" },
+  "Texto livre só chega a quem falou com você nas últimas 24 horas. Para os demais, o envio falha — a plataforma recusa.":
+    { es: "El texto libre solo llega a quien habló con usted en las últimas 24 horas. Para los demás, el envío falla — la plataforma lo rechaza." },
+  "URL (ex.: seu webhook do N8N)": { es: "URL (ej.: su webhook de N8N)" },
+  "Um disparo escolhe um público pelas tags e campos do contato e manda a mesma mensagem para todo mundo dele, aos poucos. Crie o primeiro para ver a prévia de quantas pessoas ele alcança.":
+    { es: "Un envío masivo elige un público por las etiquetas y los campos del contacto y manda el mismo mensaje a todos ellos, de a poco. Cree el primero para ver la vista previa de cuántas personas alcanza." },
+  "Um flow começa por um GATILHO que você escolhe — contato novo, tag aplicada, campo alterado, mensagem recebida, negócio que mudou de etapa. Dali ele manda mensagens, pergunta com botões e leva o contato por caminhos diferentes conforme a resposta.":
+    { es: "Un flujo empieza por un DISPARADOR que usted elige — contacto nuevo, etiqueta aplicada, campo modificado, mensaje recibido, negocio que cambió de etapa. De ahí manda mensajes, pregunta con botones y lleva al contacto por caminos distintos según la respuesta." },
+  "Valores dos espaços do template": { es: "Valores de los espacios de la plantilla" },
+  "Variável copiada. Cole dentro do texto da mensagem.": { es: "Variable copiada. Péguela dentro del texto del mensaje." },
+  "Ver arquivados": { es: "Ver archivados" },
+  "Voltar para os disparos": { es: "Volver a los envíos masivos" },
+  "campo (ex.: contact.tags, contact.custom_fields.plano)": { es: "campo (ej.: contact.tags, contact.custom_fields.plan)" },
+  "contato(s) agora": { es: "contacto(s) ahora" },
+  "enviados": { es: "enviados" },
+  "falharam": { es: "fallaron" },
+  "pt_BR e pt são templates diferentes.": { es: "pt_BR y pt son plantillas distintas." },
+  "pulados": { es: "omitidos" },
+  "valor": { es: "valor" },
+  "É como o campo é citado dentro das mensagens e pela API. Não muda depois de criado — por isso renomear o campo nunca quebra uma mensagem publicada.":
+    { es: "Es como el campo se cita dentro de los mensajes y por la API. No cambia después de creado — por eso renombrar el campo nunca rompe un mensaje publicado." },
+  "É o modo certo para campanha: fora da janela de 24 horas a plataforma só aceita template aprovado, pelo canal oficial.":
+    { es: "Es el modo correcto para campaña: fuera de la ventana de 24 horas la plataforma solo acepta plantilla aprobada, por el canal oficial." },
+  "é diferente de": { es: "es distinto de" },
+  "é igual a": { es: "es igual a" },
+
+  // Vocabulários que chegam à tela por `t(MAPA[chave])` — o guarda resolve a
+  // constante e cobra o espanhol de cada valor.
+  "Agendado": { es: "Programado" },
+  "Enviando": { es: "Enviando" },
+  "Dados do contato": { es: "Datos del contacto" },
+  "Integração": { es: "Integración" },
+  "Eventos de contato": { es: "Eventos de contacto" },
+  "Número": { es: "Número" },
+  "Data e hora": { es: "Fecha y hora" },
+  "Verdadeiro/Falso": { es: "Verdadero/Falso" },
+  "Matriz": { es: "Matriz" },
+  "Texto longo": { es: "Texto largo" },
+  "Escolha única": { es: "Opción única" },
+  "Escolha múltipla": { es: "Opción múltiple" },
+  "está preenchido": { es: "está completo" },
+  "está vazio": { es: "está vacío" },
+
+  "Data": { es: "Fecha" },
+  "Link": { es: "Enlace" },
+  // Marca de produto: igual nos dois idiomas, mas a entrada precisa existir —
+  // o guarda cobra a CHAVE, não a diferença.
+  "WhatsApp": { es: "WhatsApp" },
+
+  // Passe de correção: campos do usuário no contato e espaços do template.
+  "Campos declarados em Configurações › Campos do Usuário, mais os do funil.":
+    { es: "Campos declarados en Configuración › Campos del Usuario, más los del embudo." },
+  "Espaço do template": { es: "Espacio de la plantilla" },
+  "Um item por linha.": { es: "Un elemento por línea." },
+
 };
 
 /**

@@ -267,6 +267,26 @@ export const AUDIT_ACTIONS = [
   "automation.rule_deleted",
   "automation.rule_executed",
   "automation.run_resent",
+  "flows.created",
+  "flows.updated",
+  "flows.deleted",
+  "flows.graph_saved",
+  "flows.worker_run",
+  // Registro de tags e de campos do contato (migration 0312). São mutações de
+  // CONFIGURAÇÃO da organização: mudam o vocabulário que toda automação usa.
+  "tag.created",
+  "tag.updated",
+  "tag.deleted",
+  "contact_field.created",
+  "contact_field.updated",
+  "contact_field.deleted",
+  // Disparos (migration 0312). `broadcast.worker_run` só é emitido quando o
+  // tick FEZ algo — cron vazio não é mutação (CLAUDE.md).
+  "broadcast.created",
+  "broadcast.updated",
+  "broadcast.deleted",
+  "broadcast.scheduled",
+  "broadcast.worker_run",
   "ai.skill_imported",
   "ai.skill_installed",
   "ai.skill_uninstalled",

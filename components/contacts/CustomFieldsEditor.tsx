@@ -1,8 +1,24 @@
 "use client";
 /**
- * CustomFieldsEditor — lê `crm_pipelines.settings.fields[]` e renderiza o
- * input certo por tipo. Usado pelo dossiê e pelo painel do inbox, via
- * `LeadFieldsForm`.
+ * CustomFieldsEditor — recebe uma lista de definições e renderiza o input certo
+ * por tipo. Usado pelo dossiê do contato, pelo painel do inbox e pelo dossiê do
+ * negócio, via `LeadFieldsForm`.
+ *
+ * ── De onde vêm as definições ───────────────────────────────────────────────
+ *
+ * Do CHAMADOR, e isso é deliberado: para o NEGÓCIO elas saem de
+ * `crm_pipelines.settings.fields[]` (são campos daquele funil), e para o
+ * CONTATO saem de `camposDoContato()` (lib/contacts/campos-do-contato.ts), que
+ * junta o registro `public.contact_fields` com o legado do funil. Este
+ * componente não sabe de onde vieram e não deve saber — é ele que desenha, não
+ * que decide.
+ *
+ * ── `datetime` e `list` entraram com o registro (migration 0312) ────────────
+ *
+ * São dois dos seis tipos que a tela de Campos do Usuário oferece. Sem eles
+ * aqui, um campo criado como "Data e hora" cairia no `default` do switch e
+ * viraria caixa de texto — o operador digitaria o formato que quisesse e a
+ * condição do flow que compara data nunca casaria.
  */
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,9 +39,11 @@ export type CustomFieldType =
   | "textarea"
   | "number"
   | "date"
+  | "datetime"
   | "select"
   | "multiselect"
   | "boolean"
+  | "list"
   | "email"
   | "phone"
   | "url";
@@ -107,6 +125,55 @@ export function CustomFieldsEditor({ fields, value, onChange, disabled, classNam
                 />
               </div>
             );
+          case "datetime":
+            return (
+              <div key={f.key} className="space-y-2">
+                {labelEl}
+                <Input
+                  id={id}
+                  type="datetime-local"
+                  // O valor vai e volta como a string que o `datetime-local`
+                  // produz (`2026-09-20T14:30`), sem passar por `new Date()`.
+                  // Converter para ISO aqui gravaria o instante em UTC e o
+                  // campo reabriria com outra hora para quem não está em UTC —
+                  // e o que o operador digitou é a hora LOCAL dele.
+                  value={typeof v === "string" ? v.slice(0, 16) : ""}
+                  onChange={(e) => set(f.key, e.target.value)}
+                  disabled={disabled}
+                />
+              </div>
+            );
+          case "list": {
+            // "Matriz": uma lista de textos livres. Sem opções declaradas, ao
+            // contrário de `multiselect` — quem escolhe os valores é quem
+            // preenche, não quem cadastrou o campo.
+            const itens = Array.isArray(v) ? (v as unknown[]).map((x) => String(x)) : [];
+            return (
+              <div key={f.key} className="space-y-2 md:col-span-2">
+                {labelEl}
+                <Textarea
+                  id={id}
+                  rows={3}
+                  // Uma linha por item. Textarea e não N inputs: o número de
+                  // itens é livre, e um editor com botões de adicionar/remover
+                  // seria um componente inteiro para o que uma quebra de linha
+                  // resolve — e colar uma lista de fora passa a funcionar.
+                  value={itens.join("\n")}
+                  onChange={(e) =>
+                    set(
+                      f.key,
+                      e.target.value
+                        .split("\n")
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    )
+                  }
+                  disabled={disabled}
+                />
+                <p className="text-xs text-muted-foreground">{t("Um item por linha.")}</p>
+              </div>
+            );
+          }
           case "select":
             return (
               <div key={f.key} className="space-y-2">

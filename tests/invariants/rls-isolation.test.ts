@@ -102,6 +102,11 @@ beforeAll(() => {
       v_agent uuid;
       v_version uuid;
       v_boundary jsonb;
+      v_flow uuid;
+      v_node_a uuid;
+      v_node_b uuid;
+      v_exec uuid;
+      v_broadcast uuid;
     begin
       foreach v_org in array array['${ORG_A}'::uuid, '${ORG_B}'::uuid] loop
         select id into v_sess from public.channel_sessions where organization_id = v_org limit 1;
@@ -271,6 +276,64 @@ beforeAll(() => {
             (organization_id, provider, label, api_key_encrypted, api_key_iv, api_key_tag, api_key_last4)
             values (v_org, 'anthropic', 'rls-invariant', '\\x00'::bytea, '\\x00'::bytea, '\\x00'::bytea, '0000');
         end if;
+
+        -- Flow Builder (migration 0311): o flow inteiro — desenho (flows,
+        -- flow_nodes, flow_edges) e histórico (flow_executions,
+        -- flow_execution_events). Vazar o desenho entrega ao vizinho o texto
+        -- que a organização manda aos clientes dela; vazar a execução entrega
+        -- QUEM recebeu e o que respondeu.
+        if not exists (select 1 from public.flows where organization_id = v_org) then
+          insert into public.flows (organization_id, name, trigger_type, trigger_config)
+            values (v_org, 'rls-invariant', 'contact_tag_added', '{"tag":"rls"}'::jsonb)
+            returning id into v_flow;
+
+          insert into public.flow_nodes (organization_id, flow_id, type, label, config)
+            values (v_org, v_flow, 'TRIGGER', 'rls-invariant', '{"trigger_type":"contact_tag_added"}'::jsonb)
+            returning id into v_node_a;
+          insert into public.flow_nodes (organization_id, flow_id, type, label, config)
+            values (v_org, v_flow, 'END', 'rls-invariant', '{}'::jsonb)
+            returning id into v_node_b;
+
+          insert into public.flow_edges (organization_id, flow_id, source_node_id, target_node_id)
+            values (v_org, v_flow, v_node_a, v_node_b);
+
+          insert into public.flow_executions (organization_id, flow_id, contact_id, current_node_id)
+            values (v_org, v_flow, v_contact, v_node_a)
+            returning id into v_exec;
+
+          insert into public.flow_execution_events (organization_id, execution_id, node_id, event_type)
+            values (v_org, v_exec, v_node_a, 'entered');
+        end if;
+
+        -- Registro de vocabulario e disparos (migration 0312). Vazar tags e
+        -- contact_fields entrega ao vizinho COMO a organizacao segmenta a
+        -- carteira dela: os nomes das etiquetas e dos campos sao a estrategia
+        -- comercial escrita. Vazar broadcasts entrega a campanha antes de ela
+        -- sair; vazar broadcast_recipients entrega a LISTA de clientes.
+        --
+        -- (Sem crase nem acento neste bloco: ele vive dentro de um template
+        -- literal de JS, e uma crase aqui FECHA a string — o arquivo inteiro
+        -- vira erro de sintaxe.)
+        if not exists (select 1 from public.tags where organization_id = v_org) then
+          insert into public.tags (organization_id, name, folder)
+            values (v_org, 'rls-invariant', 'rls');
+        end if;
+
+        if not exists (select 1 from public.contact_fields where organization_id = v_org) then
+          insert into public.contact_fields (organization_id, key, label, type)
+            values (v_org, 'rls_invariant', 'rls-invariant', 'text');
+        end if;
+
+        if not exists (select 1 from public.broadcasts where organization_id = v_org) then
+          insert into public.broadcasts (organization_id, name, segment, message)
+            values (v_org, 'rls-invariant',
+                    '{"tags_all":["rls-invariant"]}'::jsonb,
+                    '{"window_mode":"inside_24h","body":"rls"}'::jsonb)
+            returning id into v_broadcast;
+
+          insert into public.broadcast_recipients (organization_id, broadcast_id, contact_id)
+            values (v_org, v_broadcast, v_contact);
+        end if;
       end loop;
     end
     $seed$;
@@ -340,6 +403,32 @@ export const TABLES = [
   // positivo. O SELECT de `authenticated` é por COLUNA, sem as colunas cifradas:
   // a contagem abaixo usa só `organization_id` e mede o que um membro enxerga.
   "ai_provider_credentials",
+  // migration 0311 — o Flow Builder inteiro. O DESENHO (flows/flow_nodes/
+  // flow_edges) é o texto que a organização manda para os clientes dela e as
+  // regras de quando mandar; o HISTÓRICO (flow_executions/
+  // flow_execution_events) diz QUEM recebeu, o que respondeu e por qual
+  // caminho seguiu. Leitura org-scoped sem gate de papel nas cinco (o `agent`
+  // semeado aqui lê); a ESCRITA de desenho exige `manager` e esse segundo eixo
+  // não é medido aqui — quem o mede é a rota (`requireRole("manager")` em
+  // app/api/v1/flows), e as duas tabelas de execução não têm policy de escrita
+  // nenhuma para `authenticated` (só o motor, por service role).
+  "flows",
+  "flow_nodes",
+  "flow_edges",
+  "flow_executions",
+  "flow_execution_events",
+  // migration 0312 — o vocabulário e os disparos. `tags` e `contact_fields`
+  // são a ESTRATÉGIA comercial escrita em palavras ("cci_diz_que_pagou",
+  // "produto_interesse"); `broadcasts` é a campanha antes de sair; e
+  // `broadcast_recipients` é a lista de clientes de quem a campanha é. Leitura
+  // org-scoped sem gate de papel nas quatro (o `agent` semeado aqui lê); a
+  // ESCRITA exige `manager` nas três primeiras e NÃO existe para
+  // `broadcast_recipients` (só o worker, por service role) — esse segundo eixo
+  // é medido pela rota, como nas tabelas do flow acima.
+  "tags",
+  "contact_fields",
+  "broadcasts",
+  "broadcast_recipients",
   // ⚠️ `webhook_lead_captures` (migration 0174) NÃO entra nesta lista, e a
   // ausência é deliberada: a policy dela exige `manager`, e o usuário semeado
   // aqui é `agent` — o controle positivo falharia por ACERTO, e a "correção"

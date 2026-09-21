@@ -92,7 +92,15 @@ export async function POST(req: NextRequest): Promise<Response> {
   // Uma chamada só. Renomear a etiqueta e trocar o nome nas regras `add_tag` dos
   // agentes acontece na MESMA transação — é isto que impede o estado que a issue
   // descreve: contato renomeado com o agente ainda escrevendo o nome antigo.
-  const { data, error } = await db.rpc("fn_vocabulario_de_tags_operar", {
+  // `fn_tag_operar` (0312) e não `fn_vocabulario_de_tags_operar` direto: o
+  // invólucro faz a MESMA operação e, na mesma transação, mantém o registro de
+  // etiquetas (`public.tags`) em sincronia — preservando o id no rename.
+  //
+  // Sem isto, esta tela renomeava a etiqueta em todos os registros e deixava a
+  // linha do registro com o nome velho: as duas metades da mesma tela passariam
+  // a discordar, e a integração que guardou o uuid apontaria para um nome que
+  // não existe mais.
+  const { data, error } = await db.rpc("fn_tag_operar", {
     p_org: auth.org.orgId,
     p_acao: acao,
     p_tag: tag,
@@ -103,6 +111,16 @@ export async function POST(req: NextRequest): Promise<Response> {
       return fail("forbidden", "Esta sessão não pode mudar as etiquetas da organização.", 403, { requestId });
     if (error.code === "22023")
       return fail("validation_failed", "Confira a etiqueta e o novo nome.", 422, { requestId });
+    // Índice único do REGISTRO de etiquetas: renomear para um nome já
+    // declarado. A transação volta atrás inteira (ver `fn_tag_operar`), então
+    // nada ficou pela metade — é só dizer ao operador qual é a saída.
+    if (error.code === "23505")
+      return fail(
+        "conflict",
+        "Já existe uma etiqueta com esse nome. Para unir as duas, use Juntar.",
+        409,
+        { requestId },
+      );
     return fail("internal_error", "Não foi possível concluir a operação.", 500, { requestId });
   }
 

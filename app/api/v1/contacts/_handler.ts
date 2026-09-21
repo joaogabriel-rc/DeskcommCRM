@@ -581,9 +581,10 @@ export async function patchContactHandler(
     );
   }
 
-  const tagServiceOrigin = input.tags !== undefined
-    ? await observeServiceOrigin(createAdminClient(), ctx.organization_id, contactId)
-    : null;
+  // A origem de serviço da tag era observada AQUI para viajar no evento que
+  // esta rota emitia. O evento passou a ser do banco (migration 0311), e é o
+  // próprio `emit_event` que carimba a origem no instante da emissão — uma
+  // observação a menos por PATCH, e a mesma garantia.
   patch.updated_at = new Date().toISOString();
 
   const { data: updated, error: updErr } = await supabase
@@ -649,24 +650,20 @@ export async function patchContactHandler(
       if (error) console.error("[contacts.patch] emit_event failed", error.message);
     });
 
-  if (input.tags !== undefined) {
-    const prevTags: string[] = (existing as { tags?: string[] }).tags ?? [];
-    const addedTags = input.tags.filter((t) => !prevTags.includes(t));
-    if (addedTags.length) {
-      await createAdminClient()
-        .rpc("emit_event", {
-          p_event_type: "contact.tag_added",
-          p_entity_kind: "contact",
-          p_entity_id: contact.id,
-          p_payload: { added_tags: addedTags, tags: input.tags, service_origin: tagServiceOrigin },
-          p_metadata: { request_id: ctx.requestId, ...a.metadataActor },
-          p_organization_id: contact.organization_id,
-        })
-        .then(({ error }) => {
-          if (error) console.error("[contacts.patch] emit_event failed", error.message);
-        });
-    }
-  }
+  // ── `contact.tag_added` NÃO É EMITIDO AQUI — o BANCO emite ────────────────
+  //
+  // Quem emite é `trg_emit_event_on_contact_tags_change` (migration 0311),
+  // AFTER UPDATE em `contacts`. Enquanto os dois emitiam, uma tag posta por
+  // esta rota gerava DUAS linhas de `contact.tag_added` — e o consumidor é o
+  // motor de automação: regra "ganhou a tag → mandar WhatsApp" disparava duas
+  // vezes, duas mensagens para o mesmo cliente. É o mesmo defeito que a
+  // ingestão de mensagens já pagou com `message.received` ("2 events? NÃO —
+  // só 1"), e a cura é a mesma: um emissor só, o que cobre TODOS os
+  // escritores.
+  //
+  // O trigger cobre mais que esta rota: import, bulk, MCP, N8N via Bearer
+  // `dsk_` e qualquer UPDATE futuro. O payload dele traz `added_tags` (a forma
+  // que as regras já leem) e `tag` (a conveniência do Flow Builder).
 
   await audit({
     action: "contact.updated",

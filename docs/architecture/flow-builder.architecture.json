@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Flow Builder: do gatilho à resposta do contato",
+    "subtitle": "O gatilho é uma escolha dentro do flow; tag é só um deles. Motor com relógio próprio, reusando envio, ações e fronteira de serviço.",
+    "output": "flow-builder.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "humano", "label": "humano" },
+    { "id": "borda", "label": "borda" },
+    { "id": "execucao", "label": "execucao" },
+    { "id": "banco", "label": "banco" },
+    { "id": "externo", "label": "externo" }
+  ],
+  "mainPath": ["canvas", "graph_api", "flows_tbl", "trigger_handler", "engine", "message_node", "contato"],
+  "nodes": [
+    {
+      "id": "canvas",
+      "lane": "humano",
+      "col": 0,
+      "type": "service",
+      "label": "Canvas /app/flows: escolhe o GATILHO e monta os passos"
+    },
+    {
+      "id": "graph_api",
+      "lane": "borda",
+      "col": 1,
+      "type": "service",
+      "label": "PUT /flows/[id]/graph: valida 1 TRIGGER, projeta gatilho na linha e sobe version"
+    },
+    {
+      "id": "flows_tbl",
+      "lane": "banco",
+      "col": 2,
+      "type": "store",
+      "label": "flows / flow_nodes / flow_edges (RLS por organização)"
+    },
+    {
+      "id": "emissores",
+      "lane": "banco",
+      "col": 1,
+      "type": "service",
+      "label": "Emissores reais: trigger de tags em contacts, handlers de contato/negócio/agenda, ingestão de mensagem"
+    },
+    {
+      "id": "event_log",
+      "lane": "banco",
+      "col": 2,
+      "type": "store",
+      "label": "event_log (status pending; registro sem consumidor nasce done)"
+    },
+    {
+      "id": "trigger_handler",
+      "lane": "execucao",
+      "col": 3,
+      "type": "service",
+      "label": "flow-trigger.v1: casa evento x catálogo de gatilhos e abre execução"
+    },
+    {
+      "id": "engine",
+      "lane": "execucao",
+      "col": 4,
+      "type": "service",
+      "label": "Motor: executa nó, persiste estado, decide próximo, pausa e retoma"
+    },
+    {
+      "id": "exec_tbl",
+      "lane": "banco",
+      "col": 4,
+      "type": "store",
+      "label": "flow_executions / flow_execution_events (uma execução viva por flow+contato)"
+    },
+    {
+      "id": "message_node",
+      "lane": "execucao",
+      "col": 5,
+      "type": "service",
+      "label": "Nó MESSAGE: janela de 24h (texto ou template) e botões como saídas"
+    },
+    {
+      "id": "fronteira",
+      "lane": "banco",
+      "col": 5,
+      "type": "service",
+      "label": "Fronteira de serviço: só envia com origem verificável"
+    },
+    {
+      "id": "envio",
+      "lane": "execucao",
+      "col": 6,
+      "type": "service",
+      "label": "sendMessageHandler (o mesmo da UI, da automação e do agente)"
+    },
+    {
+      "id": "contato",
+      "lane": "externo",
+      "col": 7,
+      "type": "external",
+      "label": "Contato no WhatsApp"
+    },
+    {
+      "id": "reply_handler",
+      "lane": "execucao",
+      "col": 6,
+      "type": "service",
+      "label": "flow-reply.v1: casa a resposta com o botão e retoma pelo caminho escolhido"
+    },
+    {
+      "id": "cron",
+      "lane": "execucao",
+      "col": 5,
+      "type": "service",
+      "label": "cron/flow-worker: relógio do nó DELAY, claim atômico com lease"
+    },
+    {
+      "id": "acoes",
+      "lane": "execucao",
+      "col": 5,
+      "type": "service",
+      "label": "Nó ACTION: registry de ações da automação (tag, campo, etapa, conversa, outro flow)"
+    },
+    {
+      "id": "n8n",
+      "lane": "externo",
+      "col": 7,
+      "type": "external",
+      "label": "N8N / servidor do cliente (webhook com anti-SSRF e HMAC)"
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "canvas", "to": "graph_api", "label": "salvar desenho" },
+    { "id": "e2", "from": "graph_api", "to": "flows_tbl", "label": "fn_flow_replace_graph (atômico)" },
+    { "id": "e3", "from": "emissores", "to": "event_log", "label": "evento de fato" },
+    { "id": "e4", "from": "event_log", "to": "trigger_handler", "label": "drain despacha o tipo assinado" },
+    { "id": "e5", "from": "trigger_handler", "to": "flows_tbl", "label": "quais flows ativos escutam este gatilho" },
+    { "id": "e6", "from": "trigger_handler", "to": "engine", "label": "abre execução (idempotente por flow+contato)" },
+    { "id": "e7", "from": "engine", "to": "exec_tbl", "label": "persiste cada passo" },
+    { "id": "e8", "from": "engine", "to": "message_node", "label": "nó de mensagem" },
+    { "id": "e9", "from": "engine", "to": "acoes", "label": "nó de ação" },
+    { "id": "e10", "from": "message_node", "to": "fronteira", "label": "pede origem verificável" },
+    { "id": "e11", "from": "fronteira", "to": "envio", "label": "fronteira resolvida" },
+    { "id": "e12", "from": "envio", "to": "contato", "label": "mensagem (texto ou template)" },
+    { "id": "e13", "from": "contato", "to": "reply_handler", "label": "resposta chega como message.received" },
+    { "id": "e14", "from": "reply_handler", "to": "engine", "label": "retoma no caminho do botão escolhido" },
+    { "id": "e15", "from": "engine", "to": "cron", "label": "nó DELAY grava next_execution_at" },
+    { "id": "e16", "from": "cron", "to": "engine", "label": "retoma no vencimento" },
+    { "id": "e17", "from": "acoes", "to": "emissores", "label": "tag/etapa geram evento novo (e podem iniciar outro flow)" },
+    { "id": "e18", "from": "engine", "to": "n8n", "label": "nó WEBHOOK" },
+    { "id": "e19", "from": "n8n", "to": "emissores", "label": "N8N escreve pela API e o evento volta como gatilho" }
+  ]
+}

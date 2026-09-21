@@ -5,7 +5,9 @@
  *
  * O PR entregou a página e as duas metades da rota com atalho de platform admin
  * (`allowPlatformAdmin: true` / `user.is_platform_admin && !user.support`). Só
- * que quem grava é `fn_vocabulario_de_tags_operar`, cujo portão é
+ * que quem grava é `fn_vocabulario_de_tags_operar` — hoje pelo invólucro
+ * `fn_tag_operar` (migration 0312), que a chama junto com a sincronia do
+ * registro de etiquetas na MESMA transação —, cujo portão é
  * `fn_role_at_least(p_org, 'manager')` — e `fn_role_at_least` resolve SÓ por
  * `fn_user_role_in_org`, sem ramo de platform admin (`supabase/baseline.sql`).
  * Resultado: um platform admin que não é manager+ NESTA organização via a tela
@@ -47,7 +49,21 @@ vi.mock("@/lib/auth/server", () => ({
   resolveActiveOrg: async () => ({ orgId: ORG, name: "Org", role: estado.papelDaMembresia }),
   mfaEmDivida: async () => false,
 }));
-vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc }) }));
+// `from` entrou com o REGISTRO de etiquetas (migration 0312): a página lê
+// `public.tags` além de chamar a RPC do vocabulário. O dublê devolve lista
+// vazia — o que este arquivo mede é o PORTÃO (quem pode ver e gravar), não o
+// conteúdo da tela.
+const listaVazia = { data: [], error: null };
+const from = vi.fn(() => {
+  const encadeavel: Record<string, unknown> = {};
+  for (const metodo of ["select", "eq", "is", "order"])
+    encadeavel[metodo] = () => encadeavel;
+  // `await` numa query do PostgREST resolve a promessa do builder: por isso o
+  // objeto encadeável também é "thenável".
+  encadeavel.then = (resolve: (v: unknown) => unknown) => Promise.resolve(listaVazia).then(resolve);
+  return encadeavel;
+});
+vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc, from }) }));
 vi.mock("@/lib/audit", () => ({ audit: vi.fn() }));
 vi.mock("@/lib/impersonate/support", () => ({ requireSupportWrite: async () => null }));
 vi.mock("next/navigation", () => ({ redirect: redirecionar, useRouter: () => ({ refresh: vi.fn() }) }));
@@ -76,7 +92,7 @@ beforeEach(() => {
   rpc.mockImplementation(async (fn: string) => {
     if (fn === "fn_user_role_in_org") return { data: estado.papelNoBanco, error: null };
     if (fn === "fn_vocabulario_de_tags") return { data: [], error: null };
-    if (fn === "fn_vocabulario_de_tags_operar") return { data: { contatos: 0 }, error: null };
+    if (fn === "fn_tag_operar") return { data: { contatos: 0 }, error: null };
     return { data: null, error: { message: `rpc inesperada: ${fn}` } };
   });
 });
@@ -91,7 +107,7 @@ describe("platform admin sem papel de gerente NESTA organização", () => {
   it("⭐ POST da rota recusa com 403 antes de chamar a operação", async () => {
     const resposta = await postar({ acao: "renomear", tag: "vip", destino: "cliente-vip" });
     expect(resposta.status).toBe(403);
-    expect(chamadas()).not.toContain("fn_vocabulario_de_tags_operar");
+    expect(chamadas()).not.toContain("fn_tag_operar");
   });
 
   it("⭐ a página manda para /403 em vez de oferecer os três botões", async () => {
@@ -115,7 +131,7 @@ describe("CONTROLE: com papel de gerente a porta abre — senão os casos acima 
   it("POST devolve 200 e chama a operação", async () => {
     const resposta = await postar({ acao: "renomear", tag: "vip", destino: "cliente-vip" });
     expect(resposta.status, await resposta.clone().text()).toBe(200);
-    expect(chamadas()).toContain("fn_vocabulario_de_tags_operar");
+    expect(chamadas()).toContain("fn_tag_operar");
   });
 
   it("a página lê o vocabulário sem redirecionar", async () => {

@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Tags, Campos do Usuário e Disparos: o vocabulário que a automação usa",
+    "subtitle": "A etiqueta e o campo deixam de ser string solta e viram entidade com id. O disparo é o terceiro consumidor desse vocabulário, com fila e relógio próprios.",
+    "output": "tags-campos-e-disparos.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "humano", "label": "humano" },
+    { "id": "borda", "label": "borda" },
+    { "id": "execucao", "label": "execucao" },
+    { "id": "banco", "label": "banco" },
+    { "id": "externo", "label": "externo" }
+  ],
+  "mainPath": [
+    "config_tags",
+    "api_tags",
+    "tags_tbl",
+    "seletores",
+    "flow_acao",
+    "contato_valor",
+    "segmento",
+    "disparo_worker",
+    "contato_whatsapp"
+  ],
+  "nodes": [
+    {
+      "id": "config_tags",
+      "lane": "humano",
+      "col": 0,
+      "type": "service",
+      "label": "Configurações › Tags e Campos do Usuário: declarar o vocabulário"
+    },
+    {
+      "id": "api_tags",
+      "lane": "borda",
+      "col": 1,
+      "type": "service",
+      "label": "/api/v1/tags e /api/v1/contact-fields (manager+ para escrever, agent para ler)"
+    },
+    {
+      "id": "tags_tbl",
+      "lane": "banco",
+      "col": 2,
+      "type": "store",
+      "label": "public.tags e public.contact_fields — id estável, pasta, tipo (RLS por organização)"
+    },
+    {
+      "id": "vocab_rpc",
+      "lane": "banco",
+      "col": 2,
+      "type": "service",
+      "label": "fn_vocabulario_de_tags_operar + fn_tag_registro_aplicar: renomear preserva o id"
+    },
+    {
+      "id": "seletores",
+      "lane": "humano",
+      "col": 3,
+      "type": "service",
+      "label": "Seletor de campo, seletor de tag e 'Inserir variável' — as três telas leem a MESMA lista"
+    },
+    {
+      "id": "flow_acao",
+      "lane": "execucao",
+      "col": 4,
+      "type": "service",
+      "label": "Nó ACTION do flow: N ações na ordem, parando na primeira falha"
+    },
+    {
+      "id": "contato_valor",
+      "lane": "banco",
+      "col": 5,
+      "type": "store",
+      "label": "contacts.tags (text[]) e contacts.custom_fields (jsonb, chave imutável)"
+    },
+    {
+      "id": "flow_msg",
+      "lane": "execucao",
+      "col": 6,
+      "type": "service",
+      "label": "Nó MESSAGE: {{contact.custom_fields.<chave>}} lê o que a ação acabou de gravar"
+    },
+    {
+      "id": "n8n",
+      "lane": "externo",
+      "col": 0,
+      "type": "external",
+      "label": "N8N / integração: escreve tag e campo pela API de contatos, citando o id"
+    },
+    {
+      "id": "segmento",
+      "lane": "borda",
+      "col": 5,
+      "type": "service",
+      "label": "lib/disparos/segmento.ts: a MESMA query da prévia e da materialização"
+    },
+    {
+      "id": "disparo_autorizar",
+      "lane": "borda",
+      "col": 6,
+      "type": "service",
+      "label": "PATCH /broadcasts acao=agendar: fn_broadcast_materializar ancora a fronteira de cada contato"
+    },
+    {
+      "id": "disparo_fila",
+      "lane": "banco",
+      "col": 6,
+      "type": "store",
+      "label": "broadcast_recipients — unique (broadcast_id, contact_id) é a prevenção de duplicidade"
+    },
+    {
+      "id": "disparo_worker",
+      "lane": "execucao",
+      "col": 7,
+      "type": "service",
+      "label": "cron/broadcast-worker: claim com lease, lote por tick (o ritmo anti-banimento)"
+    },
+    {
+      "id": "envio",
+      "lane": "execucao",
+      "col": 8,
+      "type": "service",
+      "label": "sendMessageHandler (o mesmo da UI, da automação, do agente e do flow)"
+    },
+    {
+      "id": "contato_whatsapp",
+      "lane": "externo",
+      "col": 9,
+      "type": "external",
+      "label": "Contato no WhatsApp"
+    }
+  ],
+  "edges": [
+    { "id": "t1", "from": "config_tags", "to": "api_tags", "label": "criar, editar, arquivar" },
+    { "id": "t2", "from": "api_tags", "to": "tags_tbl", "label": "grava o registro" },
+    { "id": "t3", "from": "api_tags", "to": "vocab_rpc", "label": "renomear: valor aplicado primeiro, registro depois" },
+    { "id": "t4", "from": "vocab_rpc", "to": "contato_valor", "label": "reescreve tags de contatos, negócios, conversas e regras" },
+    { "id": "t5", "from": "tags_tbl", "to": "seletores", "label": "a lista que a tela oferece" },
+    { "id": "t6", "from": "seletores", "to": "flow_acao", "label": "campo e tag escolhidos, não digitados" },
+    { "id": "t7", "from": "flow_acao", "to": "contato_valor", "label": "grava o valor e publica no contexto da execução" },
+    { "id": "t8", "from": "contato_valor", "to": "flow_msg", "label": "a mensagem lê o que a ação gravou" },
+    { "id": "t9", "from": "n8n", "to": "contato_valor", "label": "POST/PATCH /contacts com tags e custom_fields" },
+    { "id": "t10", "from": "n8n", "to": "api_tags", "label": "consulta o id estável da tag e do campo" },
+    { "id": "t11", "from": "seletores", "to": "segmento", "label": "critérios do público" },
+    { "id": "t12", "from": "contato_valor", "to": "segmento", "label": "quem tem a tag e o campo" },
+    { "id": "t13", "from": "segmento", "to": "disparo_autorizar", "label": "prévia e lista, da mesma função" },
+    { "id": "t14", "from": "disparo_autorizar", "to": "disparo_fila", "label": "uma linha por contato, com a fronteira ancorada" },
+    { "id": "t15", "from": "disparo_fila", "to": "disparo_worker", "label": "claim atômico do lote" },
+    { "id": "t16", "from": "disparo_worker", "to": "envio", "label": "reconfere a fronteira antes de cada envio" },
+    { "id": "t17", "from": "envio", "to": "contato_whatsapp", "label": "texto ou template aprovado" },
+    { "id": "t18", "from": "disparo_worker", "to": "disparo_fila", "label": "grava o desfecho; sem pendente, o disparo conclui" },
+    { "id": "t19", "from": "flow_msg", "to": "envio", "label": "mesmo caminho de saída" }
+  ]
+}

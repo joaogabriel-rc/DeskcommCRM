@@ -20,6 +20,17 @@ build/
 !.env.example
 !.env.hostgator.example
 
+# Override LOCAL do compose. O `docker compose` mescla este arquivo sozinho
+# quando ele existe, e é onde cada máquina completa a stack de desenvolvimento
+# (Redis, serverless-redis-http, chave de canal em texto plano do WAHA CORE).
+#
+# NÃO É VERSIONADO, e a razão é concreta: ele carrega segredo de ambiente em
+# claro. Enquanto ficou de fora do .gitignore, um `git add -A` o teria levado
+# para o histórico junto com a chave — achado na auditoria desta branch, antes
+# do commit. O `docker-compose.yml` e o `.prod.yml` continuam versionados; só a
+# camada por máquina sai.
+docker-compose.override.yml
+
 # Testing & coverage
 coverage/
 .nyc_output/

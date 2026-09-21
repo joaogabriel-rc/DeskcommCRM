@@ -15,6 +15,8 @@ import { useContact } from "@/hooks/contacts/useContact";
 import { useAuth } from "@/hooks/auth/AuthProvider";
 import { useDefaultPipeline } from "@/hooks/pipelines/useDefaultPipeline";
 import { camposDoFunil } from "@/lib/leads/campos-do-funil";
+import { camposDoContato } from "@/lib/contacts/campos-do-contato";
+import { useCamposDoContato } from "@/hooks/catalogo/useCatalogo";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { TimelineView } from "@/components/contacts/TimelineView";
 import { EditContactDialog } from "@/components/contacts/EditContactDialog";
@@ -38,6 +40,10 @@ export function ContactDetailClient({ contactId }: Props) {
   // As DEFINIÇÕES continuam no funil (`crm_pipelines.settings.fields[]`) — só o
   // VALOR mora no contato. `camposDoFunil` é o mesmo leitor que o Kanban usa.
   const pipelineQuery = useDefaultPipeline(Boolean(activeOrg));
+  // O REGISTRO de campos do contato (migration 0312). Some com o funil em
+  // `camposDoContato()`: o registro manda, e o que só existe no funil
+  // continua aparecendo — senão um campo visível numa tela sumiria da outra.
+  const registroDeCampos = useCamposDoContato();
   const [editOpen, setEditOpen] = useState(false);
   const [anonOpen, setAnonOpen] = useState(false);
 
@@ -248,7 +254,10 @@ export function ContactDetailClient({ contactId }: Props) {
         contact={contact}
         open={editOpen}
         onOpenChange={setEditOpen}
-        customFieldDefs={camposDoFunil(pipelineQuery.data?.pipeline.settings ?? null)}
+        customFieldDefs={camposDoContato(
+          registroDeCampos.data,
+          camposDoFunil(pipelineQuery.data?.pipeline.settings ?? null),
+        )}
       />
       <AnonymizeDialog contactId={contactId} open={anonOpen} onOpenChange={setAnonOpen} />
     </div>

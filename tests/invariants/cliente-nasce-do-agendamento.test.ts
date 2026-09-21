@@ -580,6 +580,15 @@ describe("a etiqueta tirada à mão é respeitada", () => {
     // quando o único horário era cancelado. O sistema apagava o que nunca pôs.
     const contato = await criarContato(ORG_A, "Cliente de antes da regra");
     await pool.query("update contacts set tags = array['cliente','vip'] where id = $1", [contato]);
+    // A partir daqui: DELTA, não absoluto. O Flow Builder (migration 0311)
+    // instrumentou TODO escritor de contacts.tags — a linha acima, sendo uma
+    // escrita manual de tag genuína, agora emite `contact.tag_added` de
+    // propósito (é o próprio caso de uso do produto: uma tag posta à mão, ou
+    // por um sistema externo, tem que poder disparar um Flow). O que este
+    // teste protege é outra coisa: que MARCAR/CANCELAR o agendamento não
+    // emitem evento nenhum por conta própria — por isso a contagem de
+    // referência é tirada DEPOIS do set manual, não antes dele.
+    const eventos = await eventosDeEtiqueta({ contato });
 
     const ag = await marcar(ORG_A, contato, "2025-10-01T10:00:00Z");
     const marcado = await lerContato(contato);
@@ -591,7 +600,7 @@ describe("a etiqueta tirada à mão é respeitada", () => {
     const depois = await lerContato(contato);
     expect(depois.first_service_at).toBeNull();
     expect(depois.tags).toEqual(["cliente", "vip"]);
-    expect(await eventosDeEtiqueta({ contato })).toBe(0);
+    expect(await eventosDeEtiqueta({ contato })).toBe(eventos);
   });
   it("I34 · a etiqueta que a equipe REPÔS à mão: o sistema não a tira no cancelamento seguinte", async () => {
     // A JANELA QUE A LEITURA PREGUIÇOSA DO DONO DEIXAVA ABERTA. Medido, antes da

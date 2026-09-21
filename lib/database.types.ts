@@ -1976,6 +1976,469 @@ export type Database = {
           },
         ]
       }
+      flows: {
+        Row: {
+          created_at: string
+          created_by_user_id: string | null
+          description: string | null
+          id: string
+          name: string
+          organization_id: string
+          status: string
+          trigger_config: Json
+          trigger_type: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          created_by_user_id?: string | null
+          description?: string | null
+          id?: string
+          name: string
+          organization_id: string
+          status?: string
+          trigger_config?: Json
+          trigger_type?: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          created_by_user_id?: string | null
+          description?: string | null
+          id?: string
+          name?: string
+          organization_id?: string
+          status?: string
+          trigger_config?: Json
+          trigger_type?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flows_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      flow_nodes: {
+        Row: {
+          config: Json
+          created_at: string
+          flow_id: string
+          id: string
+          label: string
+          organization_id: string
+          position_x: number
+          position_y: number
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          flow_id: string
+          id?: string
+          label?: string
+          organization_id: string
+          position_x?: number
+          position_y?: number
+          type: string
+          updated_at?: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          flow_id?: string
+          id?: string
+          label?: string
+          organization_id?: string
+          position_x?: number
+          position_y?: number
+          type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flow_nodes_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "flows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      flow_edges: {
+        Row: {
+          created_at: string
+          flow_id: string
+          id: string
+          organization_id: string
+          source_handle: string | null
+          source_node_id: string
+          target_node_id: string
+        }
+        Insert: {
+          created_at?: string
+          flow_id: string
+          id?: string
+          organization_id: string
+          source_handle?: string | null
+          source_node_id: string
+          target_node_id: string
+        }
+        Update: {
+          created_at?: string
+          flow_id?: string
+          id?: string
+          organization_id?: string
+          source_handle?: string | null
+          source_node_id?: string
+          target_node_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flow_edges_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "flows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "flow_edges_source_node_id_fkey"
+            columns: ["source_node_id"]
+            isOneToOne: false
+            referencedRelation: "flow_nodes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "flow_edges_target_node_id_fkey"
+            columns: ["target_node_id"]
+            isOneToOne: false
+            referencedRelation: "flow_nodes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      flow_executions: {
+        Row: {
+          attempts: number
+          claimed_until: string | null
+          completed_at: string | null
+          contact_id: string
+          context: Json
+          conversation_id: string | null
+          current_node_id: string | null
+          flow_id: string
+          id: string
+          last_error: string | null
+          next_execution_at: string | null
+          organization_id: string
+          started_at: string
+          status: string
+          trigger_event_id: string | null
+          updated_at: string
+          waiting_for: string | null
+          waiting_node_id: string | null
+        }
+        Insert: {
+          attempts?: number
+          claimed_until?: string | null
+          completed_at?: string | null
+          contact_id: string
+          context?: Json
+          conversation_id?: string | null
+          current_node_id?: string | null
+          flow_id: string
+          id?: string
+          last_error?: string | null
+          next_execution_at?: string | null
+          organization_id: string
+          started_at?: string
+          status?: string
+          trigger_event_id?: string | null
+          updated_at?: string
+          waiting_for?: string | null
+          waiting_node_id?: string | null
+        }
+        Update: {
+          attempts?: number
+          claimed_until?: string | null
+          completed_at?: string | null
+          contact_id?: string
+          context?: Json
+          conversation_id?: string | null
+          current_node_id?: string | null
+          flow_id?: string
+          id?: string
+          last_error?: string | null
+          next_execution_at?: string | null
+          organization_id?: string
+          started_at?: string
+          status?: string
+          trigger_event_id?: string | null
+          updated_at?: string
+          waiting_for?: string | null
+          waiting_node_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flow_executions_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "flows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "flow_executions_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      flow_execution_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          execution_id: string
+          id: string
+          node_id: string | null
+          organization_id: string
+          payload: Json
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          execution_id: string
+          id?: string
+          node_id?: string | null
+          organization_id: string
+          payload?: Json
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          execution_id?: string
+          id?: string
+          node_id?: string | null
+          organization_id?: string
+          payload?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flow_execution_events_execution_id_fkey"
+            columns: ["execution_id"]
+            isOneToOne: false
+            referencedRelation: "flow_executions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tags: {
+        Row: {
+          archived_at: string | null
+          color: string | null
+          created_at: string
+          created_by_user_id: string | null
+          description: string | null
+          folder: string
+          id: string
+          name: string
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          archived_at?: string | null
+          color?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          description?: string | null
+          folder?: string
+          id?: string
+          name: string
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          archived_at?: string | null
+          color?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          description?: string | null
+          folder?: string
+          id?: string
+          name?: string
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      contact_fields: {
+        Row: {
+          archived_at: string | null
+          created_at: string
+          created_by_user_id: string | null
+          description: string | null
+          folder: string
+          id: string
+          key: string
+          label: string
+          options: Json
+          organization_id: string
+          position: number
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          archived_at?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          description?: string | null
+          folder?: string
+          id?: string
+          key: string
+          label: string
+          options?: Json
+          organization_id: string
+          position?: number
+          type?: string
+          updated_at?: string
+        }
+        Update: {
+          archived_at?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          description?: string | null
+          folder?: string
+          id?: string
+          key?: string
+          label?: string
+          options?: Json
+          organization_id?: string
+          position?: number
+          type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      broadcasts: {
+        Row: {
+          claimed_until: string | null
+          created_at: string
+          created_by_user_id: string | null
+          failed_count: number
+          finished_at: string | null
+          id: string
+          last_error: string | null
+          message: Json
+          name: string
+          next_run_at: string | null
+          organization_id: string
+          scheduled_at: string | null
+          segment: Json
+          sent_count: number
+          skipped_count: number
+          started_at: string | null
+          status: string
+          total_recipients: number
+          updated_at: string
+        }
+        Insert: {
+          claimed_until?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          failed_count?: number
+          finished_at?: string | null
+          id?: string
+          last_error?: string | null
+          message?: Json
+          name: string
+          next_run_at?: string | null
+          organization_id: string
+          scheduled_at?: string | null
+          segment?: Json
+          sent_count?: number
+          skipped_count?: number
+          started_at?: string | null
+          status?: string
+          total_recipients?: number
+          updated_at?: string
+        }
+        Update: {
+          claimed_until?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          failed_count?: number
+          finished_at?: string | null
+          id?: string
+          last_error?: string | null
+          message?: Json
+          name?: string
+          next_run_at?: string | null
+          organization_id?: string
+          scheduled_at?: string | null
+          segment?: Json
+          sent_count?: number
+          skipped_count?: number
+          started_at?: string | null
+          status?: string
+          total_recipients?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      broadcast_recipients: {
+        Row: {
+          attempts: number
+          broadcast_id: string
+          claimed_until: string | null
+          contact_id: string
+          created_at: string
+          error: string | null
+          id: string
+          organization_id: string
+          sent_at: string | null
+          service_boundary: Json | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          broadcast_id: string
+          claimed_until?: string | null
+          contact_id: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          organization_id: string
+          sent_at?: string | null
+          service_boundary?: Json | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          broadcast_id?: string
+          claimed_until?: string | null
+          contact_id?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          organization_id?: string
+          sent_at?: string | null
+          service_boundary?: Json | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       automation_rule_runs: {
         Row: {
           actions_result: Json
@@ -8354,6 +8817,33 @@ export type Database = {
       fn_can_view_lead: {
         Args: { p_org: string; p_owner_user_id: string }
         Returns: boolean
+      }
+      fn_claim_due_flow_executions: {
+        Args: { p_lease_seconds: number; p_limit: number }
+        Returns: {
+          attempts: number
+          claimed_until: string | null
+          completed_at: string | null
+          contact_id: string
+          context: Json
+          conversation_id: string | null
+          current_node_id: string | null
+          flow_id: string
+          id: string
+          last_error: string | null
+          next_execution_at: string | null
+          organization_id: string
+          started_at: string
+          status: string
+          trigger_event_id: string | null
+          updated_at: string
+          waiting_for: string | null
+          waiting_node_id: string | null
+        }[]
+      }
+      fn_flow_replace_graph: {
+        Args: { p_edges: Json; p_flow_id: string; p_nodes: Json; p_organization_id: string }
+        Returns: undefined
       }
       fn_claim_due_followup_enrollments: {
         Args: { p_lease_seconds: number; p_limit: number }

@@ -241,14 +241,29 @@ function tiposConsumidos(): Set<string> {
   return new Set([...doRegistry, ...Object.keys(CONSUMIDORES_FORA_DO_REGISTRY)]);
 }
 
-/** A lista que o banco usa para fechar o registro no nascimento. */
+/**
+ * A lista que o banco usa para fechar o registro no nascimento — a EFETIVA,
+ * não a união do histórico.
+ *
+ * ⚠️ Antes isto unia a lista de TODOS os arquivos SQL, e a união tornava a
+ * remoção de um tipo impossível de expressar: a migration antiga continua no
+ * disco (nunca se edita migration aplicada), então o tipo removido seguia
+ * aparecendo e o teste acusava "tipo com consumidor na lista" para sempre.
+ * Medido quando `contact.created`/`contact.updated` ganharam consumidor
+ * (Flow Builder, migration 0311) e saíram da lista: o schema estava certo e o
+ * gate, vermelho.
+ *
+ * O que vale é a ÚLTIMA definição do `baseline.sql` — é o arquivo que o
+ * self-hoster aplica, e dentro dele a última reescrita é a que fica de pé.
+ * Migrations seguem varridas pelas OUTRAS asserções (trigger + backfill nos
+ * dois caminhos), que é onde a história importa.
+ */
 function tiposDeRegistro(): Set<string> {
-  const achados = new Set<string>();
-  for (const f of arquivosSql()) {
-    const m = DEF_REGISTRO.exec(semComentarios(readFileSync(f, "utf8")));
-    if (m) for (const x of m[1]!.matchAll(/'([a-z0-9_.]+)'/g)) achados.add(x[1]!);
-  }
-  return achados;
+  const texto = semComentarios(readFileSync(join(RAIZ, "supabase/baseline.sql"), "utf8"));
+  const definicoes = [...texto.matchAll(new RegExp(DEF_REGISTRO.source, "g"))];
+  const ultima = definicoes[definicoes.length - 1];
+  if (!ultima) throw new Error("baseline.sql sem definição de fn_event_log_e_registro");
+  return new Set([...ultima[1]!.matchAll(/'([a-z0-9_.]+)'/g)].map((x) => x[1]!));
 }
 
 /**

@@ -150,6 +150,27 @@ describe("fatia S4 — vocabulário de tags (contrato do que foi escrito)", () =
     expect(rota).toMatch(/from "@\/lib\/api\/wrappers"/);
     expect(rota).toContain('requireRole("manager"');
     expect(rota).toContain('rpc("fn_vocabulario_de_tags", {');
-    expect(rota).toContain('rpc("fn_vocabulario_de_tags_operar"');
+    // ⚠️ A ESCRITA MUDOU DE NOME, NÃO DE NATUREZA. Esta linha exigia
+    // `fn_vocabulario_de_tags_operar` direto. Desde a migration 0312 a rota
+    // chama `fn_tag_operar`, um invólucro que executa AQUELA função e a
+    // sincronia do registro de etiquetas (`public.tags`) no mesmo corpo — logo,
+    // na mesma transação. É mais transacional do que era, não menos: antes a
+    // rota fazia duas chamadas e havia um instante com o vocabulário renomeado
+    // e o registro no nome velho.
+    //
+    // A cadeia continua pinada: a asserção seguinte cobra que o invólucro de
+    // fato chame a função original, para "trocar de nome" não virar "parar de
+    // reescrever as etiquetas aplicadas".
+    expect(rota).toContain('rpc("fn_tag_operar"');
+  });
+
+  it("o invólucro transacional chama MESMO a operação de vocabulário", () => {
+    const sql = ler("supabase/migrations/20260920180000_0312_tags_campos_disparos.sql");
+    expect(sql).toMatch(/create or replace function public\.fn_tag_operar\(/);
+    expect(sql).toContain("public.fn_vocabulario_de_tags_operar(p_org, p_acao, p_tag, p_destino)");
+    expect(sql).toContain("public.fn_tag_registro_aplicar(p_org, p_acao, p_tag, p_destino)");
+    // `security invoker`: quem cobra papel são as funções chamadas. Um
+    // `definer` aqui passaria por cima da RLS de `public.tags`.
+    expect(sql).toMatch(/function public\.fn_tag_operar[\s\S]{0,300}?security invoker/);
   });
 });

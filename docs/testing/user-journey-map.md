@@ -2557,3 +2557,77 @@ RPC `fn_support_context` falhou e derrubou `/api/v1/pipelines` com 500 — e foi
 assim que o estado "não consegui carregar as etapas" apareceu na tela sem ser
 provocado. A função existe e tem `EXECUTE` para `authenticated` no banco local;
 a falha foi de carga, não de permissão.
+
+
+## J28 — Automações: o vocabulário que a automação usa `[P1]` (2026-09-20)
+
+Fatia das migrations 0311/0312. O que se provou, pela TELA (Chromium dirigindo
+o app local, conta real, banco local) e pelo MOTOR (execução real do drain e do
+worker), nesta ordem:
+
+| # | Caso | Resultado | Evidência |
+|---|---|---|---|
+| 1 | O menu tem a seção **Automações**, com Fluxos e Disparos | ✅ | `evidence/automacoes/01-menu.png` |
+| 2 | Criar tag com pasta, pela tela | ✅ | `evidence/automacoes/02-tag.png` |
+| 3 | A tag nasce com identificador visível e copiável | ✅ | idem |
+| 4 | Renomear a tag PRESERVA o identificador | ✅ | comparação antes/depois no mesmo seletor |
+| 5 | Criar campo do usuário; a chave é sugerida a partir do nome | ✅ | `evidence/automacoes/03-campo.png` |
+| 6 | Renomear o campo MANTÉM a chave | ✅ | idem |
+| 7 | O canvas do fluxo abre com o gatilho plantado | ✅ | `evidence/automacoes/04-canvas.png` |
+| 8 | Disparo novo, com segmentação por tag e prévia de público | ✅ | `evidence/automacoes/05-disparo.png` |
+| 9 | Nó de ação com TRÊS ações grava os dois campos e aplica a tag, na ordem | ✅ | motor |
+| 10 | A mensagem seguinte lê os valores que aquelas ações acabaram de gravar | ✅ | corpo medido: `Produto: Impressão 3D / Origem: Meta Ads` |
+| 11 | Uma execução por contato, com o drain rodando quatro vezes | ✅ | motor |
+| 12 | A segmentação encontra o contato por tag E por campo | ✅ | motor |
+| 13 | Materializar o público duas vezes deixa UM destinatário | ✅ | índice único `(broadcast_id, contact_id)` |
+| 14 | O worker envia uma vez; o segundo tick não reenvia | ✅ | `attempts = 1`, disparo `completed` |
+
+**Zero erro de console e zero resposta 5xx** em toda a navegação.
+
+O que esta jornada NÃO cobriu, e continua pendente: o campo do usuário no
+formulário do contato (lá ainda valem os campos declarados no funil), e um
+disparo com template aprovado saindo de verdade pelo canal oficial da Meta — o
+ambiente local usa o canal por QR, onde template não se aplica.
+
+### Passe de correção (2026-09-20, mesma sessão)
+
+Quatro prioridades, medidas pela tela e pela rota real, no ambiente local:
+
+| # | Caso | Resultado |
+|---|---|---|
+| 15 | Campo "Data e hora" criado em Configurações aparece no formulário do contato como `datetime-local` | ✅ |
+| 16 | Campo "Matriz" aparece como lista (um item por linha) | ✅ |
+| 17 | Os dois valores persistem em `contacts.custom_fields` pela rota normal | ✅ `"2026-12-25T14:30"` e `["Impressao 3D","Modelagem"]` — `evidence/automacoes/06-campos-no-contato.png` |
+| 18 | Ativar um flow com mensagem fora da janela SEM template é RECUSADO (422), e o flow fica em rascunho | ✅ |
+| 19 | Com o template preenchido — inclusive um slot de cabeçalho (`header:1`) — o flow liga | ✅ |
+| 20 | Renomear tag pela rota move registro e contato juntos, preservando o id | ✅ |
+| 21 | Renomear para um nome já declarado devolve 409 e a transação inteira volta atrás | ✅ contato intacto |
+
+**Defeito achado pela medição, não a olho:** com os campos de uma organização que
+declarou vinte, o diálogo de editar contato ficou com 1563px de altura num
+viewport de 800, `overflow-y: visible`, e o botão Salvar em y=1120 — fora da
+tela e sem rolagem. Antes do registro de campos isso não aparecia porque as
+definições só vinham do funil e eram poucas. Corrigido no chamador
+(`max-h-[85vh] overflow-y-auto`), não no `DialogContent` compartilhado.
+
+### Conserto do diálogo de contato e o orçamento do menu (2026-09-20)
+
+| # | Caso | Resultado |
+|---|---|---|
+| 22 | Diálogo de contato com 37 campos em 1280×800 | ✅ 680px, cabe, título visível, Salvar em y=679 visível e **clicável** (hit-test) |
+| 23 | Miolo rolado até o fim: cabeçalho e rodapé NÃO se movem | ✅ Salvar continua em y=679 |
+| 24 | Mesmo cenário em 600px e em 1080px | ✅ ambos |
+| 25 | Com apenas 2 campos, sem barra de rolagem e caixa compacta | ✅ 665px, sem rolagem |
+| 26 | Clique real em Salvar, sem `force` | ✅ |
+| 27 | Menu lateral cabe em 1280×900 sem rolar | ✅ depois de tirar Meta Ads, Atividades e Webhooks do sidebar |
+| 28 | `/app/ads/meta`, `/app/activities`, `/app/webhooks` continuam respondendo | ✅ 200/307 — as rotas não mudaram |
+| 29 | Meta Ads e Atividades aparecem no hub `/app/analise` | ✅ |
+
+A spec `tests/e2e/contato-modal-cabe-na-tela.spec.ts` prende os casos 22 a 26 e
+está registrada em `SPECS_PARTE_2` do workflow de e2e. Rodada localmente com o
+build de produção: **15 passed** junto de `navegacao.spec.ts` e
+`contato-salva-email.spec.ts`.
+
+**Dívida deixada em aberto, por decisão do dono do produto:** o grupo Canais não
+tem hub, então Webhooks e Nuvemshop passam a ser alcançáveis só pelo ⌘K. A saída
+estrutural é um hub para Canais.

@@ -76,3 +76,61 @@ export type LinhaDeVocabulario = {
   descricao: string | null;
   no_vocabulario: boolean;
 };
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * O REGISTRO de etiquetas (migration 0312) — a tag como ENTIDADE, com id.
+ *
+ * O que muda em relação ao bloco acima: ali a etiqueta só existia depois de
+ * alguém escrevê-la em algum lugar, e a tela mostrava o que já tinha sido
+ * escrito. Aqui ela pode ser CRIADA antes do primeiro uso, ganha pasta, cor e
+ * descrição, e ganha um `id` uuid que uma integração (N8N, API) cita sem
+ * depender da grafia.
+ *
+ * O que NÃO muda: a etiqueta continua sendo string dentro de `contacts.tags`.
+ * O registro é o vocabulário; o valor aplicado segue onde sempre esteve.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export const PASTA_MAX = 60;
+export const PASTA_PADRAO = "Tags";
+
+export const criarTagSchema = z.object({
+  name: tagSchema,
+  folder: z.string().trim().min(1).max(PASTA_MAX).default(PASTA_PADRAO),
+  color: z
+    .string()
+    .trim()
+    .regex(/^#[0-9a-fA-F]{6}$/, "cor_invalida")
+    .nullish(),
+  description: z.string().trim().max(500).nullish(),
+});
+export type CriarTagInput = z.infer<typeof criarTagSchema>;
+
+/**
+ * `name` ENTRA aqui, ao contrário de `key` no registro de campos — e a razão é
+ * a diferença entre os dois: o nome da tag É o valor aplicado, então renomear
+ * exige reescrever `contacts.tags` de todo mundo. Quem faz isso numa transação
+ * só é `fn_vocabulario_de_tags_operar` (0264); por isso a rota de PATCH manda o
+ * rename por lá e só depois sincroniza o registro, preservando o id.
+ */
+export const atualizarTagSchema = z.object({
+  name: tagSchema.optional(),
+  folder: z.string().trim().min(1).max(PASTA_MAX).optional(),
+  color: z
+    .string()
+    .trim()
+    .regex(/^#[0-9a-fA-F]{6}$/, "cor_invalida")
+    .nullish(),
+  description: z.string().trim().max(500).nullish(),
+  archived: z.boolean().optional(),
+});
+export type AtualizarTagInput = z.infer<typeof atualizarTagSchema>;
+
+/** Uma linha do registro, como a tela e a API a devolvem. */
+export interface TagDoRegistro {
+  id: string;
+  name: string;
+  folder: string;
+  color: string | null;
+  description: string | null;
+  archived_at: string | null;
+}

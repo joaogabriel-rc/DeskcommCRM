@@ -15,7 +15,14 @@ import type { Role } from "@/lib/auth/types";
  * Doutrina: docs/doctrine/sistema-vivo.md — "por qual porta se chega até mim?"
  */
 
-export type NavGroupId = "atendimento" | "crm" | "ia" | "canais" | "analise" | "organizacao";
+export type NavGroupId =
+  | "atendimento"
+  | "crm"
+  | "ia"
+  | "canais"
+  | "automacoes"
+  | "analise"
+  | "organizacao";
 
 export interface NavGroup {
   id: NavGroupId;
@@ -70,6 +77,18 @@ export const NAV_GROUPS: NavGroup[] = [
   { id: "crm", label: "CRM", hub: { href: "/app/crm", label: "Ver tudo em CRM" } },
   { id: "ia", label: "Agente de IA", hub: { href: "/app/ai", label: "Ver tudo em IA" } },
   { id: "canais", label: "Canais" },
+  // ── Por que Automações saiu de dentro de Canais ───────────────────────────
+  //
+  // "Canais" responde POR ONDE a mensagem entra e sai: o número, o webhook, a
+  // loja. Fluxos respondia OUTRA pergunta — o que o sistema faz sozinho — e
+  // estava ali só porque era a prateleira mais próxima quando nasceu. Com
+  // Disparos ao lado, a diferença deixou de ser sutil: os dois são trabalho
+  // que acontece sem ninguém clicando, um reagindo a um gatilho e outro saindo
+  // de uma lista, e nenhum dos dois é um canal.
+  //
+  // Sem hub: são duas telas, e um hub de dois itens é um clique a mais para
+  // chegar onde já dava para chegar (mesma régua do comentário de NAV_GROUPS).
+  { id: "automacoes", label: "Automações" },
   { id: "analise", label: "Análise", hub: { href: "/app/analise", label: "Ver tudo em Análise" } },
   {
     id: "organizacao",
@@ -457,6 +476,46 @@ export const NAV_CATALOG = [
     icon: "WebhooksLogo",
     group: "canais",
     minRole: "manager",
+    // SEM `sidebar`, pelos últimos 13px que a seção Automações pediu. A conta é
+    // a do cabeçalho do Sidebar: cada linha custa 32px, e faltavam 13 — com
+    // esta, sobram 19px de folga, a mesma que o arquivo registra depois das
+    // duas vezes anteriores em que o menu estourou.
+    //
+    // ⚠️ E ELA CUSTA MAIS QUE AS OUTRAS DUAS, por um motivo que precisa estar
+    // escrito: "Meta Ads" e "Atividades" saíram para dentro do hub do grupo
+    // Análise, e continuam a um clique. O grupo Canais NÃO tem hub — então a
+    // única porta navegável de Webhooks passa a ser o ⌘K, exatamente o estado
+    // que a entrada de Nuvemshop logo acima descreve como problema.
+    //
+    // Decisão do dono do produto, tomada com essa ressalva na frente. A saída
+    // estrutural, quando alguém a quiser, é a mesma de sempre: um hub para
+    // Canais — e aí Webhooks e Nuvemshop voltam a ter porta.
+    //
+    // A ROTA, a tela e as permissões não mudam.
+  },
+
+  // ---- Automações — o que o sistema faz sem ninguém clicando ----
+  {
+    href: "/app/flows",
+    label: "Fluxos",
+    // ⚠️ A descrição DIZIA "uma tag dispara mensagens", e isso ficou falso na
+    // fatia do seletor de gatilhos: tag é um dos treze, e escrever assim no ⌘K
+    // ensinava o produto errado a quem busca por "automação".
+    description:
+      "Monte o caminho do contato numa tela: escolha o gatilho e ligue mensagens, ações, esperas e condições.",
+    icon: "FlowArrow",
+    group: "automacoes",
+    minRole: "manager",
+    sidebar: true,
+  },
+  {
+    href: "/app/disparos",
+    label: "Disparos",
+    description:
+      "Envie WhatsApp em massa para um público filtrado por tag e por campo, com agendamento e acompanhamento.",
+    icon: "Megaphone",
+    group: "automacoes",
+    minRole: "manager",
     sidebar: true,
   },
 
@@ -502,7 +561,17 @@ export const NAV_CATALOG = [
     // pessoa — orçamento e criativo são da empresa inteira. Mesmo grau dos
     // outros dois vizinhos do grupo.
     minRole: "manager",
-    sidebar: true,
+    // SEM `sidebar`, desde que Automações virou seção própria. O sidebar tem
+    // orçamento fixo: medido em 1280×900, a seção nova deixou o menu 77px além
+    // da dobra, e `tests/e2e/navegacao.spec.ts` proíbe o menu rolar nessa
+    // altura — a promessa que a reorganização dos grupos veio cumprir.
+    //
+    // Esta tela e "Atividades" foram as escolhidas porque o grupo Análise TEM
+    // hub: as duas continuam a um clique em "Ver tudo em Análise", com a frase
+    // que explica para que servem, e o ⌘K acha as duas por nome. É o mesmo
+    // padrão que "Evolução da IA" e "Audit Log" logo abaixo já seguiam.
+    //
+    // A ROTA e a tela não mudam em nada: sair do menu não é sair do produto.
   },
   {
     // Irmã de "Desempenho", não a mesma coisa: lá é DESFECHO (funil agora,
@@ -517,7 +586,8 @@ export const NAV_CATALOG = [
     icon: "ClockCounterClockwise",
     group: "analise",
     section: "Os números do período",
-    sidebar: true,
+    // SEM `sidebar` — ver o motivo no comentário de "Meta Ads", acima. A tela
+    // continua inteira, alcançável pelo hub do grupo e pelo ⌘K.
   },
   {
     // Observabilidade, não configuração: por isso não fica junto dos agentes.
@@ -601,6 +671,21 @@ export const NAV_CATALOG = [
     description:
       "O vocabulário de etiquetas da empresa: onde cada uma é usada e como renomear, juntar ou excluir.",
     icon: "Tag",
+    group: "organizacao",
+    section: "Sua empresa",
+    minRole: "manager",
+  },
+  {
+    // Irmã da de cima, e no mesmo lugar por isso: as duas declaram o
+    // VOCABULÁRIO que a automação inteira consome. A etiqueta diz o que o
+    // contato É; o campo diz o que se sabe SOBRE ele. Antes desta tela, campo
+    // do contato só podia ser declarado dentro das configurações de um FUNIL
+    // (`crm_pipelines.settings.fields[]`) — quem não usa funil não tinha onde.
+    href: "/app/settings/contact-fields",
+    label: "Campos do Usuário",
+    description:
+      "Os campos personalizados do contato: nome, tipo, pasta e o identificador que a API e o N8N usam.",
+    icon: "ClipboardText",
     group: "organizacao",
     section: "Sua empresa",
     minRole: "manager",

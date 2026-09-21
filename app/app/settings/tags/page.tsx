@@ -30,10 +30,11 @@ import { redirect } from "next/navigation";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { traduzir } from "@/lib/i18n/dicionario";
-import type { LinhaDeVocabulario } from "@/lib/schemas/tags";
+import type { LinhaDeVocabulario, TagDoRegistro } from "@/lib/schemas/tags";
 import { createClient } from "@/lib/supabase/server";
 
 import { PainelDeTags } from "./_painel";
+import { RegistroDeTags } from "./_registro";
 
 export const metadata = { title: "Tags" };
 export const dynamic = "force-dynamic";
@@ -65,6 +66,18 @@ export default async function TagsPage() {
     p_org: activeOrg.orgId,
   });
 
+  // O REGISTRO (migration 0312) — a lista DECLARADA, com id. Lido aqui, no
+  // servidor, e passado como `initialData` para o painel não piscar vazio antes
+  // do primeiro fetch. Client da SESSÃO: quem recorta a organização é a RLS de
+  // `public.tags`, e o `.eq` é defesa em profundidade.
+  const { data: registro } = await supabase
+    .from("tags")
+    .select("id, name, folder, color, description, archived_at")
+    .eq("organization_id", activeOrg.orgId)
+    .is("archived_at", null)
+    .order("folder", { ascending: true })
+    .order("name", { ascending: true });
+
   const idioma = user.idioma;
   const t = (texto: string) => traduzir(texto, idioma);
 
@@ -79,15 +92,31 @@ export default async function TagsPage() {
         </p>
       </header>
 
-      {error ? (
-        // A falha NÃO vira lista vazia: "nenhuma etiqueta" e "não consegui ler"
-        // levam o operador a decisões opostas (uma convida a criar tudo de novo).
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm">
-          {t("Não foi possível carregar as etiquetas agora. Recarregue a página.")}
+      <RegistroDeTags
+        initialData={(registro ?? []) as TagDoRegistro[]}
+        canWrite={ROLE_RANK[activeOrg.role] >= ROLE_RANK.manager}
+      />
+
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">{t("Onde cada etiqueta está")}</h2>
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            {t(
+              "Inclui também as etiquetas que os agentes e a importação escreveram sem passar por cadastro. É aqui que se vê o peso de cada uma antes de mexer.",
+            )}
+          </p>
         </div>
-      ) : (
-        <PainelDeTags tags={(data ?? []) as LinhaDeVocabulario[]} idioma={idioma} />
-      )}
+
+        {error ? (
+          // A falha NÃO vira lista vazia: "nenhuma etiqueta" e "não consegui ler"
+          // levam o operador a decisões opostas (uma convida a criar tudo de novo).
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm">
+            {t("Não foi possível carregar as etiquetas agora. Recarregue a página.")}
+          </div>
+        ) : (
+          <PainelDeTags tags={(data ?? []) as LinhaDeVocabulario[]} idioma={idioma} />
+        )}
+      </section>
     </div>
   );
 }

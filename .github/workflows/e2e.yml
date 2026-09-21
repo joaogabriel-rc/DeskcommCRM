@@ -485,6 +485,7 @@ jobs:
         qa-l12-funil.spec.ts
         navegacao.spec.ts
         agenda-google-meet.spec.ts
+        contato-modal-cabe-na-tela.spec.ts
       # `moeda-da-organizacao` entrou na PARTE_2 em 2026-09-04, ao lado de
       # `navegacao` — mesmo domínio (Configurações) e a mesma ausência de
       # dependência: sem WAHA, Resend, Nuvemshop ou Redis. Toca a organização

@@ -59,6 +59,8 @@ SEGREDO_SEGURO="$(printf '%s' "$INTERNAL_SECRET" | sed "s/'/'\\\\''/g")"
 CRONS="
 * * * * *|25|api/v1/cron/agent-dispatcher
 * * * * *|25|api/v1/cron/followup-flow-worker
+* * * * *|25|api/v1/cron/flow-worker
+* * * * *|25|api/v1/cron/broadcast-worker
 * * * * *|45|api/v1/cron/event-log-drain
 * * * * *|25|api/v1/cron/routing-worker
 * * * * *|25|api/v1/cron/recover-stuck-messages

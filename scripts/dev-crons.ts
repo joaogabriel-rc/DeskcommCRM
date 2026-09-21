@@ -14,6 +14,8 @@ const INTERVAL_MS = Number(process.env.DEV_CRON_INTERVAL_MS ?? "15000");
 const PATHS = [
   "/api/v1/cron/event-log-drain",
   "/api/v1/cron/followup-flow-worker",
+  "/api/v1/cron/flow-worker",
+  "/api/v1/cron/broadcast-worker",
 ] as const;
 
 function requiredEnv(name: string): string {
