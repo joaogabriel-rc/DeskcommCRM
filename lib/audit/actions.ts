@@ -73,6 +73,14 @@ export const AUDIT_ACTIONS = [
   "lgpd.anonymize_catchup",
   "member.invited",
   "team.interface_changed",
+  /**
+   * A EMPRESA trocou as portas que mostra (issue #1341, migration 0367). É o
+   * degrau acima do `team.interface_changed`: ali a pergunta é "quem tirou o
+   * Inbox da Maria", aqui é "quem escondeu o Inbox da instalação inteira, e
+   * quando" — pergunta que só tem resposta na trilha, porque a coluna guarda só
+   * o valor de agora e a escolha anterior não se reconstrói.
+   */
+  "org.interface_changed",
   "member.accepted",
   "member.role_changed",
   "member.revoked",
@@ -128,6 +136,8 @@ export const AUDIT_ACTIONS = [
   // como falha (rodada vazia não vira linha — varredura não é mutação).
   "message.recover_stuck_run",
   "contact.blocked",
+  "phone_number.created",
+  "phone_number.updated",
   "ai.handoff_triggered",
   "ai.reactivated_by_agent",
   "conversation.usable_for_rag_toggled",
@@ -207,6 +217,15 @@ export const AUDIT_ACTIONS = [
   "ai_agent.run_completed",
   "ai_agent.run_failed",
   "channel.connected",
+  "prospecting.changed",
+  // A ABORDAGEM que SAIU (PR #963). Distinta de `prospecting.changed`, que é
+  // configuração: esta é a única linha do produto que fala primeiro com quem
+  // nunca falou com a empresa, e é a resposta a "por que vocês me escreveram?".
+  // Emitida pelo worker quando houve EFEITO (tentativa de envio), nunca em
+  // rodada de cron vazia.
+  "prospecting.approach_sent",
+  "channel.pairing_code_requested",
+  "channel.social_configured",
   "channel.ai_access_updated",
   "channel.reconnected",
   // Duas ações distintas de propósito: `deleted` apagou a linha (canal virgem),
@@ -257,6 +276,11 @@ export const AUDIT_ACTIONS = [
   "demanda.encerrada",
   "routing.worker_run",
   "attendant.heartbeat_swept",
+  // A PRIMEIRA batida de presença de um atendente: é ela que insere a linha e
+  // acorda o roteamento (`trg_routing_availability_changed`), efeito que outra
+  // pessoa sente. As batidas seguintes não auditam, pela mesma régua do cron
+  // que não faz nada (CLAUDE.md, Audit log).
+  "attendant.presence_started",
   "webhook.source_created",
   "webhook.source_updated",
   "webhook.source_deleted",
@@ -272,7 +296,7 @@ export const AUDIT_ACTIONS = [
   "flows.deleted",
   "flows.graph_saved",
   "flows.worker_run",
-  // Registro de tags e de campos do contato (migration 0312). São mutações de
+  // Registro de tags e de campos do contato (migration 0383). São mutações de
   // CONFIGURAÇÃO da organização: mudam o vocabulário que toda automação usa.
   "tag.created",
   "tag.updated",
@@ -280,7 +304,7 @@ export const AUDIT_ACTIONS = [
   "contact_field.created",
   "contact_field.updated",
   "contact_field.deleted",
-  // Disparos (migration 0312). `broadcast.worker_run` só é emitido quando o
+  // Disparos (migration 0383). `broadcast.worker_run` só é emitido quando o
   // tick FEZ algo — cron vazio não é mutação (CLAUDE.md).
   "broadcast.created",
   "broadcast.updated",
@@ -372,7 +396,35 @@ export const AUDIT_ACTIONS = [
   // (nenhum handler o consumiria — ver register-handlers.ts) e a troca não
   // deixa rastro em nenhuma outra tabela.
   "platform.signup_mode_updated",
+  // Configuração da INSTALAÇÃO trocada pela tela (migration 0341): credencial de
+  // e-mail, remetente, contatos. Auditável pelo mesmo motivo das vizinhas — é
+  // mutação de plataforma, sem `organization_id`, e "por que parou de enviar
+  // e-mail?" só tem resposta aqui.
+  //
+  // ⚠️ O VALOR NUNCA ENTRA NO metadata, e isto não é zelo: `api_audit_log` é
+  // append-only por schema (nenhum papel tem GRANT de UPDATE/DELETE, nem o
+  // `service_role`), então um segredo que caia ali fica cinco anos e não sai.
+  // O emissor grava só a chave, a natureza e os últimos 4 caracteres.
+  "platform.config_changed",
+  "platform.config_reset",
+  // O COMPORTAMENTO da instalação trocado em `platform_settings` pela tela
+  // `/admin/sistema` (migration 0331, issue #1034) — irmã da linha de cima, e
+  // mutação de plataforma. Auditável porque pergunta "por que a IA não parou no
+  // teto?" / "por que a entrega do webhook foi recusada?" só tem resposta aqui:
+  // é a única tabela que guarda quem desligou o bloqueio de gasto, mudou o
+  // portão de divulgação ou passou a exigir assinatura nas entregas.
+  "platform.comportamento_updated",
+  // A lista de endereços da rede INTERNA que a instalação pode alcançar
+  // (`platform_settings.internal_destinations`, migration 0324, decisão 22-d).
+  // Auditável pela mesma razão da linha acima e com alcance maior: cada entrada
+  // é uma porta que o servidor passa a poder abrir para dentro da própria rede,
+  // levando junto a credencial da instalação. "Desde quando isto estava
+  // liberado?" não tem resposta em nenhuma outra tabela — a coluna guarda o
+  // estado, não o histórico —, e não há event_log que cubra o tipo (nenhum
+  // handler o consumiria; evento sem consumer é o anti-pattern nº 3).
+  "platform.internal_destinations_updated",
   "platform_google_oauth.updated",
+  "platform_smtp_settings.updated",
   // A credencial do APP da Meta da INSTALAÇÃO (migration 0257): o App Secret que
   // assina a entrega do webhook e o verify token que responde ao handshake.
   // Auditável pelo mesmo motivo da linha acima, e com alcance maior — quem tem o
@@ -495,6 +547,12 @@ export const AUDIT_ACTIONS = [
   // próprio: como `agenda.tipo_alterado { campos: ["is_active"] }` ele seria,
   // na trilha, indistinguível de "mudaram a duração".
   "agenda.tipo_reativado",
+  // A opção da ORGANIZAÇÃO que decide se o Atendente mexe na agenda dos colegas
+  // (issue #978, migration 0343). É ato de gestão como o dos tipos acima: muda o
+  // que TODO Atendente pode fazer a partir dali, e sem esta linha a primeira
+  // negativa de um colega não teria explicação na trilha — nem como responder
+  // "quando foi que desligaram isso?".
+  "agenda.colegas_podem_mexer_alterado",
   // A rodada que AVISOU alguém do próprio compromisso. Mensagem que saiu para o
   // telefone de um cliente é efeito, e efeito audita — mas só a rodada que
   // enviou: a que varreu e não achou ninguém a avisar não é mutação.
@@ -515,6 +573,27 @@ export const AUDIT_ACTIONS = [
   // seria "sumiu". Só a rodada que expirou alguma coisa; varredura vazia não é
   // mutação.
   "agenda.pendente_expirado",
+  // O catálogo financeiro. Audita porque define PARA ONDE o dinheiro vai: a
+  // forma de pagamento escolhe a conta em que a entrada cai, e mudar isso em
+  // silêncio faria um mês inteiro cair na conta errada sem ninguém saber quem
+  // mexeu.
+  "financeiro.catalogo_criado",
+  "financeiro.catalogo_alterado",
+  "financeiro.catalogo_inativado",
+  "comanda.aberta",
+  "comanda.alterada",
+  "comanda.cancelada",
+  "comanda.item_incluido",
+  "comanda.item_removido",
+  "comanda.finalizada",
+  "comanda.estornada",
+  "financeiro.lancamento_criado",
+  "financeiro.lancamento_pago",
+  "financeiro.lancamento_removido",
+  "fidelidade.ponto_dado",
+  "fidelidade.ponto_resgatado",
+  "financeiro.recorrencia_gerada",
+  "comanda.faturada_em_lote",
   // A rodada de renovação — e ela só audita quando FEZ algo, como manda a regra
   // do cron desta base. Uma linha por rodada com efeito, carregando a contagem:
   // é o que permite responder "quantas agendas precisaram reconectar esta
@@ -539,6 +618,7 @@ export const AUDIT_ACTIONS = [
   "agenda.appointment_updated",
   "agenda.confirmation_sweep_run",
   "agenda.settings_updated",
+  "agenda.endereco_salvo",
   "agenda.appointment_rescheduled",
   "agenda.appointment_cancelled",
   // Relógio HTTP (Hobby / sem contêiner scheduler): uma batida que alguém
@@ -565,6 +645,12 @@ export const AUDIT_ACTIONS = [
   "crm_task.updated",
   "crm_task.deleted",
   "organization.switched",
+  // Chamada originada via /api/v1/calls (módulo VoIP, migration 0347).
+  // Só o CREATE é auditado aqui — status/transcript são atualizados pelo
+  // worker via admin client, fora do caminho de sessão que este audit cobre.
+  "call.created",
+  "voip_trunk.created",
+  "voip_trunk.updated",
 
   // Chamada de voz WhatsApp (spec 18, migration 0234). Ligá-la vincula um
   // SEGUNDO aparelho ao número que já atende, por um caminho que não é o
@@ -615,11 +701,108 @@ export const AUDIT_ACTIONS = [
   // Mover um card para OUTRO funil (issue #922) clona o negócio no destino e
   // encerra o original: é a escrita que mexe em DOIS funis de uma vez.
   "lead.moved_to_pipeline",
+  /**
+   * A equipe perguntou à IA sobre um caso (migration 0281). Uma linha por
+   * PERGUNTA, respondida ou não — `respondeu:false` com `error_code` é o que
+   * torna contável "a IA parou de responder à equipe", que sem isto só
+   * apareceria como casos parados na fila.
+   *
+   * ⚠️ SEM O TEXTO. Nem a pergunta, nem a resposta: `api_audit_log` é
+   * append-only, sem UPDATE nem DELETE para papel nenhum — o que entra ali não
+   * sai pela cascata de LGPD.
+   */
+  "ai.case_chat_asked",
+  /**
+   * O aviso de caso no WhatsApp da equipe (migration 0292).
+   *
+   * Três códigos e não um: "saiu", "não saiu em definitivo" e "alguém mudou a
+   * configuração" são perguntas diferentes, feitas por gente diferente. Um
+   * código só obrigaria a abrir o metadata para saber qual dos três aconteceu —
+   * e o painel de auditoria filtra por `action`, não por metadata.
+   *
+   * `ai.case_alert_sent` só quando a entrega virou `enviado`; `ai.case_alert_failed`
+   * só na falha DEFINITIVA (retry não é fato auditável, é o sistema tentando).
+   *
+   * ⚠️ SEM O TEXTO e SEM O NÚMERO INTEIRO. O corpo do aviso nunca entra (ele
+   * carrega o relato do cliente) e o destino entra MASCARADO: `api_audit_log` é
+   * append-only, sem UPDATE nem DELETE para papel nenhum — o que entra ali não
+   * sai pela cascata de LGPD.
+   */
+  "ai.case_alert_sent",
+  "ai.case_alert_failed",
+  "ai.case_alert_settings_changed",
+  /**
+   * O botão "enviar aviso de teste" (onda 8) — e ele é um QUARTO código, não
+   * `ai.case_alert_sent` com um `teste: true` no metadata.
+   *
+   * A razão é de conta, não de gosto: o teste manda uma mensagem de verdade
+   * pelo número da organização e gasta uma do teto diário. Se ele entrasse como
+   * `sent`, quem auditasse "quantos avisos saíram este mês" contaria as
+   * conferências junto — e o painel de auditoria filtra por `action`, nunca por
+   * metadata. Auditado tenha ele saído ou não: o gasto e a tentativa são o
+   * fato, e a razão da recusa é o que responde depois "por que não sai".
+   */
+  "ai.case_alert_test_sent",
+  /**
+   * A cobrança da PASSAGEM que ninguém assumiu (onda 11).
+   *
+   * Código próprio, e não `ai.caso_parado_cobrado` com um campo no metadata:
+   * são duas populações diferentes e a pergunta que se faz depois é diferente.
+   * O caso parado é a IA esperando uma DECISÃO; a passagem esquecida é um
+   * cliente esperando uma RESPOSTA, e ninguém sabe que ele existe. Dos treze
+   * caminhos que passam conversa para uma pessoa, só um nasce de caso — o vigia
+   * de casos não alcançava os outros doze nem por acidente, e um metadata
+   * compartilhado esconderia justamente essa diferença (o painel de auditoria
+   * filtra por `action`, nunca por metadata).
+   *
+   * Audita a RODADA que cobrou, nunca a que varreu e não achou ninguém: rodada
+   * sem efeito não é mutação (`tests/unit/cron-audita-so-quando-ha-efeito.test.ts`).
+   */
+  "ai.passagem_parada_cobrada",
   // A chave de IA girada NO LUGAR (PATCH /ai/credentials/:id). Distinto de
   // `ai.credential_created` e `ai.credential_revalidated`: aqui o id não muda, e
   // "quando esta chave foi trocada, e por quem" é a pergunta que só esta linha
   // responde — a coluna `updated_at` se move por qualquer motivo.
   "ai.credential_updated",
+  // Rodada do canal-mudo-watcher que ABRIU ou FECHOU aviso (doc 11, decisão B).
+  // Só com efeito: varredura diária que não achou nada não é mutação.
+  "channel.canal_mudo_watcher_run",
+  // A rodada do cron `followup-sem-agente` que MEXEU em alguma coisa: abriu
+  // aviso de fluxo publicado que nenhum agente arma, fechou aviso cujo vínculo
+  // apareceu, ou os dois. Rodada sem efeito não audita (CLAUDE.md §Audit log),
+  // então esta linha existe quando `abertos + fechados > 0` — e `metadata` leva
+  // as duas contagens mais `examinados`, que é o que diferencia "ninguém tinha
+  // fluxo desarmado" de "a varredura não rodou".
+  "ai.followup_sem_agente_reconciliado",
+  // Ajustes determinísticos de estilo da ORGANIZAÇÃO ligados, desligados ou com
+  // item trocado (PATCH /ai/style-adjustments). O `metadata.ajuste` nomeia o
+  // item; a linha registra a decisão sem expor o prompt do agente.
+  "ai.style_adjustment_changed",
+  /** POST /api/v1/tenants/provision — organização criada por um sistema externo (doc 38 b). */
+  "tenant.created_by_provisioning",
+  /**
+   * A repetição do provisionamento completou o que a tentativa anterior não
+   * chegou a gravar — hoje, o vínculo de admin do dono. Sai SÓ quando houve
+   * efeito, e é o único registro que a organização nascida de uma tentativa
+   * partida tem: a `tenant.created_by_provisioning` dela nunca saiu, porque a
+   * primeira tentativa morreu antes de chegar nessa linha.
+   */
+  "tenant.provisioning_completed",
+  // O funil que VOLTOU do arquivo (#979). Espelha `pipeline.archived`: sem um
+  // código próprio, tirar do arquivo cairia em `pipeline.updated` e sumiria no
+  // meio dos renames — e "quem trouxe este funil de volta, e quando" é a
+  // pergunta que o painel de auditoria só responde filtrando por `action`.
+  "pipeline.unarchived",
+
+  // O banco de dados externo do agente (migration 0372). Dado de terceiro pode
+  // ter PII: a configuração da conexão é auditada, e a LEITURA também — mas o
+  // metadata de `read` carrega só o QUE foi lido (schema/tabela), nunca os
+  // valores de filtro, que viajariam como PII para o log.
+  "external_db_connection.created",
+  "external_db_connection.updated",
+  "external_db_connection.deleted",
+  "external_db_connection.tested",
+  "external_db_connection.read",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

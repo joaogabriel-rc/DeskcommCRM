@@ -28,7 +28,7 @@
  *   • `lei.revisada === false` (ou `lei === null`) faz o documento NÃO citar
  *     lei nenhuma. Não há fallback para a lei brasileira: afirmar a LGPD para
  *     um titular em Angola é exatamente a citação errada;
- *   • `PAISES_OFERECIDOS` — a lista que o seletor de Configurações mostra —
+ *   • `paisesOferecidos()` — a lista que o seletor de Configurações mostra —
  *     só inclui país com citação revisada. O registro pode conhecer mais
  *     países do que a lista oferece; é o que permite preparar o trabalho sem
  *     publicar o que ninguém revisou.
@@ -205,7 +205,7 @@ const PERFIL_BR: PerfilDoPais = {
  * O registro de países conhecidos.
  *
  * ⚠️ Conhecer ≠ oferecer. A lista que o operador escolhe é
- * `PAISES_OFERECIDOS`, e ela exige `lei.revisada`. Entram aqui, à medida do
+ * `paisesOferecidos()`, e ela exige `lei.revisada`. Entram aqui, à medida do
  * trabalho de cada país: documento (forma, e checksum só quando é público),
  * lei com citação revisada, calendário de feriados e padrões de PII. País
  * incompleto mora aqui com o que já tem — nunca meio perfil publicado.

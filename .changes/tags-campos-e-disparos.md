@@ -1,16 +1,15 @@
 ---
 impacto: capacidade_nova
 secao: adicionado
-titulo: Automações ganham seção própria, com Tags, Campos do Usuário e Disparos
+titulo: Chegam Disparos, Tags e Campos do Usuário
 ---
 
-O menu tem uma seção nova, **Automações**, com **Fluxos** (que saiu de Canais) e
-**Disparos**. E duas telas novas em Configurações: **Tags** e
-**Campos do Usuário**.
+O menu ganha **Disparos**, ao lado de **Fluxos**, dentro de **Canais**. E duas
+telas novas em Configurações: **Tags** e **Campos do Usuário**.
 
 **Tags** deixou de ser só a lista do que já tinha sido escrito. Agora dá para
-criar uma etiqueta antes do primeiro uso, organizar em pastas, dar cor e
-descrição — e cada uma tem um identificador que não muda quando o nome muda, que
+criar uma etiqueta antes do primeiro uso, organizar em pastas e dar cor — e
+cada uma tem um identificador que não muda quando o nome muda, que
 é o que a sua integração com o N8N pode guardar. Renomear continua corrigindo os
 contatos, os negócios, as conversas e as regras de agente na mesma operação, e
 agora preserva o identificador. As etiquetas que você já usa aparecem lá

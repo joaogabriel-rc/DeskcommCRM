@@ -192,6 +192,28 @@ export async function devolverAtendimentoAoAgente(
     });
   }
 
+  // (3c) A PASSAGEM SE FECHA. O episódio acabou sem ninguém assumir — e é isso
+  // que `reconhecido_em` preenchido COM `reconhecido_por` nulo significa.
+  //
+  // Sem esta chamada o dedup do aviso impede a PRÓXIMA passagem de nascer: o
+  // aviso daquela conversa continua `open`, o motor o trata como episódio vivo,
+  // e o cliente que pedir um atendente de novo não gera aviso nenhum.
+  //
+  // `fn_passagem_devolvida` e não um `update` daqui: a policy da tabela é `for
+  // select` apenas, então o client de sessão não tem `update` — de propósito,
+  // para que ninguém reescreva um fato. Falha aqui NÃO derruba a devolução: o
+  // comando já voltou para a IA, e um aviso que sobra é recuperável pela tela.
+  const { error: passagemErr } = await supabase.rpc("fn_passagem_devolvida", {
+    p_organization_id: organizationId,
+    p_conversation_id: input.conversationId,
+  });
+  if (passagemErr) {
+    logger.warn("[escalacao.retomada] passagem não foi fechada", {
+      conversation_id: input.conversationId,
+      error: passagemErr.message,
+    });
+  }
+
   // (4) Sinal durável de fim do episódio. AWAITED, não fire-and-forget, pela
   // mesma razão que a rota original documentava: é o ÚNICO produtor do sinal que
   // retoma um follow-up pausado por passagem a humano (lib/followup/reactivity.ts).

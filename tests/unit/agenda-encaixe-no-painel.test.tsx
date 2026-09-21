@@ -262,3 +262,17 @@ describe("a confirmação é levada até a vista", () => {
     expect(rolou.mock.contexts.at(-1)).toBe(screen.getByTestId("confirmacao"));
   });
 });
+
+describe("o calendário não trava no mês seguinte", () => {
+  it("Próximo mês fica clicável mesmo quando a consulta só trouxe este mês, e avisa quem busca", async () => {
+    const onMesVisivel = vi.fn();
+    montar({ onMesVisivel });
+
+    expect(screen.getByTestId("mes-seguinte")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("mes-seguinte"));
+
+    await waitFor(() => {
+      expect(onMesVisivel.mock.calls.some((c) => (c[0] as Date).getMonth() === 9)).toBe(true);
+    });
+  });
+});

@@ -34,10 +34,10 @@ import type { Agendamento, Pessoa, VisaoDaAgenda } from "./tipos";
  *
  * `useHorariosLivres` é o mesmo hook que o painel de marcação usa, batendo na
  * mesma rota que o agente usa. A diferença é só o recorte: o painel pergunta
- * pelos próximos 30 dias, a grade pergunta pela janela que ela desenha. Duas
- * perguntas, uma regra — então tela e agente nunca discordam sobre o que está
- * livre. Reimplementar jornada aqui seria mais rápido e criaria exatamente essa
- * discordância, que aparece como 422 na cara de quem clicou.
+ * pelo mês que ele está mostrando, a grade pergunta pela janela que ela desenha.
+ * Duas perguntas, uma regra — então tela e agente nunca discordam sobre o que
+ * está livre. Reimplementar jornada aqui seria mais rápido e criaria exatamente
+ * essa discordância, que aparece como 422 na cara de quem clicou.
  */
 export function AgendaInterativa({
   visao,

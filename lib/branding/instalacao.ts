@@ -53,8 +53,10 @@
  *
  * ── Sem `event_log` ──────────────────────────────────────────────────────────
  *
- * Confirmado lendo `lib/event-log/register-handlers.ts`: os 12 handlers
- * registrados cobrem IA, RAG, LGPD, automações, follow-up e mídia. Nenhum
+ * Confirmado lendo `lib/event-log/register-handlers.ts`: os handlers
+ * registrados cobrem IA, RAG, LGPD, automações, follow-up, mídia e o aviso de
+ * caso ao suporte — para reconferir sem acreditar nesta linha,
+ * `grep -c 'registerHandler(' lib/event-log/register-handlers.ts`. Nenhum
  * cobriria um tipo `platform_branding.*`, e o drain deixa evento sem handler
  * INTOCADO — a linha nasceria `pending` para sempre em todo clone. Evento sem
  * consumer é o anti-pattern nº 3 do CLAUDE.md. O registro desta mutação é

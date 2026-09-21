@@ -48,6 +48,7 @@ import {
 import { logger } from "@/lib/logger";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { ehPedidoDeOptOut } from "@/lib/opt-out/deteccao";
+import { ehContatoDoNumeroInterno } from "@/lib/escalacao/numero-interno-de-aviso";
 import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
 import { autorizarContatoParaIA } from "@/lib/ai/elegibilidade/autorizacao";
 import { casarCampanha, lerCampanhas } from "@/lib/ai/elegibilidade/campanha";
@@ -120,6 +121,25 @@ export async function aplicarEfeitosPosEntrada(
   admin: Admin,
   entrada: EntradaDeMensagem,
 ): Promise<void> {
+  // ── CINTO DE SEGURANÇA, nunca a defesa principal ────────────────────────
+  //
+  // Os ingestores cortam o número interno de avisos ANTES de `upsertContact`,
+  // que é o que importa (é o INSERT da conversa que dispara o rodízio). Este
+  // aqui existe para o caminho que alguém venha a esquecer — um ingestor novo,
+  // um provedor novo, uma reentrega por outro caminho. Chegando até aqui, o
+  // contato e a conversa já nasceram; o que ainda dá para impedir é o resto:
+  // opt-out, demanda, campanha, follow-up e o despacho do agente.
+  //
+  // Custo zero para quem nunca ligou o aviso: a leitura vem do memo de 30 s e
+  // sai sem tocar o banco quando não há número interno configurado.
+  if (await ehContatoDoNumeroInterno(admin, entrada.organizationId, entrada.contactId)) {
+    logger.info("[pos-entrada] efeitos pulados: mensagem do número interno de avisos", {
+      organizationId: entrada.organizationId,
+      origem: entrada.origem,
+    });
+    return;
+  }
+
   await aplicarOptOut(admin, entrada);
   await guardarOrigemDaPagina(admin, entrada);
   await abrirDemanda(admin, entrada);
@@ -350,7 +370,14 @@ async function guardarOrigemDaPagina(admin: Admin, entrada: EntradaDeMensagem): 
     // A consulta vem ANTES de qualquer escrita, e DENTRO do try: falha de
     // leitura não pode virar estampa. O `estampar` só roda depois de a
     // primeira mensagem estar confirmada.
-    if (!(await ehAPrimeiraMensagemDoContato(admin, entrada.contactId, entrada.messageId))) {
+    if (
+      !(await ehAPrimeiraMensagemDoContato(
+        admin,
+        entrada.organizationId,
+        entrada.contactId,
+        entrada.messageId,
+      ))
+    ) {
       logger.info("pos-entrada: código de origem fora da primeira mensagem (ignorado)", {
         contactId: entrada.contactId,
         messageId: entrada.messageId,
@@ -358,7 +385,7 @@ async function guardarOrigemDaPagina(admin: Admin, entrada: EntradaDeMensagem): 
       return;
     }
 
-    const gravou = await estamparOrigemDaPagina(admin, entrada.contactId, origem);
+    const gravou = await estamparOrigemDaPagina(admin, entrada.organizationId, entrada.contactId, origem);
     if (!gravou) {
       logger.warn("pos-entrada: origem da página NÃO gravada (a mensagem entra assim mesmo)", {
         contactId: entrada.contactId,

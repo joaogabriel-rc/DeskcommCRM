@@ -40,8 +40,16 @@ import {
   MOTIVO_LEGIVEL,
 } from "@/lib/conversoes/estado-da-conexao";
 import { traduzir } from "@/lib/i18n/dicionario";
-import { montarCodigoDeOrigemDoSite, TAMANHO_MAXIMO_DO_CODIGO } from "@/lib/leads/origem-do-site";
+import {
+  CHAVES_DE_UTM,
+  montarCodigoDeOrigemDoSite,
+  TAMANHO_MAXIMO_DO_CODIGO,
+} from "@/lib/leads/origem-do-site";
 import { formatCentsBRL } from "@/lib/money";
+import {
+  faltaParaConectarOGoogleAds,
+  googleAdsEstaConfigurado,
+} from "@/lib/plataformas-de-anuncio/google/config";
 import { lerEstadoDaConexaoGoogle } from "@/lib/plataformas-de-anuncio/google/estado-da-conexao";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -138,7 +146,12 @@ export default async function ConversoesPage({
       )}
 
       <FormularioDeConversoes estado={estado} idioma={idioma} />
-      <FormularioDeConversoesGoogle estado={estadoGoogle} idioma={idioma} />
+      <FormularioDeConversoesGoogle
+        estado={estadoGoogle}
+        idioma={idioma}
+        configurado={googleAdsEstaConfigurado()}
+        falta={faltaParaConectarOGoogleAds()}
+      />
 
       <section className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between">
@@ -232,10 +245,19 @@ export default async function ConversoesPage({
           <code className="mt-3 block overflow-x-auto rounded-md bg-muted/50 p-2 text-xs break-all">
             {linkDeExemplo}
           </code>
+          {/*
+            A LISTA DE CHAVES VEM DO MÓDULO, e não da frase — mesma razão que o
+            exemplo logo acima é gerado e não escrito à mão. Enquanto os nomes
+            moravam dentro do texto traduzido, acrescentar uma chave exigia
+            lembrar de dois arquivos, e esquecer o segundo deixava a tela
+            ensinando uma lista incompleta em português e em espanhol.
+
+            O nome entra FORA do `t()` de propósito: `traduzir()` casa a string
+            EXATA, e um template literal não casaria chave nenhuma.
+          */}
           <p className="mt-3 text-xs text-muted-foreground">
-            {t(
-              "Este exemplo foi gerado por esta tela. Os campos que o código aceita são utm_source, utm_medium, utm_campaign, utm_term, utm_content, gclid e fbclid.",
-            )}
+            {t("Este exemplo foi gerado por esta tela. Os campos que o código aceita são:")}{" "}
+            {CHAVES_DE_UTM.join(", ")}.
           </p>
         </div>
 

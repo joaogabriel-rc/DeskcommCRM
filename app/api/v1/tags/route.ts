@@ -7,12 +7,13 @@
  * São perguntas diferentes, e a diferença é o ponto da fatia. `/vocabulario`
  * responde "quais nomes JÁ foram escritos por alguém, e onde" — é derivado, e
  * por isso não tem id: um nome que ninguém aplicou não existe lá. Esta responde
- * "quais etiquetas a organização DECLAROU", com uuid estável, pasta, cor e
- * descrição. É a que uma integração (N8N, script próprio) consulta, porque é a
- * única em que o identificador sobrevive a uma renomeação.
+ * "quais etiquetas a organização DECLAROU", com uuid estável e pasta. É a que
+ * uma integração (N8N, script próprio) consulta, porque é a única em que o
+ * identificador sobrevive a uma renomeação. A cor não mora aqui: é do
+ * vocabulário, e a leitura dela é `GET /api/v1/tags/cores`.
  *
  * A etiqueta APLICADA continua sendo string em `contacts.tags` — ver o
- * cabeçalho da migration 0312 e a doutrina de `lib/schemas/tags.ts`.
+ * cabeçalho da migration 0383 e a doutrina de `lib/schemas/tags.ts`.
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
@@ -27,7 +28,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-const COLUNAS = "id, name, folder, color, description, archived_at";
+const COLUNAS = "id, name, folder, archived_at";
 
 export async function GET(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
@@ -88,8 +89,6 @@ export async function POST(req: NextRequest): Promise<Response> {
       created_by_user_id: authz.user.id,
       name: parsed.data.name,
       folder: parsed.data.folder,
-      color: parsed.data.color ?? null,
-      description: parsed.data.description ?? null,
     })
     .select(COLUNAS)
     .single();

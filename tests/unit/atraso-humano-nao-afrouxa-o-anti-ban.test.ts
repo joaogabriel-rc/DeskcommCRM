@@ -101,7 +101,7 @@ describe("o atraso humano NÃO substitui o throttle anti-ban entre bolhas", () =
 });
 
 /**
- * FIAÇÃO — mesmo padrão de `handoff-fernando-fiacao.test.ts`.
+ * FIAÇÃO — mesmo padrão de `handoff-fantasma-fiacao.test.ts`.
  *
  * `jaEsperouComoHumano` mora num closure no meio de um arquivo de ~2700 linhas e
  * não é alcançável por teste de função pura: o turno inteiro precisaria de pool,

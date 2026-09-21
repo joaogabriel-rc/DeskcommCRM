@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EntradaDeMensagem } from "@/lib/channels/pos-entrada";
 import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
+import { palavraDeSaida } from "@/lib/prospecting/rodape-de-saida";
 
 /**
  * OS EFEITOS QUE TRANSFORMAM UMA MENSAGEM EM TRABALHO.
@@ -58,6 +59,12 @@ let ultimoUpdate: Record<string, unknown> | null = null;
 let ultimaRpc: Record<string, unknown> | null = null;
 /** TODAS as chamadas de RPC, na ordem, com o NOME da função. */
 let rpcChamadas: Array<{ nome: string; args: Record<string, unknown> }> = [];
+/**
+ * Os `.eq()` da leitura de `messages`, na ordem em que chegam. Sem eles, trocar
+ * a organização e o contato no call site (dois `string` lado a lado, que o
+ * tipo não distingue) passava verde: o fake respondia igual a qualquer filtro.
+ */
+let filtrosDeMessages: Array<[string, unknown]> = [];
 
 /** Imita o builder do PostgREST: encadeável, o efeito acontece no `await`. */
 function cadeia(rotulo: string): Record<string, unknown> {
@@ -91,7 +98,8 @@ const admin = {
        */
       select(_colunas: string, _opcoes?: unknown) {
         const consulta = {
-          eq(_coluna: string, _valor: unknown) {
+          eq(coluna: string, valor: unknown) {
+            if (tabela === "messages") filtrosDeMessages.push([coluna, valor]);
             return consulta;
           },
           order(_coluna: string, _opcoes?: unknown) {
@@ -148,6 +156,7 @@ beforeEach(() => {
   ultimoUpdate = null;
   ultimaRpc = null;
   rpcChamadas = [];
+  filtrosDeMessages = [];
   audit.mockClear();
   garantirLeadDaConversa.mockClear();
   garantirLeadDaConversa.mockResolvedValue({ criado: true, leadId: "lead-1" } as never);
@@ -193,6 +202,25 @@ describe("opt-out", () => {
   it("bloqueia o contato quando a mensagem pede para sair", async () => {
     await rodar({ texto: "quero PARAR de receber" });
     expect(ultimoUpdate).toMatchObject({ is_blocked: true, blocked_reason: "stop_keyword" });
+  });
+
+  it("a palavra que a abordagem fria PROMETE é a que bloqueia aqui — a volta do laço", async () => {
+    // A ida (a mensagem oferece a saída) mora em
+    // `prospeccao-oferece-saida-e-a-saida-funciona`. Este é o outro lado, e os
+    // dois puxam da MESMA fonte: se alguém trocar a palavra do rodapé por uma
+    // que a ingestão não reconhece, um dos dois arquivos fica vermelho.
+    //
+    // Sem esta ligação, cada metade passava sozinha e a pessoa pedia para sair
+    // sem sair — que é pior que nunca ter prometido, porque ela responde, nada
+    // acontece, e conclui que foi ignorada.
+    for (const locale of ["pt-BR", "es-AR", "en-US"]) {
+      ultimoUpdate = null;
+      await rodar({ texto: palavraDeSaida(locale) });
+      expect(
+        ultimoUpdate,
+        `o rodapé de ${locale} promete "${palavraDeSaida(locale)}" e a ingestão não bloqueou`,
+      ).toMatchObject({ is_blocked: true, blocked_reason: "stop_keyword" });
+    }
   });
 
   it("NÃO bloqueia quem só escreveu uma palavra parecida", async () => {
@@ -478,6 +506,16 @@ describe("a origem da página que veio no texto", () => {
     await rodar({ texto: `oi! vi voces no site ${CODIGO}`, messageId: "msg-1" });
     expect(nomesDeRpc()).not.toContain("fn_estampar_atribuicao_de_anuncio");
     expect(garantirLeadDaConversa).toHaveBeenCalled();
+  });
+
+  it("o histórico lido é o DESTE contato, nesta organização — cada uuid na sua coluna", async () => {
+    // `ehAPrimeiraMensagemDoContato(admin, organizationId, contactId, …)`: dois
+    // uuid seguidos, do mesmo tipo. Trocados no call site, a consulta procura
+    // o contato na coluna da organização, não acha nada, e a origem nunca
+    // estampa — sem erro, só silêncio (continuação da correção do #1213).
+    await rodar({ texto: `oi ${CODIGO}` });
+    expect(filtrosDeMessages).toContainEqual(["organization_id", ENTRADA.organizationId]);
+    expect(filtrosDeMessages).toContainEqual(["contact_id", ENTRADA.contactId]);
   });
 
   it("olha o histórico ANTES de escrever no contato", async () => {

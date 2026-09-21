@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useContactList } from "@/hooks/contacts/useContactList";
 import { ContactsTable } from "@/components/contacts/ContactsTable";
+import { PontoDaEtiqueta } from "@/components/tags/PontoDaEtiqueta";
 import { NewContactDialog } from "@/components/contacts/NewContactDialog";
 import { ImportContactsDialog } from "@/components/contacts/ImportContactsDialog";
 import { TAG_DE_CLIENTE } from "@/lib/contacts/cliente";
@@ -154,6 +155,7 @@ export function ContactsListClient() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" disabled={tagOptions.length === 0}>
+              {tag ? <PontoDaEtiqueta tag={tag} className="mr-2" /> : null}
               {tag ? `${t("Tag")}: ${tag}` : `${t("Tag")}: ${t("todas")}`}
             </Button>
           </DropdownMenuTrigger>
@@ -163,6 +165,7 @@ export function ContactsListClient() {
             <DropdownMenuItem onClick={() => setTag(undefined)}>{t("Todas")}</DropdownMenuItem>
             {tagOptions.map((tagOption) => (
               <DropdownMenuItem key={tagOption} onClick={() => setTag(tagOption)}>
+                <PontoDaEtiqueta tag={tagOption} className="mr-2" />
                 {tagOption}
               </DropdownMenuItem>
             ))}

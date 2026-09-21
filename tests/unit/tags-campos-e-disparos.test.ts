@@ -1,5 +1,5 @@
 /**
- * As regras PURAS do vocabulário e dos disparos (migration 0312).
+ * As regras PURAS do vocabulário e dos disparos (migration 0383).
  *
  * ─── O que cada bloco vigia, e por que ele existe ──────────────────────────
  *
@@ -70,7 +70,7 @@ describe("o nó de ações lê as duas formas de configuração", () => {
 });
 
 describe("a chave sugerida para um campo é sempre válida no banco", () => {
-  // O CHECK é `^[a-z][a-z0-9_]{0,39}$` (migration 0312).
+  // O CHECK é `^[a-z][a-z0-9_]{0,39}$` (migration 0383).
   const valida = /^[a-z][a-z0-9_]{0,39}$/;
 
   it.each([

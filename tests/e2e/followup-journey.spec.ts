@@ -39,6 +39,8 @@ import * as path from "node:path";
 
 import { test, expect, type Page } from "@playwright/test";
 
+import { zoomAte } from "./utils/canvas-do-fluxo";
+
 import { afirmarAdminDeTenantPuro } from "./utils/precondicao";
 import { generateTotp, msUntilNextTotpWindow } from "./utils/totp";
 import { carregarEnvLocal } from "../../scripts/lib/env-de-teste";
@@ -269,8 +271,7 @@ test.describe("followup — jornada completa (Task 8.3)", () => {
       throw new Error("node ids ausentes após montar a paleta");
     }
 
-    const zoomOut = page.locator(".react-flow__controls-zoomout");
-    for (let i = 0; i < 6; i++) await zoomOut.click();
+    await zoomAte(page, 0.7);
     await page.waitForTimeout(300);
 
     const canvasBox = await page.getByTestId("flow-canvas").boundingBox();

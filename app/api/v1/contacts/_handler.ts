@@ -582,7 +582,7 @@ export async function patchContactHandler(
   }
 
   // A origem de serviço da tag era observada AQUI para viajar no evento que
-  // esta rota emitia. O evento passou a ser do banco (migration 0311), e é o
+  // esta rota emitia. O evento passou a ser do banco (migration 0382), e é o
   // próprio `emit_event` que carimba a origem no instante da emissão — uma
   // observação a menos por PATCH, e a mesma garantia.
   patch.updated_at = new Date().toISOString();
@@ -652,7 +652,7 @@ export async function patchContactHandler(
 
   // ── `contact.tag_added` NÃO É EMITIDO AQUI — o BANCO emite ────────────────
   //
-  // Quem emite é `trg_emit_event_on_contact_tags_change` (migration 0311),
+  // Quem emite é `trg_emit_event_on_contact_tags_change` (migration 0382),
   // AFTER UPDATE em `contacts`. Enquanto os dois emitiam, uma tag posta por
   // esta rota gerava DUAS linhas de `contact.tag_added` — e o consumidor é o
   // motor de automação: regra "ganhou a tag → mandar WhatsApp" disparava duas

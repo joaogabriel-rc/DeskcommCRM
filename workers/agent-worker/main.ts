@@ -85,6 +85,10 @@ import { completeTurnForEnrollment, createPgAdminClient } from "@/lib/followup/t
 import { seedPlatformPlaybook } from "@/lib/agent-engine/agent/playbook-seed";
 import { runCronLoop } from "@/lib/agent-engine/cron/scheduler";
 import { createPool } from "@/lib/agent-engine/db/pool";
+import {
+  carregarComportamentoPorPool,
+  pisoDoComportamentoDoMotor,
+} from "@/lib/instalacao/comportamento-sql";
 import { runDrainLoop } from "@/lib/agent-engine/edge/crm/drain";
 import { runEventLogDrainLoop, prontidaoDoLacoDeEventLog } from "@/lib/event-log/drain-loop";
 import { crmEdgeConfigFromEnv } from "@/lib/agent-engine/edge/crm/mcp-client";
@@ -277,6 +281,13 @@ export async function startWorker(
     log.warn("órfãos soltos no boot", bootReap);
   }
 
+  // O comportamento da INSTALAÇÃO entra no processo ANTES dos laços que
+  // consomem turnos: a releitura abaixo só acontece no primeiro tique do reaper
+  // (QUEUE_REAPER_INTERVAL_MS, 60 s por padrão), e até lá o orçamento e os knobs
+  // do turno responderiam com o piso do `.env`, não com a escolha da tela.
+  // Nunca lança: sem leitura boa, vale o piso — o comportamento de antes.
+  await carregarComportamentoPorPool(pool, pisoDoComportamentoDoMotor(env));
+
   const server = createHealthzServer(pool, log, env.METRICS_WINDOW_MS);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -289,6 +300,14 @@ export async function startWorker(
   const inFlight = new Set<Promise<void>>();
 
   const reaperTimer = setInterval(() => {
+    // Recarrega o comportamento da INSTALAÇÃO no ritmo do reaper: é o que faz
+    // uma escolha feita na tela de admin alcançar ESTE processo sem restart
+    // (issue #1034). O memo de 30 s evita ir ao banco a cada tique, e o
+    // carregador nunca lança — o `.catch` cobre o caso impossível sem deixar
+    // rejeição solta (o worker morre com promise rejeitada não tratada).
+    carregarComportamentoPorPool(pool, pisoDoComportamentoDoMotor(env)).catch((err: unknown) =>
+      log.error("comportamento da instalação: releitura falhou", { error: errMsg(err) }),
+    );
     reapExpiredJobs(pool, { visibilityTimeoutMs: env.QUEUE_VISIBILITY_TIMEOUT_MS })
       .then((reaped) => {
         if (reaped.revived + reaped.dead > 0) log.warn("reaper devolveu jobs órfãos", reaped);

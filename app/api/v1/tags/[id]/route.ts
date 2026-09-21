@@ -12,12 +12,14 @@
  *
  * Por isso o rename vai primeiro por `fn_vocabulario_de_tags_operar` (0264),
  * que reescreve tudo isso numa transação só, e só depois sincroniza o registro
- * por `fn_tag_registro_aplicar` (0312), PRESERVANDO o id. É o inverso do que a
+ * por `fn_tag_registro_aplicar` (0383), PRESERVANDO o id. É o inverso do que a
  * intuição sugere (mexer no registro primeiro), e é o que garante que o id
  * sobreviva: quem guardou o uuid continua apontando para a mesma etiqueta.
  *
- * Pasta, cor e descrição são METADADO — não estão gravados em lugar nenhum
- * além daqui — e vão direto no UPDATE.
+ * Pasta e arquivamento são METADADO do registro — não estão gravados em lugar
+ * nenhum além daqui — e vão direto no UPDATE. Cor e descrição NÃO: são do
+ * vocabulário (`organizations.settings.tags[]`, migration 0336), e quem as grava
+ * é `POST /api/v1/tags/vocabulario` com `definir_cor`.
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
@@ -32,7 +34,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-const COLUNAS = "id, name, folder, color, description, archived_at";
+const COLUNAS = "id, name, folder, archived_at";
 
 export async function PATCH(
   req: NextRequest,
@@ -70,7 +72,7 @@ export async function PATCH(
   const renomeou = !!novoNome && novoNome.toLowerCase() !== anterior.name.toLowerCase();
 
   if (renomeou) {
-    // UMA chamada, UMA transação: `fn_tag_operar` (0312) chama o rename do
+    // UMA chamada, UMA transação: `fn_tag_operar` (0383) chama o rename do
     // vocabulário (contatos, negócios, conversas e as regras `add_tag` dos
     // agentes) e o do registro no mesmo corpo. Se o segundo levantar, o
     // primeiro volta atrás junto — a versão anterior fazia duas chamadas, e
@@ -81,6 +83,7 @@ export async function PATCH(
       p_acao: "renomear",
       p_tag: anterior.name,
       p_destino: novoNome!,
+      p_cor: null,
     });
     if (opErr) {
       if (opErr.code === "42501")
@@ -104,10 +107,10 @@ export async function PATCH(
 
   // O metadado, e só o metadado. `name` fica de fora: quem o escreveu foi o
   // bloco acima, e repeti-lo aqui poderia desfazer a normalização do banco.
+  // Cor e descrição também: são do vocabulário (`settings.tags[]`), e quem as
+  // grava é `POST /api/v1/tags/vocabulario` com `definir_cor`.
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (parsed.data.folder !== undefined) patch.folder = parsed.data.folder;
-  if (parsed.data.color !== undefined) patch.color = parsed.data.color ?? null;
-  if (parsed.data.description !== undefined) patch.description = parsed.data.description ?? null;
   if (parsed.data.archived !== undefined)
     patch.archived_at = parsed.data.archived ? new Date().toISOString() : null;
 

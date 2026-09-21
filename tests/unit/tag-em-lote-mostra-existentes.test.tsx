@@ -11,8 +11,9 @@ import { BulkActionBar } from "@/components/kanban/BulkActionBar";
  * cards selecionados, o menu "Tag…" não mostrava nenhuma tag que já existe nos
  * leads — cada pessoa digitava a sua variação.
  *
- * A lista vem da página (as tags dos leads do quadro, a mesma conta do
- * FilterBar): a ação em lote grava em `lead.tags`, então é essa a lista certa.
+ * A lista vem da página: as tags dos leads do quadro, só `lead.tags`. Não é a
+ * conta do seletor do FilterBar, que também lista os marcadores do contato — a
+ * ação em lote grava em `lead.tags`, então é essa a lista certa.
  */
 
 const mutate = vi.fn();

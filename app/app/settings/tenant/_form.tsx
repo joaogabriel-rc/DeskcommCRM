@@ -31,15 +31,13 @@ const TIMEZONES = [
   "America/Belem",
   "America/Recife",
   "America/Fortaleza",
+  "Europe/Lisbon",
   "UTC",
 ];
 
 export function TenantForm({ initial }: Props) {
   const t = useT();
   const [form, setForm] = useState<TenantInput>(initial);
-  const [reasonsText, setReasonsText] = useState(
-    (initial.lost_reasons_extra ?? []).join(", "),
-  );
   const [isPending, startTransition] = useTransition();
 
   function set<K extends keyof TenantInput>(key: K, value: TenantInput[K]) {
@@ -48,12 +46,7 @@ export function TenantForm({ initial }: Props) {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const reasons = reasonsText
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    const candidate = { ...form, lost_reasons_extra: reasons };
-    const parsed = tenantSchema.safeParse(candidate);
+    const parsed = tenantSchema.safeParse(form);
     if (!parsed.success) {
       toast.error(t("Dados inválidos."));
       return;
@@ -198,19 +191,6 @@ export function TenantForm({ initial }: Props) {
               onChange={(e) => set("privacy_policy_url", e.target.value || null)}
             />
           </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="lost_reasons">{t("Motivos de perda extras (separados por vírgula)")}</Label>
-          <Input
-            id="lost_reasons"
-            value={reasonsText}
-            onChange={(e) => setReasonsText(e.target.value)}
-            placeholder={t("ex: Sem orçamento, Concorrente")}
-          />
-          <p className="text-xs text-muted-foreground">
-            {t("Adicionados ao set padrão. Cada pipeline pode ter seus próprios motivos.")}
-          </p>
         </div>
 
         <div className="flex sm:justify-end">

@@ -27,6 +27,7 @@ function payload(): ExportPayload {
     orders: [],
     activities: [],
     appointments: [],
+    sales: [],
     tasks: [],
     webhook_captures: [],
     audit_log_extract: [],
@@ -47,7 +48,14 @@ function payload(): ExportPayload {
       },
     ],
     voice_calls: [],
-  appointment_notices: [
+    prospecting_candidates: [],
+    cases: [],
+    case_events: [],
+    case_chat_messages: [],
+    passagens: [],
+    avisos_de_caso: [],
+    demandas: [],
+    appointment_notices: [
       {
         id: "aviso-aberto",
         ref_id: "compromisso-confirmado",
@@ -91,6 +99,15 @@ async function rendered(data: ExportPayload) {
     await task.destroy();
   }
 }
+
+// O que responde ao titular é o byte, não a árvore React: um motor de renderização
+// novo pode mudar o formato do arquivo sem que nenhum teste da árvore perceba.
+it("os bytes entregues são um PDF: começam com o cabeçalho %PDF- e têm páginas", async () => {
+  const pdf = await rendered(payload());
+  const cabecalho = Buffer.from(pdf.bytes.subarray(0, 5)).toString("latin1");
+  expect(cabecalho).toBe("%PDF-");
+  expect(pdf.pages).toBeGreaterThan(0);
+});
 
 it("PDF efetivamente entregue contém registros, datas, estados e controlador sem material privado", async () => {
   const data = payload();

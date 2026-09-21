@@ -45,20 +45,32 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
-/** Faz `extractPdfText` falhar com a mensagem dada, sem tocar no resto do módulo. */
-function comFalhaDePdf(mensagem: string) {
+/**
+ * Faz `extractPdfText` falhar como o módulo real falha, sem tocar no resto dele.
+ *
+ * O `motivo` é o argumento que importa: `documento.ts` decide por ele, e **não**
+ * pela frase ("a frase é traduzível", diz o comentário da decisão). Um duplo que
+ * só reproduzisse a mensagem entregaria conteúdo classificado como
+ * infraestrutura — e foi exatamente o que este arquivo fez enquanto a decisão
+ * ainda era pela frase.
+ */
+function comFalhaDePdf(mensagem: string, motivo: PdfExtractorModule.MotivoDaFalhaDePdf = "falha") {
   vi.doMock("@/lib/ai/rag/extractors/pdf", async () => {
     const real = await vi.importActual<typeof PdfExtractorModule>("@/lib/ai/rag/extractors/pdf");
     return {
       ...real,
       extractPdfText: async () => {
-        throw new real.PdfExtractError(mensagem);
+        throw new real.PdfExtractError(mensagem, undefined, motivo);
       },
     };
   });
 }
 
-/** A sentinela que `documento.ts` usa para separar conteúdo de infraestrutura. */
+/**
+ * A frase que o extrator emite quando o PDF abriu e não tem letra selecionável.
+ * Ela é só o texto do diagnóstico: quem separa conteúdo de infraestrutura é o
+ * `motivo` que acompanha o erro.
+ */
 const SEM_TEXTO = "pdfjs-dist extracted no text (possibly image-only PDF)";
 
 afterEach(() => {
@@ -94,7 +106,7 @@ describe("extrairTextoDoArquivo — onde a causa da falha de PDF vai parar", () 
     // O controle que dá sentido ao caso acima. Se o `console.error` fosse
     // incondicional, esta asserção ficaria vermelha — e sem ela a sonda do
     // outro caso não distinguiria "logou a causa certa" de "loga sempre".
-    comFalhaDePdf(SEM_TEXTO);
+    comFalhaDePdf(SEM_TEXTO, "sem_texto");
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const { extrairTextoDoArquivo } = await import("@/lib/ai/rag/ingest/documento");

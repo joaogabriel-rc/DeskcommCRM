@@ -2,7 +2,7 @@
 
 /**
  * O REGISTRO de etiquetas — criar, pesquisar, editar, organizar em pastas e ver
- * o identificador (migration 0312).
+ * o identificador (migration 0383).
  *
  * ── Por que este painel é SEPARADO do que já estava na tela ─────────────────
  *
@@ -15,7 +15,7 @@
  *                               foi escrito, e por isso lista também o que
  *                               nunca passou por cadastro nenhum.
  *   este                        "o que esta organização DECLAROU que existe" —
- *                               com id, pasta, cor e descrição, e com o botão
+ *                               com id e pasta, e com o botão
  *                               de criar ANTES do primeiro uso, que é o que
  *                               faltava para montar um flow com gatilho de tag
  *                               sem primeiro marcar um contato à mão.
@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { ChipDeEtiqueta } from "@/components/tags/ChipDeEtiqueta";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useT } from "@/lib/i18n/IdiomaProvider";
 import {
@@ -63,11 +63,9 @@ type Rascunho = {
   id?: string;
   name: string;
   folder: string;
-  color: string;
-  description: string;
 };
 
-const VAZIO: Rascunho = { name: "", folder: PASTA_PADRAO, color: "", description: "" };
+const VAZIO: Rascunho = { name: "", folder: PASTA_PADRAO };
 
 export function RegistroDeTags({ initialData, canWrite }: Props) {
   const t = useT();
@@ -97,8 +95,6 @@ export function RegistroDeTags({ initialData, canWrite }: Props) {
     const payload = {
       name: rascunho.name.trim(),
       folder: rascunho.folder.trim() || PASTA_PADRAO,
-      color: rascunho.color.trim() || null,
-      description: rascunho.description.trim() || null,
     };
     if (!payload.name) return;
     if (rascunho.id) await atualizar.mutateAsync({ id: rascunho.id, ...payload });
@@ -160,16 +156,12 @@ export function RegistroDeTags({ initialData, canWrite }: Props) {
             <ul className="divide-y divide-border/60">
               {lista.map((tag) => (
                 <li key={tag.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
-                  <span
-                    aria-hidden
-                    className="size-2.5 shrink-0 rounded-full border border-border"
-                    style={tag.color ? { backgroundColor: tag.color } : undefined}
-                  />
                   <div className="min-w-40 flex-1">
-                    <p className="text-sm font-medium">{tag.name}</p>
-                    {tag.description && (
-                      <p className="text-xs text-muted-foreground">{tag.description}</p>
-                    )}
+                    {/* A cor vem do VOCABULÁRIO (`settings.tags[]`), pelo provider
+                        que o layout monta — o mesmo caminho do chip do Inbox. O
+                        registro não guarda cor; quem a escolhe é o painel abaixo
+                        ("Definir cor"). */}
+                    <ChipDeEtiqueta tag={tag.name} />
                   </div>
                   <button
                     type="button"
@@ -191,8 +183,6 @@ export function RegistroDeTags({ initialData, canWrite }: Props) {
                             id: tag.id,
                             name: tag.name,
                             folder: tag.folder,
-                            color: tag.color ?? "",
-                            description: tag.description ?? "",
                           })
                         }
                       >
@@ -257,24 +247,6 @@ export function RegistroDeTags({ initialData, canWrite }: Props) {
                   <option key={p} value={p} />
                 ))}
               </datalist>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="tag-cor">{t("Cor (opcional)")}</Label>
-              <Input
-                id="tag-cor"
-                value={rascunho?.color ?? ""}
-                placeholder="#22c55e"
-                onChange={(e) => setRascunho((r) => (r ? { ...r, color: e.target.value } : r))}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="tag-descricao">{t("Descrição (opcional)")}</Label>
-              <Textarea
-                id="tag-descricao"
-                rows={2}
-                value={rascunho?.description ?? ""}
-                onChange={(e) => setRascunho((r) => (r ? { ...r, description: e.target.value } : r))}
-              />
             </div>
             {rascunho?.id && (
               <p className="font-mono text-xs text-muted-foreground">ID: {rascunho.id}</p>

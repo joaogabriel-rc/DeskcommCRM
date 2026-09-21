@@ -104,6 +104,15 @@ describe("fundirTokens", () => {
   });
 });
 
+// Troca o último caractere por um que com certeza é DIFERENTE. A versão anterior
+// escrevia "00" no fim — e uma em cada 256 assinaturas (hex, com nonce aleatório)
+// já termina em "00": nelas a "adulteração" não mudava nada, a verificação aceitava
+// e o caso falhava no CI de PRs sem relação com ele (medido no #1282, 19/09).
+function adulterar(state: string): string {
+  const ultimo = state.slice(-1);
+  return state.slice(0, -1) + (ultimo === "0" ? "1" : "0");
+}
+
 describe("estado (state assinado)", () => {
   it("emite e verifica — vai e volta", () => {
     const agora = new Date("2026-01-01T00:00:00Z");
@@ -125,7 +134,18 @@ describe("estado (state assinado)", () => {
   it("recusa assinatura adulterada", () => {
     const agora = new Date("2026-01-01T00:00:00Z");
     const state = emitirEstado({ organizationId: ORG, userId: USER }, { segredo: SEGREDO, agora });
-    const adulterado = state.slice(0, -2) + "00";
+    const adulterado = adulterar(state);
+    expect(verificarEstado(adulterado, { segredo: SEGREDO, agora })).toBeNull();
+  });
+
+  it("recusa assinatura adulterada mesmo quando ela já termina no que a adulteração escreveria", () => {
+    const agora = new Date("2026-01-01T00:00:00Z");
+    let state = "";
+    for (let i = 0; i < 10_000 && !state.endsWith("00"); i++) {
+      state = emitirEstado({ organizationId: ORG, userId: USER }, { segredo: SEGREDO, agora, nonce: `n${i}` });
+    }
+    expect(state.endsWith("00"), "nenhum nonce produziu assinatura terminada em 00").toBe(true);
+    const adulterado = adulterar(state);
     expect(verificarEstado(adulterado, { segredo: SEGREDO, agora })).toBeNull();
   });
 

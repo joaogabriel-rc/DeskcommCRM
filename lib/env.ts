@@ -74,6 +74,12 @@ const schema = z.object({
   INTERNAL_SECRET: required("INTERNAL_SECRET"),
   /** Optional dedicated secret for cron endpoints (S-06.07 onwards). */
   INTERNAL_CRON_SECRET: z.string().optional().default(""),
+  /**
+   * Segredo do DONO DA INSTALAÇÃO para `POST /api/v1/tenants/provision` (um
+   * sistema externo cria organizações). Vazio por padrão = a rota não existe
+   * (404); com menos de 32 caracteres também fica desligada.
+   */
+  TENANT_PROVISIONING_SECRET: z.string().optional().default(""),
 
   // Laboratório local de extensões: origem HTTP exata em 127.0.0.1. O cliente
   // recusa a exceção se a URL do app não for loopback. Vazio mantém HTTPS público.
@@ -202,6 +208,15 @@ const schema = z.object({
   TRANSCRIPTION_API_KEY: z.string().optional().default(""),
   TRANSCRIPTION_BASE_URL: z.string().optional().default(""),
   TRANSCRIPTION_MODEL: z.string().optional().default(""),
+  // Destinos internos que o DONO DA INSTALAÇÃO autoriza (decisão 22-d, #1004):
+  // IPv4 e faixas CIDR IPv4 que a saída pode alcançar mesmo sendo rede interna,
+  // e só para destinos que a própria INSTALAÇÃO configura (nunca o endereço que
+  // uma organização escolhe). O BANCO ESTÁ ACIMA DISTO: a lista vive em
+  // `platform_settings.internal_destinations`, editada em
+  // `/admin/destinos-internos`; esta variável é só o PISO, que vale enquanto a
+  // tela nunca foi usada. Vazio é ausente: sem ela, nada passa. Quem lê é
+  // `lib/automation/destinos-internos-autorizados.ts`.
+  IA_DESTINOS_INTERNOS_PERMITIDOS: z.string().optional().default(""),
 
   // Fusão (Fase 4): DONO ÚNICO dos eventos ai_agent.dispatch_requested.
   // 'engine' (default) = o worker agent-engine é o único consumidor (o cron
@@ -230,6 +245,19 @@ const schema = z.object({
    * Mesmo raciocínio de APP_ACCENT_HEX, algumas linhas abaixo.
    */
   AI_BUDGET_ENFORCEMENT: z.string().optional().default("on"),
+
+  // As duas chaves do MOTOR que também são comportamento da INSTALAÇÃO (issue
+  // #1034): o modo do portão de disclosure do atendimento e a camada semântica
+  // de promessa. Existem em `lib/agent-engine/env.ts` (é lá que o worker as
+  // lê); entram aqui para a tela de admin poder mostrar o PISO que o `.env`
+  // desta instalação declara, em vez de supor o default do produto.
+  //
+  // `z.string()` cru e NUNCA `z.enum`, pelo mesmo motivo da linha acima: um
+  // `z.enum` que lança no import derruba o processo, e derrubar o processo é o
+  // oposto do que um kill switch faz. Quem normaliza é o leitor de cada um:
+  // `pisoDaInstalacao()`, em lib/instalacao/comportamento-servidor.ts.
+  DISCLOSURE_MODE: z.string().optional(),
+  PROMISE_SEMANTIC_ENABLED: z.string().optional(),
 
   // `EVENT_LOG_WORKER_ENABLED` viveu aqui até 2026-08-25 e NUNCA teve leitor: o
   // campo era declarado, documentado no `.env.example` com `false` e lido por
@@ -273,6 +301,26 @@ const schema = z.object({
   RESEND_FROM_EMAIL: z.string().optional().default(""),
 
   /**
+   * SMTP — o SEGUNDO transporte de e-mail, ao lado da Resend, nunca no lugar
+   * dela. Quem já roda com Resend não mexe em nada; quem instala numa VPS e não
+   * quer criar conta em serviço externo preenche estas sete e o envio sai pelo
+   * servidor dele. Qual dos dois atende cada envio é decidido em
+   * `lib/email/roteador.ts` — SMTP quando há SMTP, Resend quando não há.
+   *
+   * O banco (`platform_smtp_settings`, pela tela /admin/email) PREVALECE sobre
+   * estas variáveis; elas existem para provisionar uma VPS sem abrir interface,
+   * e são o piso de rollback. Todas `optional().default()`: `.env` antigo não
+   * quebra ao atualizar.
+   */
+  SMTP_HOST: z.string().optional().default(""),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).optional().default(587),
+  SMTP_SECURITY: z.enum(["starttls", "tls", "none"]).optional().default("starttls"),
+  SMTP_USERNAME: z.string().optional().default(""),
+  SMTP_PASSWORD: z.string().optional().default(""),
+  SMTP_FROM_EMAIL: z.string().optional().default(""),
+  SMTP_FROM_NAME: z.string().optional().default(""),
+
+  /**
    * E-mail de suporte que a instalação mostra ao CLIENTE FINAL (tela de conta
    * suspensa, tela de cobrança).
    *
@@ -303,6 +351,30 @@ const schema = z.object({
    */
   JOB_QUEUE_RETENTION_DAYS: z.string().optional().default(""),
   AUDIT_LOG_RETENTION_DAYS: z.string().optional().default(""),
+  /**
+   * Conversa da equipe com a IA sobre um caso (migration 0281). `z.string()`
+   * pela MESMA razão das duas acima: `lib/env.ts` lança na primeira requisição
+   * e o healthcheck é TCP — um `z.coerce.number()` aqui transformaria
+   * `CASE_CHAT_RETENTION_DAYS=noventa` no derrubador do produto inteiro, com o
+   * contêiner marcado `healthy`. Quem interpreta é `lib/retencao/politica.ts`,
+   * onde lixo resolve para o lado seguro e o operador vê o aviso no log.
+   */
+  CASE_CHAT_RETENTION_DAYS: z.string().optional().default(""),
+  /**
+   * Passagem do atendimento para uma pessoa (migration 0291). `z.string()` pela
+   * MESMA razão das três acima — quem interpreta é `lib/retencao/politica.ts`,
+   * onde lixo resolve para o lado seguro e o operador vê o aviso no log, em vez
+   * de o contêiner ficar `healthy` respondendo 500 a tudo.
+   */
+  PASSAGEM_RETENTION_DAYS: z.string().optional().default(""),
+  /**
+   * Registro de entrega do aviso de caso no WhatsApp da equipe (migration
+   * 0292). `z.string()` pela MESMA razão das quatro acima — quem interpreta é
+   * `lib/retencao/politica.ts`, onde lixo resolve para o lado seguro e o
+   * operador vê o aviso no log, em vez de o contêiner ficar `healthy`
+   * respondendo 500 a tudo.
+   */
+  CASE_ALERT_RETENTION_DAYS: z.string().optional().default(""),
 
   // LGPD export (S-08.04)
   LGPD_SIGNING_KEY: z.string().optional().default(""),
@@ -446,10 +518,20 @@ if (env.NODE_ENV === "production") {
 // `OPENROUTER_API_KEY` entra na condição porque `isAiGatewayConfigured()`
 // (lib/ai/gateway.ts) e `resolveLanguageModel` a tratam como configuração
 // válida no ambiente, assim como gateway e Anthropic.
-if (!env.AI_GATEWAY_API_KEY && !env.ANTHROPIC_API_KEY && !env.OPENROUTER_API_KEY) {
+// `OPENAI_API_KEY` entra pelo mesmo motivo, com a diferença que o aviso não
+// precisa esconder: ela atende os pontos do provedor que a ORGANIZAÇÃO escolheu
+// (é o último degrau de `resolverModeloDoPonto`, lib/ai/gateway-binding.ts).
+// Sem esta linha, uma instalação que responde pelo OpenAI lia no boot que
+// "nenhuma chave de IA" estava configurada — issue #1181.
+if (
+  !env.AI_GATEWAY_API_KEY &&
+  !env.ANTHROPIC_API_KEY &&
+  !env.OPENROUTER_API_KEY &&
+  !env.OPENAI_API_KEY
+) {
   console.warn(
     "[env] Nenhuma chave de IA configurada no ambiente " +
-      "(AI_GATEWAY_API_KEY, ANTHROPIC_API_KEY ou OPENROUTER_API_KEY). " +
+      "(AI_GATEWAY_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY ou OPENAI_API_KEY). " +
       "Isto não prova que o agente está sem credencial: cada organização pode ter uma chave " +
       "cadastrada em IA › Credenciais. A falta real só é conhecida quando a resolução completa " +
       "do turno não encontra chave em nenhum degrau.",

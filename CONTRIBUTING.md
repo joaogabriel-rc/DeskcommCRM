@@ -57,6 +57,7 @@ Ao finalizar um epic:
    **O que o CI reprova sozinho** — rode antes de abrir o PR e não terá surpresa:
 
    ```bash
+   pnpm cercas    # ~30 s: as guardas estruturais (baseline, MANIFEST, docs, workflows) — o que mais reprova PR
    pnpm typecheck && pnpm lint && pnpm lint:channels && pnpm test:unit && pnpm test:shell && pnpm build
    pnpm test:db   # precisa de Docker; sobe um Postgres limpo e aplica o baseline
    ```
@@ -95,7 +96,15 @@ Ao finalizar um epic:
    self-hoster instala, roda em PR e **bloqueia** desde 2026-08-13.
 
    Verde no `e2e` **não** é "jornada provada": ele mesmo imprime, no resumo, quais specs não
-   cobriu — e a que fica de fora é justamente `vps-fresh-onboarding`, a instalação do zero.
+   cobriu. Quais são, leia do próprio workflow em vez de desta linha — ela já disse que a de
+   fora era `vps-fresh-onboarding`, a instalação do zero, e desde o PR #983 essa roda no CI:
+
+   ```bash
+   git show origin/main:.github/workflows/e2e.yml | grep -A4 'FORA_DO_CI:'
+   ```
+
+   E mesmo a jornada que TEM gate continua devendo a prova pela tela quando você mexe nela
+   (DoD 12): gate prova que não regrediu, não que a experiência ficou boa.
 
    > Esta lista dizia "três obrigatórios" e chamava o `e2e` de não-bloqueante. Estava
    > desatualizada nos dois pontos, e quem a usasse como régua mediria contra a régua errada.

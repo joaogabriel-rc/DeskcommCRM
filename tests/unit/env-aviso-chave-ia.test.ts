@@ -8,8 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * vazias não autorizam `lib/env.ts` a concluir que o agente ficará mudo.
  *
  * Este teste prende as duas metades da regra: sem chave no ambiente o aviso é
- * informativo e não anuncia o desfecho do worker; com uma chave no ambiente o
- * aviso específico continua silencioso.
+ * informativo e não anuncia o desfecho do worker; com QUALQUER chave que o
+ * produto usa no ambiente o aviso específico continua silencioso.
+ *
+ * `OPENAI_API_KEY` entrou nessa lista com a issue #1181: o catálogo serve o id
+ * do modelo da OpenAI SEM prefixo, e a chave do ambiente passou a atender o
+ * ponto pelo provedor da organização — uma instalação que responde pelo OpenAI
+ * não pode ler no boot que "nenhuma chave de IA" está configurada.
  */
 const PREFIXO = "[env] Nenhuma chave de IA";
 
@@ -22,9 +27,7 @@ function ambienteMinimo(): void {
   vi.stubEnv("AI_GATEWAY_API_KEY", "");
   vi.stubEnv("ANTHROPIC_API_KEY", "");
   vi.stubEnv("OPENROUTER_API_KEY", "");
-
-  // Evita misturar neste teste o aviso irmão da OpenAI, que tem contrato próprio.
-  vi.stubEnv("OPENAI_API_KEY", "openai-teste");
+  vi.stubEnv("OPENAI_API_KEY", "");
   // Evita ruído de outro aviso de boot sem relação com esta issue.
   vi.stubEnv("IMPERSONATE_COOKIE_SECRET", "x".repeat(32));
 }
@@ -63,6 +66,14 @@ describe("aviso de chave de IA no boot", () => {
 
   it("com chave no ambiente, não emite o aviso de ausência", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "openrouter-teste");
+
+    const avisos = await avisosDoBoot();
+
+    expect(avisos.some((texto) => texto.startsWith(PREFIXO))).toBe(false);
+  });
+
+  it("com só OPENAI_API_KEY no ambiente, também não emite", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "openai-teste");
 
     const avisos = await avisosDoBoot();
 

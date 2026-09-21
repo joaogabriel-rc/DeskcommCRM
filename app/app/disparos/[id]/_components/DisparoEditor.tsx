@@ -36,6 +36,7 @@ import {
   useSalvarDisparo,
   type DisparoDetalhe,
 } from "@/hooks/disparos/useDisparos";
+import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { proximoSlot, renomearSlot } from "@/lib/flows/slots";
 import { useT } from "@/lib/i18n/IdiomaProvider";
 import { CaretLeft, Plus, X } from "@/lib/ui/icons";
@@ -211,7 +212,7 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
               {disparo.problemas.map((p) => (
                 <li key={p.id} className="flex flex-wrap gap-2">
                   <span className="text-text-muted">
-                    {p.contacts?.display_name ?? p.contacts?.name ?? p.contacts?.phone_number ?? "—"}
+                    {rotuloDoContato(p.contacts, t)}
                   </span>
                   <span className="text-error-fg">{t(p.error ?? p.status)}</span>
                 </li>

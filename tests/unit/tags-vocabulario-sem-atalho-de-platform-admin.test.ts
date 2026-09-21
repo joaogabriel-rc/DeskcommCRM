@@ -6,7 +6,7 @@
  * O PR entregou a página e as duas metades da rota com atalho de platform admin
  * (`allowPlatformAdmin: true` / `user.is_platform_admin && !user.support`). Só
  * que quem grava é `fn_vocabulario_de_tags_operar` — hoje pelo invólucro
- * `fn_tag_operar` (migration 0312), que a chama junto com a sincronia do
+ * `fn_tag_operar` (migration 0383), que a chama junto com a sincronia do
  * registro de etiquetas na MESMA transação —, cujo portão é
  * `fn_role_at_least(p_org, 'manager')` — e `fn_role_at_least` resolve SÓ por
  * `fn_user_role_in_org`, sem ramo de platform admin (`supabase/baseline.sql`).
@@ -49,7 +49,7 @@ vi.mock("@/lib/auth/server", () => ({
   resolveActiveOrg: async () => ({ orgId: ORG, name: "Org", role: estado.papelDaMembresia }),
   mfaEmDivida: async () => false,
 }));
-// `from` entrou com o REGISTRO de etiquetas (migration 0312): a página lê
+// `from` entrou com o REGISTRO de etiquetas (migration 0383): a página lê
 // `public.tags` além de chamar a RPC do vocabulário. O dublê devolve lista
 // vazia — o que este arquivo mede é o PORTÃO (quem pode ver e gravar), não o
 // conteúdo da tela.

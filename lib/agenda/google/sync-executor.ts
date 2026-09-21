@@ -1,9 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { observeMeeting, type MeetingObservation } from "./meet";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { paraEventoDoGoogle, PREFIXO_PROPRIEDADE, type EventoDoGoogle } from "./evento";
+import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
+import {
+  paraEventoDoGoogle,
+  participantesDoAgendamento,
+  PREFIXO_PROPRIEDADE,
+  type EventoDoGoogle,
+} from "./evento";
 import {
   compare,
+  comConviteDaFicha,
   checkpoint,
   delta,
   groups,
@@ -59,6 +66,42 @@ export function mensagemDaRecusaDePublicacao(
   return erro instanceof Error && "code" in erro
     ? "O compromisso mudou. A sincronização vai reler a versão atual."
     : "Não foi possível sincronizar. Confira a conexão e tente novamente.";
+}
+
+/**
+ * E-mail da ficha do contato, para o convite do Google.
+ *
+ * A falta do e-mail (contato sem ficha, stub de teste sem `.from`, falha de
+ * leitura, titular anonimizado) NÃO é falha de sincronização: o compromisso
+ * continua indo para a agenda do atendente. Quem não tem e-mail é o caso
+ * comum — lead que chegou pelo WhatsApp.
+ */
+export async function emailDoContato(
+  db: SupabaseClient,
+  org: string,
+  contactId: string | null,
+): Promise<{ email: string; nome: string | null } | null> {
+  if (!contactId) return null;
+  if (typeof db.from !== "function") return null;
+  try {
+    const { data, error } = await db
+      .from("contacts")
+      .select("email,name,display_name,is_anonymized")
+      .eq("organization_id", org)
+      .eq("id", contactId)
+      .maybeSingle();
+    if (error || !data || data.is_anonymized) return null;
+    const email = typeof data.email === "string" ? data.email.trim() : "";
+    if (!email) return null;
+    return { email, nome: nomeDoContato(data) };
+  } catch {
+    return null;
+  }
+}
+
+function eventoTemEmail(event: EventoDoGoogle | null | undefined, email: string): boolean {
+  const chave = email.trim().toLowerCase();
+  return (event?.attendees ?? []).some((p) => p.email?.trim().toLowerCase() === chave);
 }
 
 export async function tokenForConnection(db: SupabaseClient, org: string, connectionId: string) {
@@ -127,6 +170,7 @@ export async function reconcileAppointment(
       await commit({ ack: true });
       return "processed";
     }
+    const contato = await emailDoContato(db, org, a.contact_id);
     if (!a.google_connection_id || !a.google_calendar_id || !a.google_event_id)
       throw new Error("Publicação antiga sem identidade completa. Revise a conexão.");
     const api = googleTransport(
@@ -349,9 +393,11 @@ export async function reconcileAppointment(
           "POST",
           paraEventoDoGoogle({
             ...a,
-            participantes: a.guest_email
-              ? [{ email: a.guest_email, aguardandoResposta: true }]
-              : [],
+            participantes: participantesDoAgendamento({
+              contactEmail: contato?.email,
+              contactName: contato?.nome,
+              guestEmail: a.guest_email,
+            }),
           }) as unknown as Record<string, unknown>,
           null,
           [...groups],
@@ -361,7 +407,14 @@ export async function reconcileAppointment(
       }
     }
     if (!remote) throw new Error("Evento sem projeção válida.");
-    const decision = compare(base, local, remote);
+    // O e-mail da ficha vai junto de uma alteração, nunca sozinho — ver
+    // `comConviteDaFicha` (decisão do dono, doc 36: sem convite em massa na
+    // 1ª sincronização depois da atualização).
+    const decision = comConviteDaFicha(compare(base, local, remote), {
+      temEmail: Boolean(contato?.email),
+      eventoJaTemOEmail: Boolean(contato?.email && event && eventoTemEmail(event, contato.email)),
+      cancelado: event?.status === "cancelled" || a.status === "cancelled",
+    });
     if (decision.kind === "conflict") {
       await conflict(decision.reason!, remote, decision.groups);
       return "processed";
@@ -420,7 +473,19 @@ export async function reconcileAppointment(
     }
     await send(
       local.shared.cancelled ? "DELETE" : "PATCH",
-      local.shared.cancelled ? undefined : delta(a, event, base, decision.groups, decision.shared),
+      local.shared.cancelled
+        ? undefined
+        : delta(
+            {
+              ...a,
+              contact_email: contato?.email ?? null,
+              contact_nome: contato?.nome ?? null,
+            },
+            event,
+            base,
+            decision.groups,
+            decision.shared,
+          ),
       event.etag ?? null,
       decision.groups,
       decision.shared,

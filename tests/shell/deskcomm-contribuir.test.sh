@@ -37,11 +37,27 @@ export PATH="$FAKEBIN:$PATH"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP" "$FAKEBIN"' EXIT
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+# ── isolamento do git: nada aqui escreve fora de "$TMP" ─────────────────────
+# Um `cfg "$dir" user.*` grava onde o git RESOLVER o repositório, e não
+# necessariamente em "$dir": um GIT_DIR herdado (rodar de dentro de um hook, de um
+# `rebase --exec`) manda por cima do -C; "$dir" que não é repositório sobe até o
+# pai. Foi assim que "Pessoa <alguem@fork.dev>" parou no .git/config do checkout
+# compartilhado em 10/09/2026 e assinou 829 commits da main. Aqui o config É o dado
+# sob teste (o quem-sou.sh lê `user.email`), então a identidade não pode ir para o
+# ambiente. Em vez disso:
+#   1. zera o ambiente local do git herdado — o idioma canônico do próprio git;
+#   2. a descoberta de repositório nunca sobe para fora de "$TMP";
+#   3. toda escrita de config é `--file <clone>/.git/config` (`cfg`), que não
+#      resolve repositório nenhum: alvo errado é erro alto, nunca o repo de quem roda;
+#   4. todo `cd` para um clone aborta se o clone não existir.
+unset $(git rev-parse --local-env-vars)
+export GIT_CEILING_DIRECTORIES="$TMP"
+cfg() { local alvo="$1"; shift; git config --file "$alvo/.git/config" "$@"; }
 
 # ── um "repositório principal" mínimo, com uma migration já aplicada ─────────
 principal="$TMP/principal"; mkdir -p "$principal"
 git -C "$principal" init -q -b main
-git -C "$principal" config user.email "mantenedor@exemplo.com"; git -C "$principal" config user.name "Mantenedor"
+cfg "$principal" user.email "mantenedor@exemplo.com"; cfg "$principal" user.name "Mantenedor"
 mkdir -p "$principal/supabase/migrations" "$principal/.agents/skills/deskcomm-contribuir/scripts/hooks"
 cp -R "$SCRIPTS"/. "$principal/.agents/skills/deskcomm-contribuir/scripts/"
 printf 'select 1;\n' > "$principal/supabase/migrations/20260101120000_0200_existente.sql"
@@ -54,8 +70,8 @@ git -C "$principal" add -A && git -C "$principal" commit -q -m "base"
 
 clonar() { # $1 = destino, $2 = e-mail do contribuidor
   rm -rf "$1"; git clone -q "$principal" "$1"
-  git -C "$1" config user.email "$2"; git -C "$1" config user.name "Pessoa"
-  git -C "$1" config core.hooksPath ".agents/skills/deskcomm-contribuir/scripts/hooks"
+  cfg "$1" user.email "$2"; cfg "$1" user.name "Pessoa"
+  cfg "$1" core.hooksPath ".agents/skills/deskcomm-contribuir/scripts/hooks"
   chmod +x "$1"/.agents/skills/deskcomm-contribuir/scripts/*.sh "$1"/.agents/skills/deskcomm-contribuir/scripts/hooks/*
 }
 
@@ -64,16 +80,16 @@ clone="$TMP/c1"; clonar "$clone" "alguem@fork.dev"
 saida="$(cd "$clone" && bash .agents/skills/deskcomm-contribuir/scripts/quem-sou.sh)"
 assert_contains "$saida" "^contribuidor" "e-mail desconhecido → contribuidor"
 assert_contains "$saida" "alguem@fork.dev" "a saída explica o motivo (o e-mail)"
-git -C "$clone" config user.email "rafael@maudibrasil.com.br"
+cfg "$clone" user.email "rafael@maudibrasil.com.br"
 saida="$(cd "$clone" && bash .agents/skills/deskcomm-contribuir/scripts/quem-sou.sh --curto)"
 assert_contains "$saida" "^mantenedor$" "e-mail do .mailmap → mantenedor (--curto)"
-git -C "$clone" config user.email "119944436+melgarafael@users.noreply.github.com"
+cfg "$clone" user.email "119944436+melgarafael@users.noreply.github.com"
 saida="$(cd "$clone" && bash .agents/skills/deskcomm-contribuir/scripts/quem-sou.sh)"
 assert_contains "$saida" "^mantenedor" "segundo e-mail do .mailmap → mantenedor"
 
 echo "2. check-migration-triple.sh (pre-commit)"
 clone="$TMP/c2"; clonar "$clone" "alguem@fork.dev"
-cd "$clone" && git switch -q -c fix/algo
+cd "$clone" || exit 1; git switch -q -c fix/algo
 printf 'select 2;\n' > supabase/migrations/20260909100000_0201_nova.sql
 git add supabase/migrations/20260909100000_0201_nova.sql
 saida="$(git commit -q -m "migration sem tripla" 2>&1)"; code=$?
@@ -105,23 +121,23 @@ saida="$(printf 'refs/heads/fix/algo %s refs/heads/fix/algo %s\n' "$(git rev-par
 assert_exit "$code" 0 "push de feature branch passa"
 
 echo "4. armar-hooks.sh"
-clone="$TMP/c4"; clonar "$clone" "alguem@fork.dev"; git -C "$clone" config --unset core.hooksPath
-cd "$clone"
+clone="$TMP/c4"; clonar "$clone" "alguem@fork.dev"; cfg "$clone" --unset core.hooksPath
+cd "$clone" || exit 1
 saida="$(bash .agents/skills/deskcomm-contribuir/scripts/armar-hooks.sh 2>&1)"; code=$?
 assert_exit "$code" 0 "arma sem erro"
 assert_contains "$(git config --get core.hooksPath)" "deskcomm-contribuir/scripts/hooks" "core.hooksPath aponta para os hooks do contribuidor"
-git config core.hooksPath loop/hooks
+cfg "$clone" core.hooksPath loop/hooks
 saida="$(bash .agents/skills/deskcomm-contribuir/scripts/armar-hooks.sh 2>&1)"; code=$?
 assert_exit "$code" 2 "recusa sobrescrever hooks alheios (loop/hooks do mantenedor)"
 assert_contains "$(git config --get core.hooksPath)" "^loop/hooks$" "core.hooksPath intacto"
-git config core.hooksPath ".agents/skills/deskcomm-contribuir/scripts/hooks"
+cfg "$clone" core.hooksPath ".agents/skills/deskcomm-contribuir/scripts/hooks"
 saida="$(bash .agents/skills/deskcomm-contribuir/scripts/armar-hooks.sh --desarmar 2>&1)"
 assert_exit "$?" 0 "--desarmar sai com 0"
 if git config --get core.hooksPath >/dev/null; then falha "--desarmar limpa core.hooksPath"; else ok "--desarmar limpa core.hooksPath"; fi
 
 echo "5. pre-voo.sh"
 clone="$TMP/c5"; clonar "$clone" "root@vps-123.hostgator.com.br"
-cd "$clone" && git switch -q -c feat/coisa
+cd "$clone" || exit 1; git switch -q -c feat/coisa
 # a main anda (branch atrasada) — commit direto no principal
 printf 'select 9;\n' > "$principal/outro.txt"; git -C "$principal" add -A; git -C "$principal" commit -q -m "main anda"
 printf '## [9.9.9] - à mão\n' >> CHANGELOG.md
@@ -139,15 +155,15 @@ saida="$(bash .agents/skills/deskcomm-contribuir/scripts/pre-voo.sh 2>&1)"
 assert_contains "$saida" "você está na 'main'" "na main, manda abrir branch"
 
 echo "6. sessao.sh (hook de início de sessão)"
-clone="$TMP/c6"; clonar "$clone" "alguem@fork.dev"; git -C "$clone" config --unset core.hooksPath
+clone="$TMP/c6"; clonar "$clone" "alguem@fork.dev"; cfg "$clone" --unset core.hooksPath
 saida="$(cd "$clone" && bash .agents/skills/deskcomm-contribuir/scripts/hooks/sessao.sh)"; code=$?
 assert_exit "$code" 0 "sai com 0"
 assert_contains "$saida" "clone é de um contribuidor" "contribuidor recebe o lembrete"
 assert_contains "$saida" "NÃO armados" "diz que os hooks não estão armados"
-git -C "$clone" config core.hooksPath ".agents/skills/deskcomm-contribuir/scripts/hooks"
+cfg "$clone" core.hooksPath ".agents/skills/deskcomm-contribuir/scripts/hooks"
 saida="$(cd "$clone" && bash .agents/skills/deskcomm-contribuir/scripts/hooks/sessao.sh)"
 assert_contains "$saida" "contribuidor armados" "com hooks armados, diz que estão"
-git -C "$clone" config user.email "rafael@maudibrasil.com.br"
+cfg "$clone" user.email "rafael@maudibrasil.com.br"
 saida="$(cd "$clone" && bash .agents/skills/deskcomm-contribuir/scripts/hooks/sessao.sh)"; code=$?
 assert_exit "$code" 0 "mantenedor: sai com 0"
 if [ -z "$saida" ]; then ok "mantenedor: silêncio total"; else falha "mantenedor: silêncio total" "saída: $saida"; fi
@@ -177,10 +193,10 @@ for sh in bash zsh; do
   assert_contains "$out" "^contribuidor — e-mail do git: alguem@fork.dev" "($sh) raiz do clone, sem instalação global: responde pelo script do clone"
   passo0 "$cmd" "$sem_guias" "$clone7/app/api"
   assert_contains "$out" "^contribuidor — e-mail do git: alguem@fork.dev" "($sh) subpasta do clone, sem instalação global: responde igual à raiz"
-  git -C "$clone7" config user.email "rafael@maudibrasil.com.br"
+  cfg "$clone7" user.email "rafael@maudibrasil.com.br"
   passo0 "$cmd" "$sem_guias" "$clone7/app/api"
   assert_contains "$out" "^mantenedor" "($sh) subpasta do clone do mantenedor: responde mantenedor (o guia não o trata como contribuidor)"
-  git -C "$clone7" config user.email "alguem@fork.dev"
+  cfg "$clone7" user.email "alguem@fork.dev"
   passo0 "$cmd" "$sem_guias" "$antigo/app"
   if [ "$code" != 0 ] && [ -z "$out" ]; then ok "($sh) clone sem o script, sem instalação global: sai com erro e sem resposta inventada"; else falha "($sh) clone sem o script, sem instalação global: sai com erro e sem resposta inventada" "code=$code out=$out"; fi
   assert_contains "$err" "^NÃO MEDIDO — não achei o quem-sou.sh no clone .*c7-antigo" "($sh) e o erro diz o que não achou e onde procurou"

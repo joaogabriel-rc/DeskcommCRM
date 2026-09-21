@@ -170,6 +170,8 @@ export async function POST(req: NextRequest): Promise<Response> {
   } catch (err) {
     await admin.storage.from(BUCKET_DE_CONHECIMENTO).remove([blobPath]);
     if (err instanceof ErroDeExtracao) {
+      // A resposta leva só a chave; a causa só sobrevive neste log.
+      if (err.detalhe) console.warn("[conhecimento-upload] extração recusada:", err.detalhe);
       return fail("unprocessable_entity", t(err.message), 422, { requestId });
     }
     console.error("[conhecimento-upload] extração falhou:", err);

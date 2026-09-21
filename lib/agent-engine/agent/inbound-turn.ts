@@ -1,3 +1,4 @@
+import { prospectingConversationContext } from "@/lib/prospecting/context";
 import { setExecutionAgentOperation } from '@/lib/atendimento/fronteira-server';
 import { TIPOS_DE_CASO, TIPOS_DE_CASO_PARA_A_IA } from "@/lib/ai/case-copy";
 import { DEFAULT_CHANNEL_PROVIDER } from '@/lib/channels/capabilities';
@@ -160,6 +161,10 @@ import { decidePromise } from '../guardrails/promise/engine';
 import { loadPromiseTable } from '../guardrails/promise/table';
 import { classifyPromise } from '../guardrails/promise/semantic';
 import { expectativaDeAtendimento } from '@/lib/escalacao/disponibilidade';
+import {
+  montarBriefingDaPassagem,
+  type BriefingDaPassagem,
+} from '@/lib/escalacao/briefing-da-passagem';
 import { diffCheckpoint } from '@/lib/leads/checkpoint-diff';
 import { emitAgentActivityForContact } from '@/lib/leads/agent-activity';
 import { resolveActiveLeadForContact, type LeadCandidate } from '@/lib/leads/active-lead';
@@ -297,13 +302,44 @@ export const AGENT_TOOL_DEFS = {
       'chame esta ferramenta — depois dela você não consegue mais falar com ele. Se você não avisar, ' +
       'o sistema manda um aviso padrão no seu lugar. Acionada a ferramenta, encerre o turno. ' +
       'NUNCA diga ao lead que "já chamei alguém" ou "já passei para a equipe" sem ter chamado esta ' +
-      'ferramenta NO MESMO turno — a frase no passado não substitui a ação, e ninguém é avisado de verdade.',
+      'ferramenta NO MESMO turno — a frase no passado não substitui a ação, e ninguém é avisado de verdade. ' +
+      'Preencha por_que, o_que_tentei e cliente_quer — quem assumir só vê o que você escrever aqui.',
     // Schema LARGO para o SDK (o modelo vê o campo); a validação REAL é a whitelist .strict()
     // + guard de prototype pollution dentro de applyRequestHumanHandoff — campo extra/forjado
     // vira erro de ENSINO ao modelo, nunca exceção do SDK nem strip silencioso.
+    //
+    // ⚠️ ESPELHO: as chaves aqui e as de `requestHumanHandoffInputSchema`
+    // (`human-handoff.ts`) são o MESMO conjunto, e
+    // `tests/unit/passagem-tool-schema-espelhado.test.ts` as compara. Campo só
+    // deste lado = o modelo preenche e a whitelist recusa, virando erro de
+    // ensino a cada chamada; campo só do outro = o modelo nunca sabe que existe.
+    //
+    // Os `.describe()` são o ÚNICO lugar onde o modelo aprende o que escrever, e
+    // é por isso que eles trazem exemplo em vez de definição.
     inputSchema: z
       .object({
-        reason: z.string().optional().describe('por que passar ao humano (curto)'),
+        por_que: z
+          .string()
+          .optional()
+          .describe(
+            'em uma frase, por que você não consegue resolver e está passando para uma pessoa',
+          ),
+        o_que_tentei: z
+          .array(
+            z.object({
+              o_que: z
+                .string()
+                .describe('o que você tentou (ex.: "busquei na base a política de desconto")'),
+              desfecho: z.string().optional().describe('no que deu (ex.: "a política só vai até 10%")'),
+            }),
+          )
+          .optional()
+          .describe('o que você já tentou, na ordem — evita que a pessoa refaça o mesmo caminho'),
+        cliente_quer: z
+          .string()
+          .optional()
+          .describe('o que a pessoa está pedindo, nas palavras dela'),
+        reason: z.string().optional().describe('sinônimo antigo de por_que (ainda aceito)'),
       })
       .passthrough(),
   },
@@ -628,7 +664,7 @@ export const TITULO_DO_HANDOFF_POR_ORCAMENTO = 'Teto de gasto com IA atingido �
  *
  * Envolver o turno inteiro é o único desenho que não envelhece: não há lista de
  * auxiliares a manter, e o auxiliar que alguém acrescentar amanhã já nasce
- * coberto. `resumoDoCheckpoint` é uma FUNÇÃO resolvida dentro do catch (e não um
+ * coberto. `briefingDoCheckpoint` é uma FUNÇÃO resolvida dentro do catch (e não um
  * valor pronto), porque no caminho novo a escolta abre antes de o checkpoint ter
  * sido lido — e ler o checkpoint no caminho feliz seria uma query a mais por
  * turno para um texto que quase nunca é usado.
@@ -640,10 +676,13 @@ export async function comHandoffSeOrcamentoAcabar<T>(
     leadId: string;
     conversationId: string;
     /**
-     * Resolvido SÓ no caminho de erro: `buildHandoffSummary(latestCheckpoint(...))`
-     * — do checkpoint durável, zero LLM.
+     * Resolvido SÓ no caminho de erro: montado do checkpoint durável, zero LLM.
+     *
+     * Devolve o BRIEFING inteiro, e não só o texto, porque a linha da passagem
+     * guarda as quatro colunas que ele carrega. Um campo, um significado: "o
+     * contexto que vai para quem assume".
      */
-    resumoDoCheckpoint: () => Promise<string>;
+    briefingDoCheckpoint: () => Promise<BriefingDaPassagem>;
     /**
      * Avisa o lead de que uma pessoa vai assumir, ANTES do handoff.
      *
@@ -661,7 +700,7 @@ export async function comHandoffSeOrcamentoAcabar<T>(
     return await chamada();
   } catch (err) {
     if (!(err instanceof LlmBudgetExceededError)) throw err;
-    const resumo = await ctx.resumoDoCheckpoint();
+    const doCheckpoint = await ctx.briefingDoCheckpoint();
     // AVISA antes de silenciar — ver a nota de ORDEM no gatilho determinístico:
     // `performHumanHandoff` arma a trava que o gate de envio lê, então a única
     // janela em que o aviso passa é ANTES dela.
@@ -682,13 +721,22 @@ export async function comHandoffSeOrcamentoAcabar<T>(
       });
       aviso = { avisado: false, porque: 'erro_no_envio' };
     }
+    // O texto fixo fica NA FRENTE do contexto acumulado, como antes: ele é o que
+    // diz a quem assume que o cliente NÃO pediu uma pessoa — sem isso o
+    // atendente responde a um pedido que não houve. Nenhum modelo é chamado
+    // aqui, e é o ponto: o motivo do desvio é justamente não haver orçamento.
+    const briefing: BriefingDaPassagem = {
+      ...doCheckpoint,
+      body: `${RESUMO_DO_HANDOFF_POR_ORCAMENTO}\n\n${doCheckpoint.body}`,
+    };
     await performHumanHandoff(
       ctx.pool,
       { tenantId: ctx.tenantId, leadId: ctx.leadId, conversationId: ctx.conversationId },
       {
         reason: HANDOFF_REASON_ORCAMENTO,
-        conversationSummary: `${RESUMO_DO_HANDOFF_POR_ORCAMENTO}\n\n${resumo}`,
+        conversationSummary: briefing.body,
         inboxTitle: TITULO_DO_HANDOFF_POR_ORCAMENTO,
+        passagem: { origem: 'teto_de_gasto', motivoCodigo: 'orcamento_de_ia', briefing },
         avisoAoLead: aviso,
         log: ctx.log,
       },
@@ -705,19 +753,21 @@ export async function comHandoffSeOrcamentoAcabar<T>(
  * checkpoint durável. Falhar aqui NÃO pode impedir o handoff: sem resumo o
  * humano assume com menos contexto; sem handoff ele não assume nada.
  */
-async function resumoDoCheckpointDuravel(
+async function briefingDoCheckpointDuravel(
   pool: pg.Pool,
   tenantId: string,
   leadId: string,
   log: Logger,
-): Promise<string> {
+): Promise<BriefingDaPassagem> {
+  const montar = (checkpoint: Awaited<ReturnType<typeof latestCheckpoint>>) =>
+    montarBriefingDaPassagem({ checkpoint, motivo: { codigo: 'orcamento_de_ia' } });
   try {
-    return buildHandoffSummary(await latestCheckpoint(pool, tenantId, leadId));
+    return montar(await latestCheckpoint(pool, tenantId, leadId));
   } catch (err) {
     log.warn('resumo do checkpoint não pôde ser lido — o handoff segue sem ele', {
       error: (err instanceof Error ? err.message : String(err)).slice(0, 120),
     });
-    return buildHandoffSummary(null);
+    return montar(null);
   }
 }
 
@@ -788,9 +838,9 @@ const TRANSPARENCIA_SYSTEM_BLOCK =
  * ⚠️ Terceiro parágrafo (2026-08-29, mesmo dia): o segundo parágrafo sozinho NÃO
  * bastou — medido no mesmo teste, depois de publicado. Causa raiz achada no
  * `system_prompt` que o PRÓPRIO tenant escreveu para este agente: ele instrui a
- * "encaminhar dúvidas ou situações fora da sua autonomia ao gerente Fernando".
+ * "encaminhar dúvidas ou situações fora da sua autonomia ao gerente Fulano".
  * O modelo estava classificando "confirmar horário" como uma dessas situações e
- * respondendo "vou confirmar com o Fernando/a equipe" — coerente com a
+ * respondendo "vou confirmar com o Fulano/a equipe" — coerente com a
  * identidade que o tenant deu a ele, só que sem nunca chamar a ferramenta. Um
  * agravante: a MESMA conversa já tinha várias respostas assim ANTES deste fix
  * existir, e o modelo lê o próprio histórico — puxando a resposta pra manter
@@ -865,7 +915,7 @@ function agendaSystemBlock(toolIds: readonly string[]): string {
     'Checar e marcar horário com as ferramentas de agenda está SEMPRE dentro da sua ' +
     'autonomia quando essas ferramentas estão disponíveis para você — mesmo que as instruções da empresa ' +
     'peçam para encaminhar decisões fora da sua autonomia a um gerente/responsável nomeado (ex.: "fale com o ' +
-    'Fernando"). Isso vale para OUTRAS decisões (desconto, exceção de política, algo que a ferramenta não ' +
+    'Fulano"). Isso vale para OUTRAS decisões (desconto, exceção de política, algo que a ferramenta não ' +
     'cobre) — nunca para simplesmente consultar ou marcar um horário que a ferramenta resolve sozinha. NÃO ' +
     'diga "vou confirmar/verificar com [nome de pessoa/equipe]" para justificar não ter chamado a ferramenta: ' +
     'chame primeiro, e só fale de encaminhar a alguém se a ferramenta genuinamente não resolver.'
@@ -906,6 +956,72 @@ const AGENDA_CONSULTA_SYSTEM_BLOCK =
   'OUTRAS decisões (desconto, exceção de política); nunca para simplesmente olhar quais horários ' +
   'existem. Não use "vou confirmar com [nome]" como desculpa para não ter consultado: consulte ' +
   'primeiro, e aí diga a quem passa.';
+
+/**
+ * O PRIMEIRO PASSO da cadeia de agenda, residente (#1019).
+ *
+ * ─── O que faltava, medido ──────────────────────────────────────────────────
+ *
+ * Os dois blocos acima nomeiam `crm_find_free_slots` em toda frase e
+ * `crm_list_event_types` em NENHUMA. A cadeia de dois passos — listar os tipos,
+ * pegar o `slug`, consultar os horários COM esse slug — existia só na
+ * `description` da própria ferramenta, que é onde o modelo a lê por último e
+ * sem o peso de uma instrução. Um agente com as três capacidades ligadas
+ * chamava a lista e parava ali; o relato da issue mede 4 chamadas de lista com
+ * o slug disponível e zero de `crm_find_free_slots` na sequência.
+ *
+ * ─── Por que este bloco é CONDICIONAL, e não texto fixo ─────────────────────
+ *
+ * Nomear `crm_list_event_types` para quem não a tem seria exatamente o erro que
+ * a divisão dos outros dois blocos já evita (`AGENDA_CONSULTA_SYSTEM_BLOCK`:
+ * "dar a ele o bloco inteiro seria pior — ensinaria uma ferramenta que ele não
+ * tem, e o modelo tentaria chamá-la"). Por isso o bloco entra só quando o
+ * agente tem as DUAS pontas: a lista e quem consome o slug.
+ *
+ * Ensino, não garantia: a garantia determinística é o `agendaStallGate`
+ * (`before-send.ts`), que agora reconhece a promessa feita com o nome do
+ * serviço. Os dois juntos é que fecham o caso — um ensina o caminho, o outro
+ * impede que a resposta saia por fora dele.
+ */
+const AGENDA_CADEIA_SYSTEM_BLOCK =
+  '## Agenda — os dois passos, no mesmo turno\n' +
+  'Para falar de um horário REAL você precisa de duas coisas: o TIPO de atendimento (o `slug`) e os ' +
+  'horários daquele tipo. Você tem `crm_list_event_types` para a primeira e `crm_find_free_slots` para ' +
+  'a segunda — e o segundo passo PRECISA do `slug` que o primeiro devolve.\n' +
+  'Se o lead pediu horário e você ainda não tem o `slug` do tipo (ou não sabe a qual tipo ele se ' +
+  'refere), chame `crm_list_event_types` NESTE turno, escolha o tipo pelo que o lead descreveu e chame ' +
+  '`crm_find_free_slots` com esse `slug` NO MESMO TURNO, antes de responder. Parar depois da lista e ' +
+  'responder "vou verificar/organizar" é o defeito: a lista é o começo da conversa com a agenda, não a ' +
+  'resposta. Se o tipo que o lead pediu não estiver na lista, diga isso a ele nomeando o que existe — ' +
+  'não prometa verificar o que você já sabe que não tem.\n' +
+  'Nunca invente um `slug`: ele vem da lista, escrito igualzinho.';
+
+/**
+ * Os blocos de agenda que ESTE agente recebe — a decisão num lugar só, testável.
+ *
+ * A régua é o que o agente TEM: os dois blocos de ensino nomeiam ferramentas, e
+ * nomear uma ferramenta ausente faz o modelo tentar chamá-la.
+ */
+export function blocosDeAgendaResidentes(toolIds: readonly string[]): string[] {
+  const blocos: string[] = [];
+  // A regua de "quem marca" e a da main (#831): `temFerramentaDeMarcacao` conta
+  // tambem `crm_find_and_book_appointment`, e o texto do bloco nomeia so as
+  // ferramentas que ESTE agente tem — usar o texto fixo aqui desfaria a #831 no
+  // caminho do turno.
+  if (temFerramentaDeMarcacao(toolIds)) {
+    blocos.push(agendaSystemBlock(toolIds));
+  } else if (toolIds.includes('crm_find_free_slots')) {
+    // Só consulta: o bloco de cima nomeia uma ferramenta que ele não tem.
+    blocos.push(AGENDA_CONSULTA_SYSTEM_BLOCK);
+  }
+  if (
+    toolIds.includes('crm_list_event_types') &&
+    toolIds.includes('crm_find_free_slots')
+  ) {
+    blocos.push(AGENDA_CADEIA_SYSTEM_BLOCK);
+  }
+  return blocos;
+}
 
 /**
  * Tools de agenda cuja EXECUÇÃO neste turno arma o `agendaStallGate` (before-send.ts) —
@@ -988,10 +1104,11 @@ export function ferramentasDeAgendaDoAgente(toolIds: readonly string[]): string[
  * exatamente onde o texto ensina, ou não, uma ferramenta que o agente não tem.
  */
 export function blocoResidenteDaAgenda(toolIds: readonly string[]): string | null {
-  if (temFerramentaDeMarcacao(toolIds)) return agendaSystemBlock(toolIds);
-  // Só consulta: o bloco de cima nomeia ferramentas de marcar que ele não tem.
-  if (toolIds.includes('crm_find_free_slots')) return AGENDA_CONSULTA_SYSTEM_BLOCK;
-  return null;
+  // Uma lei só: quem decide os blocos residentes da Agenda e
+  // `blocosDeAgendaResidentes` — esta fatia (#1019) acrescentou a CADEIA de dois
+  // passos como segundo bloco. Aqui fica o PRIMEIRO deles (o de marcar ou o de so
+  // consultar), que e o par que o teste da #831 prende.
+  return blocosDeAgendaResidentes(toolIds)[0] ?? null;
 }
 
 export interface InboundTurnKnobs {
@@ -1637,8 +1754,8 @@ export async function runAgentTurn(
       tenantId: job.organization_id,
       leadId: leadIdDoJob,
       conversationId: input.conversationId,
-      resumoDoCheckpoint: () =>
-        resumoDoCheckpointDuravel(pool, job.organization_id, leadIdDoJob, logDaEscolta),
+      briefingDoCheckpoint: () =>
+        briefingDoCheckpointDuravel(pool, job.organization_id, leadIdDoJob, logDaEscolta),
       // O canal nasce DENTRO da closure: instanciá-lo aqui faria todo turno feliz
       // pagar por um adapter que só o caminho de erro usa. Sem `agentActorId` de
       // propósito — quando o teto estoura antes da primeira chamada, não houve
@@ -2030,10 +2147,11 @@ async function executarTurnoDoAgente(
   // Ritual de abertura: playbook por ponteiro + checkpoint + contexto curado.
   // Com agente publicado, o system_prompt DELE é a camada tenant (platform de
   // compliance continua à frente, sempre).
+  const prospectingContext = !preview && input.conversationId ? await prospectingConversationContext(pool, tenantId, input.conversationId) : "";
   const playbook = await loadPlaybook(
     pool,
     tenantId,
-    agentConfig !== null ? { agentLayer: agentConfig.systemPrompt } : undefined,
+    agentConfig !== null ? { agentLayer: agentConfig.systemPrompt + prospectingContext } : undefined,
   );
   // Skills situacionais (F3-09): índice (name+description) SEMPRE residente — vai junto do
   // system do playbook, no prefixo estável org-wide (disclosure progressivo; cacheável F2-17).
@@ -2057,8 +2175,11 @@ async function executarTurnoDoAgente(
   // não depende de nenhuma feature — todo agente publicado o recebe.
   const blocosResidentes = [systemWithMemory, TRANSPARENCIA_SYSTEM_BLOCK];
   if (agentConfig !== null && agentConfig.casesEnabled) blocosResidentes.push(CASES_SYSTEM_BLOCK);
-  const blocoDaAgenda = agentConfig === null ? null : blocoResidenteDaAgenda(agentConfig.toolIds);
-  if (blocoDaAgenda !== null) blocosResidentes.push(blocoDaAgenda);
+  // Spec 15 §5.2 / doutrina da Agenda: a régua é o que o agente TEM — ver
+  // `blocosDeAgendaResidentes`, que decidiu isto num lugar só para poder ser
+  // testada (o bloco da cadeia nomeia `crm_list_event_types`, e nomear
+  // ferramenta ausente faz o modelo tentar chamá-la).
+  if (agentConfig !== null) blocosResidentes.push(...blocosDeAgendaResidentes(agentConfig.toolIds));
   if (preview)
     blocosResidentes.push(
       'MODO PRÉVIA: proponha a resposta com send_message. Operações são propostas separadas; nunca diga que executou uma proposta. Nenhum envio real acontece.',
@@ -2176,12 +2297,21 @@ async function executarTurnoDoAgente(
       ...avisoDaEscalacao().base,
       motivo: 'pediu_humano',
     });
+    // `inboundsPendentes` JÁ está em memória (linha acima): a fala literal do
+    // cliente entra no briefing a custo zero. É a diferença entre quem assume
+    // ler "o cliente pediu uma pessoa" e ler o que ele de fato escreveu.
+    const briefing = montarBriefingDaPassagem({
+      checkpoint: previous,
+      pendentesDoCliente: inboundsPendentes,
+      motivo: { codigo: 'requested_human' },
+    });
     await performHumanHandoff(
       pool,
       { tenantId, leadId, conversationId: input.conversationId },
       {
         reason: 'requested_human',
-        conversationSummary: buildHandoffSummary(previous),
+        conversationSummary: briefing.body,
+        passagem: { origem: 'pedido_explicito', motivoCodigo: 'requested_human', briefing },
         avisoAoLead: aviso,
         log: runLog,
       },
@@ -2209,13 +2339,19 @@ async function executarTurnoDoAgente(
       ...avisoDaEscalacao().base,
       motivo: 'suspeita_de_opt_out',
     });
+    const briefing = montarBriefingDaPassagem({
+      checkpoint: previous,
+      pendentesDoCliente: inboundsPendentes,
+      motivo: { codigo: 'suspected_optout' },
+    });
     await performHumanHandoff(
       pool,
       { tenantId, leadId, conversationId: input.conversationId },
       {
         reason: 'suspected_optout',
-        conversationSummary: buildHandoffSummary(previous),
+        conversationSummary: briefing.body,
         inboxTitle: 'Suspeita de opt-out — confirmar bloqueio do contato no CRM',
+        passagem: { origem: 'opt_out_provavel', motivoCodigo: 'suspected_optout', briefing },
         avisoAoLead: aviso,
         log: runLog,
       },
@@ -2399,8 +2535,8 @@ async function executarTurnoDoAgente(
   // dele (se o tenant tiver criado essa etapa — opt-in, ver `lib/leads/handoff-stage-move.ts`)
   // sempre que um caso humano abre neste turno, deliberado (open_human_case) ou pelo
   // fail-safe do `case_promise`. Sem isto, o funil no CRM não refletia o handoff que o
-  // PRÓPRIO PROMPT do tenant promete ao lead ("vou verificar/encaminhar com o Fernando")
-  // — medido em produção, tenant YADEA: caso aberto, funil parado em "Novo contato".
+  // PRÓPRIO PROMPT do tenant promete ao lead ("vou verificar/encaminhar com o Fulano")
+  // — medido num tenant de produção: caso aberto, funil parado em "Novo contato".
   // Nunca bloqueia nem derruba o turno — mesma disciplina de `triggerHandoff` (G1-G4),
   // que já chama o mesmo helper para o handoff por palavra-chave do cliente.
   const moverParaHandoffBestEffort = (reason: string): void => {
@@ -2786,7 +2922,7 @@ async function executarTurnoDoAgente(
             hasOpenCase,
             openedCaseThisTurn,
             // Nome(s) próprio(s) que o prompt do tenant usa pra retaguarda humana (ex.:
-            // "Fernando") — o mesmo vocabulário que `matchesHandoffKeyword` já usa do lado
+            // "Fulano") — o mesmo vocabulário que `matchesHandoffKeyword` já usa do lado
             // do CLIENTE, agora somado ao alvo genérico do `casePromiseGate` do lado do
             // que o MODELO promete. Ver `GateContext.humanPromiseExtraTargets`.
             humanPromiseExtraTargets: agentConfig?.handoffKeywords ?? [],
@@ -3227,10 +3363,19 @@ async function executarTurnoDoAgente(
                   motivo: 'pediu_humano',
                 })
               : ({ avisado: true } as const);
+          // O contexto do TURNO vai junto, e sai da closure: `previous` é o
+          // checkpoint durável e `inboundsPendentes` é o que o cliente disse e
+          // ainda não foi respondido — os dois já estão em memória, então o
+          // briefing enriquecido não custa uma consulta a mais.
           const res = await applyRequestHumanHandoff(
             pool,
             { tenantId, leadId, conversationId: input.conversationId },
-            { conversationSummary: buildHandoffSummary(previous), avisoAoLead: aviso, log: runLog },
+            {
+              conversationSummary: buildHandoffSummary(previous),
+              contextoDoTurno: { checkpoint: previous, pendentesDoCliente: inboundsPendentes },
+              avisoAoLead: aviso,
+              log: runLog,
+            },
             raw,
           );
           if (!res.ok) return res; // erro de ensino (payload fora da whitelist)
@@ -4120,7 +4265,7 @@ async function executarTurnoDoAgente(
       });
       // O reagendamento acima trata toda mensagem represada igual — um lead relatando
       // risco de segurança (freio, fumaça, bateria esquentando) esperaria a mesma janela
-      // que um "bom dia" qualquer, às vezes horas (medido em produção, tenant YADEA:
+      // que um "bom dia" qualquer, às vezes horas (medido num tenant de produção:
       // 20h+ represado num relato de bateria superaquecendo). Sem furar o cap de
       // warm-up/diário em si (proteção anti-banimento — mexer nisso é decisão de
       // produto, não deste guardrail), abre um alerta CRÍTICO na Central agora, pra um

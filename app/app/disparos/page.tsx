@@ -1,11 +1,12 @@
 /**
- * Automações → Disparos. A lista de envios em massa.
+ * Canais → Disparos. A lista de envios em massa.
  *
- * ── Por que aqui, e não em Canais ───────────────────────────────────────────
+ * ── Onde mora no menu ───────────────────────────────────────────────────────
  *
- * "Canais" responde por ONDE a mensagem entra e sai. Disparo é trabalho que
- * acontece sem ninguém clicando — irmão do Fluxo, não do número de WhatsApp.
- * Os dois moram no grupo Automações (ver `lib/navigation/catalogo.ts`).
+ * Disparo é trabalho que acontece sem ninguém clicando — irmão do Fluxo. Os dois
+ * ficam no grupo Canais, logo depois de Webhooks (ver
+ * `lib/navigation/catalogo.ts`): um grupo próprio custaria uma linha de título
+ * que a dobra de 1280×900 do menu não tem.
  *
  * ── Por que a lista mostra o ANDAMENTO, e não só o nome ─────────────────────
  *

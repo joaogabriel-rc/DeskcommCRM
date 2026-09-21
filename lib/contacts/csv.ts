@@ -1,5 +1,6 @@
 import { perfilDoPais, type DocumentoDoTitular } from "@/lib/legal/perfil-do-pais";
 import { normalizePhoneBR } from "@/lib/webhooks/inbound";
+import { normalizarTags } from "@/lib/contacts/tag-normalizada";
 /**
  * Parser de CSV para importação de contatos — RFC 4180, zero dependências.
  *
@@ -439,11 +440,9 @@ export function mapLinha(
 
   const tagsRaw = get("tags");
   if (tagsRaw !== "") {
-    const tags = tagsRaw
-      .split(/[;|]/)
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .slice(0, 20);
+    // Caixa baixa e sem repetição pela MESMA regra da ficha e da API, para o
+    // filtro casar; o teto de 20 marcadores segue aqui (issue #1224).
+    const tags = normalizarTags(tagsRaw.split(/[;|]/)).slice(0, 20);
     if (tags.length > 0) contato.tags = tags;
   }
 

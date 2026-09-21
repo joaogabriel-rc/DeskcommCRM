@@ -9,6 +9,7 @@
  */
 import { z } from "zod";
 
+import { normalizarTag, normalizarTags } from "@/lib/contacts/tag-normalizada";
 import { isValidCpf, type PerfilDoPais } from "@/lib/legal/perfil-do-pais";
 
 const PHONE_REGEX = /^\+\d{8,15}$/;
@@ -49,7 +50,9 @@ export const contactCreateSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
-  tags: z.array(z.string()).optional(),
+  // O marcador nasce em caixa baixa, pela MESMA regra da tag de conversa: o
+  // "VIP" gravado verbatim não casava com o filtro `?tag=vip` (issue #1224).
+  tags: z.array(z.string()).transform(normalizarTags).optional(),
   source: z.string().min(1).default("manual"),
   source_metadata: z.record(z.string(), z.unknown()).optional(),
   consent: z.record(z.string(), z.unknown()).optional(),
@@ -106,7 +109,9 @@ export const CONTACT_ORDER_BY = [
 
 export const contactListQuerySchema = z.object({
   search: z.string().optional(),
-  tag: z.string().optional(),
+  // O filtro normaliza pelo MESMO caminho da escrita: `?tag=VIP` acha o que a
+  // ficha gravou como "vip" (issue #1224).
+  tag: z.string().transform(normalizarTag).optional(),
   source: z.string().optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),

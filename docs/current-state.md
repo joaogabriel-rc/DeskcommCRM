@@ -169,6 +169,18 @@ protection em 2026-08-13 e saiu desta lista em 2026-08-14.)*
 
 ### 4.1 Os E2E quase não rodam no CI 🟠 — parcialmente resolvido em 2026-07-30
 
+> **Atualização (2026-09-19, PR #983):** a `vps-fresh-onboarding` saiu da `FORA_DO_CI` e passou
+> a rodar no CI, na `SPECS_PARTE_4` do `e2e.yml`, sozinha numa parte. Tudo abaixo que a dá como
+> fora, ou que conclui que "`e2e` verde não prova a instalação fresca", é registro de antes
+> dessa data. Uma ressalva continua valendo: PR que não alcança o `e2e` (regra em
+> `scripts/pr-alcanca-o-e2e.sh`) pula as partes, e ali o verde não prova tela nenhuma. O que
+> fica fora hoje não se lê deste documento — meça:
+>
+> ```bash
+> git show origin/main:.github/workflows/e2e.yml | \
+>   python3 -c "import sys,re; y=sys.stdin.read(); print(sorted({s for _,c in re.findall(r'(FORA_DO_CI):\s*>-\n((?:[ ]{8,}.*\n)+)',y) for s in re.findall(r'[a-z0-9-]+\.spec\.ts',c)}))"
+> ```
+>
 > **Atualização (2026-08-14 @ `741c4ec8`):** `e2e.yml` roda **45 das 46 specs**, e o `e2e` **é
 > check obrigatório** na branch protection desde 2026-08-08 (junto com `verify`,
 > `build-and-size`, `invariants` e `imagens-ok` — **cinco**). A única spec fora é
@@ -192,7 +204,8 @@ O que continua fora (2026-08-14): **1 das 46 specs Playwright**. A
 rodar** no `e2e.yml`. Mas a `vps-fresh-onboarding.spec.ts` — a jornada que a doutrina de QA
 Visual classifica como o caminho mais crítico do produto — continua fora, porque exige WAHA +
 Redis + Resend + Nuvemshop no runner. Regressão nela passa sem detecção (issue #63), e é por
-isso que **`e2e` verde não prova a instalação fresca**.
+isso que **`e2e` verde não prova a instalação fresca**. *(Superado em 2026-09-19 pelo PR #983 —
+ver a atualização no topo desta seção.)*
 
 O `e2e` **é** check obrigatório desde 2026-08-08; um PR que o quebre não entra na `main`.
 

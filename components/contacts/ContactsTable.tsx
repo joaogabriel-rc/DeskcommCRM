@@ -20,6 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ChipDeEtiqueta } from "@/components/tags/ChipDeEtiqueta";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -211,7 +212,7 @@ export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
                 {c.tags.length === 0
                   ? <span className="text-muted-foreground text-xs">—</span>
                   : c.tags.map((tag) => (
-                      <Badge key={tag} variant="neutral">{tag}</Badge>
+                      <ChipDeEtiqueta key={tag} tag={tag} />
                     ))}
               </div>
             </TableCell>

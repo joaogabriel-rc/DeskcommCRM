@@ -58,8 +58,26 @@ import { pathToFileURL } from "node:url";
 
 import type * as PdfjsDist from "pdfjs-dist";
 
+/**
+ * Por que a extração falhou, para quem precisa decidir sem ler a frase.
+ *
+ * - `sem_texto`: o PDF abriu inteiro e não tem letra selecionável (escaneado).
+ *   É conteúdo, não defeito — quem chama não deve alarmar ninguém.
+ * - `falha`: a engine não conseguiu ler (pacote ausente no build, binário
+ *   nativo faltando, arquivo corrompido).
+ *
+ * `ingest/documento.ts` comparava `err.message` com a frase inglesa lançada
+ * aqui; traduzir a frase faria todo PDF escaneado ser logado como falha de
+ * infraestrutura. A frase é para gente e pode mudar; o motivo não.
+ */
+export type MotivoDaFalhaDePdf = "sem_texto" | "falha";
+
 export class PdfExtractError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+    public readonly motivo: MotivoDaFalhaDePdf = "falha",
+  ) {
     super(message);
     this.name = "PdfExtractError";
   }
@@ -145,7 +163,7 @@ async function extrairEmProcesso(buffer: Buffer): Promise<string> {
 
     const combined = pageTexts.join("\n\n").trim();
     if (combined.length === 0) {
-      throw new PdfExtractError("pdfjs-dist extracted no text (possibly image-only PDF)");
+      throw new PdfExtractError("pdfjs-dist extracted no text (possibly image-only PDF)", undefined, "sem_texto");
     }
     return combined;
   } catch (err) {

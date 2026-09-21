@@ -145,21 +145,18 @@ describe("contatos da Agenda pelo nome exibido", () => {
         <VinculoDaMarcacao contactId="" conversationId="" onChange={onChange} />
       </QueryClientProvider>,
     );
-    // Espera maior que o padrão de 1 s: com a máquina carregada a primeira
-    // renderização da consulta passava do limite e o caso falhava sem defeito.
     const espera = { timeout: 5000 };
-    expect(await screen.findByRole("option", { name: "Cíntia Nunes" }, espera)).toHaveValue(ID);
-    fireEvent.change(screen.getByLabelText("Buscar cliente"), { target: { value: "Cíntia" } });
+    const campo = screen.getByLabelText("Quem será atendido");
+    expect(campo).toHaveAttribute("data-contact-id", "");
+    fireEvent.focus(campo);
+    fireEvent.change(campo, { target: { value: "Cíntia" } });
+    expect(await screen.findByRole("option", { name: "Cíntia Nunes" }, espera)).toBeInTheDocument();
     await waitFor(
       () => expect(deps.from.mock.results.some((r) => r.value.or.mock.calls.length > 0)).toBe(true),
       espera,
     );
-    await waitFor(
-      () => expect(screen.queryByRole("button", { name: /Criar/ })).not.toBeInTheDocument(),
-      espera,
-    );
-    expect(screen.getByRole("option", { name: "Cíntia Nunes" })).toHaveValue(ID);
-    fireEvent.change(screen.getByLabelText("Quem será atendido"), { target: { value: ID } });
+    expect(screen.queryByRole("button", { name: /Criar/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "Cíntia Nunes" }));
     expect(onChange).toHaveBeenLastCalledWith(ID, "");
     qc.clear();
   });

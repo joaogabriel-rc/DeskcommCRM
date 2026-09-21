@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useT } from "@/hooks/i18n/useT";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PontoDaEtiqueta } from "@/components/tags/PontoDaEtiqueta";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -269,6 +270,7 @@ export function BulkActionBar({
               .slice(0, 10)
               .map((tag) => (
                 <DropdownMenuItem key={tag} onClick={() => runTagAdd(tag)}>
+                  <PontoDaEtiqueta tag={tag} className="mr-2" />
                   {tag}
                 </DropdownMenuItem>
               ))}

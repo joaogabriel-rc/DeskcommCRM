@@ -59,6 +59,13 @@ export const CHAVES_DE_UTM = [
   "utm_campaign",
   "utm_term",
   "utm_content",
+  // Os três níveis abaixo da campanha. Quem opera tráfego lê "de onde veio" em
+  // quatro níveis (campanha, conjunto, anúncio, posicionamento), e até aqui só o
+  // primeiro atravessava — os outros três caíam na mesma peneira que um valor
+  // colado à toa. Na Meta eles saem das macros dinâmicas de URL do anúncio.
+  "utm_adset",
+  "utm_ad",
+  "utm_placement",
   "gclid",
   "fbclid",
 ] as const;
@@ -74,10 +81,14 @@ const TAMANHO_MAXIMO_DO_VALOR = 200;
  * podia montar um link que a ingestão descartava em silêncio — um defeito que
  * não dói em teste nem em log, dói na atribuição de quem confiou no link.
  *
- * O número: o pior caso plausível são as sete chaves de campanha no teto de
- * valor (200 caracteres cada), que dão 2007 caracteres de base64url em ASCII e
+ * O número: o pior caso plausível são as dez chaves de campanha no teto de
+ * valor (200 caracteres cada), que dão 2868 caracteres de base64url em ASCII e
  * cabem aqui dentro. O que passar do teto é RECUSADO, nunca truncado — cortar a
  * UTM no meio gravaria uma campanha que ninguém montou.
+ *
+ * O teto NÃO subiu quando `utm_adset`, `utm_ad` e `utm_placement` entraram: as
+ * três chaves novas custam 861 caracteres, e a folga de 3000 já as cobria. Subir
+ * o número junto teria escondido que a folga existia.
  */
 export const TAMANHO_MAXIMO_DO_CODIGO = 3000;
 
@@ -178,10 +189,12 @@ export function extrairOrigemDaPagina(texto: string | null | undefined): OrigemD
  */
 export async function estamparOrigemDaPagina(
   admin: Admin,
+  organizationId: string,
   contactId: string,
   origem: OrigemDaPagina,
 ): Promise<boolean> {
   const { error } = await admin.rpc("fn_estampar_atribuicao_de_anuncio", {
+    p_org: organizationId,
     p_contact: contactId,
     p_platform: "site",
     p_metadata: {
@@ -222,15 +235,31 @@ export async function estamparOrigemDaPagina(
  * Na dúvida não se grava origem. O custo de uma origem faltando é um relatório
  * mais pobre; o de uma origem inventada é um número errado que ninguém vai
  * auditar depois — e este módulo trata o texto do cliente como não confiável.
+ *
+ * ─── O filtro de organização NÃO é dispensável aqui ─────────────────────────
+ *
+ * A consulta roda no client de ADMIN (service role), que passa por cima da RLS:
+ * sem filtro explícito ela lê as mensagens de TODAS as organizações. O
+ * `contact_id` de hoje é uuid e não colide entre tenants — e isso não é motivo
+ * para dispensar o filtro. A alternativa é reavaliar, a cada leitura deste
+ * arquivo, se a premissa de unicidade ainda vale; o filtro custa um `eq` e
+ * torna a resposta sobre "este contato" uma resposta sobre "este contato desta
+ * organização", que é a única pergunta que o domínio sabe fazer.
+ *
+ * A organização vem por PARÂMETRO, tirada do segredo do webhook que abriu a
+ * conversa (`entrada.organizationId`), nunca do corpo da requisição — quem
+ * escreve a mensagem escolhe o texto, não o tenant.
  */
 export async function ehAPrimeiraMensagemDoContato(
   admin: Admin,
+  organizationId: string,
   contactId: string,
   messageId: string | null,
 ): Promise<boolean> {
   const { data, count, error } = await admin
     .from("messages")
     .select("id", { count: "exact" })
+    .eq("organization_id", organizationId)
     .eq("contact_id", contactId)
     .eq("direction", "inbound")
     .order("sent_at", { ascending: true })

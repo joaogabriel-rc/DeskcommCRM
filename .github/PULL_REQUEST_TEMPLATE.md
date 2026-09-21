@@ -40,6 +40,7 @@
 
 <!-- Contribuindo de fora? Marque o que conseguiu; o resto é nosso. Nada aqui trava PR externo. -->
 
+- [ ] `pnpm cercas` zerado (~30 s — as guardas estruturais que mais reprovam PR)
 - [ ] `pnpm typecheck` zerado
 - [ ] `pnpm lint` zerado
 - [ ] Testes relevantes existem e passam (`pnpm test:unit`)

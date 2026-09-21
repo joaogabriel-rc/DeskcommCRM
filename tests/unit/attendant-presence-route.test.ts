@@ -31,10 +31,12 @@ import { fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { ROLE_RANK, type AuthUser, type Role } from "@/lib/auth/types";
 import { requireSupportWrite } from "@/lib/impersonate/support";
+import { audit } from "@/lib/audit";
 
 vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
 vi.mock("@/lib/impersonate/support", () => ({ requireSupportWrite: vi.fn(async () => null) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
+vi.mock("@/lib/audit", () => ({ audit: vi.fn(async () => {}) }));
 
 const ORG = "22222222-2222-4222-8222-222222222222";
 const ANA = "11111111-1111-4111-8111-111111111111";
@@ -51,10 +53,23 @@ interface Escrita {
  * Dublê do supabase user-scoped: registra o payload do upsert e devolve a linha
  * como o PostgREST devolveria.
  */
-function fazerSupabase() {
+function fazerSupabase(linhaJaExiste = false) {
   const escritas: Escrita[] = [];
   const client = {
     from: (tabela: string) => ({
+      // A rota lê antes de gravar para saber se esta é a PRIMEIRA batida — a que
+      // insere a linha e acorda o roteamento. O dublê devolve o que o banco
+      // devolveria nos dois estados: linha ausente (primeira) ou presente.
+      select: () => {
+        const q = {
+          eq: () => q,
+          maybeSingle: async () => ({
+            data: linhaJaExiste ? { user_id: ANA } : null,
+            error: null,
+          }),
+        };
+        return q;
+      },
       upsert: (payload: Record<string, unknown>, opts?: { onConflict?: string }) => {
         escritas.push({ tabela, payload, onConflict: opts?.onConflict });
         return {
@@ -74,9 +89,9 @@ function fazerSupabase() {
   return { escritas, client };
 }
 
-async function comSupabase() {
+async function comSupabase(linhaJaExiste = false) {
   const { createClient } = await import("@/lib/supabase/server");
-  const dublê = fazerSupabase();
+  const dublê = fazerSupabase(linhaJaExiste);
   vi.mocked(createClient).mockResolvedValue(
     dublê.client as unknown as Awaited<ReturnType<typeof createClient>>,
   );
@@ -180,6 +195,45 @@ describe("POST /api/v1/attendants/presence — o emissor do sinal", () => {
     expect(body.data.present).toBe(true);
     const expira = new Date(String(body.data.presence_expires_at)).getTime();
     expect(expira - Date.now()).toBeGreaterThan(0);
+  });
+
+  // ─── Auditoria: a régua é "auditar quando houve efeito" ───────────────────
+  //
+  // Não é exceção nova. O CLAUDE.md já escreve, na seção Audit log, que a
+  // rodada de cron que não fez nada não audita e a que fez, audita. Aqui o
+  // efeito que outra pessoa sente é o INSERT da primeira batida, porque é ele
+  // que dispara `trg_routing_availability_changed` e acorda o roteamento.
+  //
+  // Os dois casos abaixo são as duas direções: sem os dois, "não auditar" e
+  // "auditar sempre" ficariam indistinguíveis.
+  it("a PRIMEIRA batida audita uma linha — é ela que insere e acorda o roteamento", async () => {
+    sessao("agent");
+    await comSupabase(false);
+
+    const res = await chamar();
+    expect(res.status).toBe(200);
+
+    expect(vi.mocked(audit)).toHaveBeenCalledTimes(1);
+    // `mock.calls[0]` é opcional para o TypeScript (noUncheckedIndexedAccess), e
+    // desestruturar direto não compila. O `?? []` mantém o teste legível sem
+    // asserção de não-nulo.
+    const [entrada] = vi.mocked(audit).mock.calls[0] ?? [];
+    expect(entrada, "audit foi chamado, mas sem entrada").toBeDefined();
+    if (!entrada) return;
+    expect(entrada.action).toBe("attendant.presence_started");
+    expect(entrada.organizationId).toBe(ORG);
+    expect(entrada.actorUserId).toBe(ANA);
+    expect(entrada.resourceType).toBe("attendant_availability");
+  });
+
+  it("a batida seguinte NÃO audita: renovar o carimbo não é efeito que alguém sinta", async () => {
+    sessao("agent");
+    await comSupabase(true);
+
+    const res = await chamar();
+    expect(res.status).toBe(200);
+
+    expect(vi.mocked(audit)).not.toHaveBeenCalled();
   });
 
   it("viewer não emite sinal (a rota exige agent+)", async () => {

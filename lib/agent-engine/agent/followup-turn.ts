@@ -40,6 +40,10 @@ import {
 } from './inbound-turn';
 import { isLeadInHandoff } from './human-handoff';
 import { fusoDaOrganizacao } from './fuso-da-org';
+import {
+  followupPublicadoDoEnrollment,
+  proximaAberturaDoFollowup,
+} from './janela-de-followup';
 import type { LeadStateRow } from './lead-state';
 import { loadReentryTemplate, pickReentryVariant } from './reentry-template';
 import {
@@ -261,6 +265,67 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
     const target: ReentrySendTarget = { tenantId, leadId, conversationId: boundary!.conversation_id, channelSessionId: targetRows[0]!.channel_session_id };
 
     const clock = deps.clock ?? ((): Date => new Date());
+
+    // #490 — a janela PRÓPRIA vale só para envio proativo dirigido por fluxo.
+    // `classify` e `plan_timing` não falam com o cliente e podem rodar a qualquer
+    // hora. Retornos prometidos via `schedule_followup` continuam fora deste
+    // recorte: eles não têm enrollment/agent pinado, e a issue deixou essa regra
+    // explicitamente em aberto para uma decisão separada.
+    if (payload.followup_enrollment_id !== undefined && payload.purpose === 'send_message') {
+      const followup = await followupPublicadoDoEnrollment(
+        pool,
+        tenantId,
+        payload.followup_enrollment_id,
+      );
+      const sendWindow =
+        typeof followup === 'object' && followup !== null
+          ? (followup as { send_window?: unknown }).send_window
+          : null;
+      if (sendWindow !== null && sendWindow !== undefined) {
+        const runLog = withFields(deps.log, {
+          job_id: job.id,
+          tenant_id: tenantId,
+          lead_id: leadId,
+          enrollment_id: payload.followup_enrollment_id,
+        });
+        const agora = clock();
+        const fuso = await fusoDaOrganizacao(pool, tenantId, runLog);
+        const proximaAbertura = proximaAberturaDoFollowup(followup, fuso, agora);
+        if (proximaAbertura !== null) {
+          const complete = deps.completeFollowupTurn;
+          if (!complete || payload.node_id === undefined) {
+            throw new Error(
+              'follow-up adiado pela janela própria sem completeFollowupTurn/node_id — o enrollment não saberia do adiamento',
+            );
+          }
+          await rescheduleReentry(pool, {
+            tenantId,
+            leadId,
+            jobId: job.id,
+            at: proximaAbertura,
+            payload: job.payload,
+          });
+          runLog.info('follow-up adiado pela janela própria do agente', {
+            next_run_at: proximaAbertura.toISOString(),
+            timezone: fuso,
+          });
+          // O adiamento VOLTA para o enrollment, como o da janela anti-ban em
+          // `runFlowDrivenTurn`. Sem isto o motor lê a espera como worker morto:
+          // o dead-man da ação esgota ~11h e marca `dead` um enrollment cujo
+          // envio ia sair na abertura — e o padrão desta faixa (sexta 18h →
+          // segunda 9h) já espera 63h.
+          await complete(pool, {
+            jobId: job.id,
+            jobClaim: claimOfJob(job),
+            organizationId: tenantId,
+            enrollmentId: payload.followup_enrollment_id,
+            nodeId: payload.node_id,
+            result: { kind: 'deferred', until: proximaAbertura, reason: 'followup_send_window' },
+          });
+          return;
+        }
+      }
+    }
 
     // Onda 5 (Task 5.1): turno DIRIGIDO POR FLUXO — guard exclusivo, nunca cai nos
     // caminhos legados abaixo (F3-03/F3-04 seguem intocados quando o campo falta).

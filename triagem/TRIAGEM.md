@@ -93,12 +93,22 @@ Nesta ordem:
    `conclusion`, e o comando é este, sempre, antes de qualquer outra coisa:
 
    ```bash
-   BR=$(gh pr view <n> --json headRefName --jq .headRefName)
-   for id in $(gh api repos/{owner}/{repo}/actions/runs \
-                 --jq "[.workflow_runs[] | select(.head_branch==\"$BR\" and .conclusion==\"action_required\")] | .[].id"); do
+   SHA=$(gh pr view <n> --json headRefOid --jq .headRefOid)
+   for id in $(gh api "repos/{owner}/{repo}/actions/runs?head_sha=$SHA" \
+                 --jq '[.workflow_runs[] | select(.conclusion=="action_required")] | .[].id'); do
      gh api -X POST "repos/{owner}/{repo}/actions/runs/$id/approve"
    done
    ```
+
+   **A chave é o `head_sha`, nunca o nome da branch** — é o achado 17 deste arquivo, aplicado
+   aqui. `head_branch` é um nome que o contribuidor escolhe, e um fork que abriu o PR a partir
+   da `main` dele faz o filtro casar com a `main` do upstream; com dois forks assim ao mesmo
+   tempo, o laço aprova o run do PR errado, que é executar código de terceiro sem revisão.
+   A troca conserta um segundo defeito de brinde: `actions/runs` sem `?head_sha=` devolve as
+   **30 mais recentes** e filtra no cliente, e a densidade deste repo passa de 400 runs/dia —
+   ou seja, as 30 cobrem minutos, e o exemplo do próprio parágrafo abaixo é um PR de **6 dias**.
+   Filtrando no servidor por `head_sha`, o conjunto já nasce pequeno e a paginação deixa de
+   existir como problema.
 
    Medido: o PR #176 ficou **6 dias** aberto e, quando a triagem chegou, os 4 workflows estavam em
    `action_required` desde o primeiro push. A latência de 5h08min que este arquivo cita não é
@@ -438,7 +448,8 @@ junto com o disco do 12-bis: são os dois instrumentos da triagem que falham em 
 ## 3-quinquies. Fila grande — a integração em lote, e o gate que ela esconde
 
 **Gatilho: mais de ~10 PRs abertos.** Abaixo disso, trie e mergeie um a um. Acima, um a um é a
-decisão errada, e a razão se mede antes de começar:
+decisão errada **para a faixa completa**, e a razão se mede antes de começar (a faixa leve tem regra
+própria logo abaixo):
 
 ```bash
 git fetch origin --force $(for n in $(gh pr list --state open --limit 100 --json number \
@@ -511,6 +522,97 @@ isso funcionar, e cada uma já falhou quando ausente:
    mede-se e comenta-se (a revisão de segurança vale como comentário antecipado), mas integrá-lo
    tira dele o rebase que ele mesmo anunciou.
 
+### A faixa leve não espera o lote — merge automático no próprio PR
+
+**Decisão do dono, 18/09/2026.** PR da faixa leve (pequeno, checks obrigatórios verdes, teste que
+cobre o comportamento alterado, nada em schema, permissões, segurança, dinheiro, instalação ou
+efeito externo) **não entra em lote**. Aprovado na leitura, ele recebe o merge automático e entra
+sozinho quando os checks ficarem verdes:
+
+```bash
+gh pr merge <n> --auto --merge      # merge de verdade, nunca squash — mesma razão do item 1 acima
+```
+
+**Por quê, medido (15–18/09/2026, 249 PRs mergeados):** o PR esperava o merge **depois** de verde
+3,7 h na mediana e 28,7 h no p90 — mais do que todo o ciclo de CI (0,7 h na mediana). A espera era
+pelo lote, não pelo CI. O lote continua sendo a ferramenta certa onde ele protege algo: arquivo
+de apêndice (`baseline.sql`, `MANIFEST.md`), migration e interação entre PRs da faixa completa. A
+fila de merge (merge queue) do GitHub, que faria isso por nós, **não está disponível** neste
+repositório (conta pessoal; a regra é recusada com 422).
+
+Quatro cuidados, cada um com a sonda:
+
+1. **Dependência entre PRs.** Se o PR depende de outro ainda aberto, ele vai com o lote. Confira
+   antes de ligar: o corpo do PR e `git diff --name-only origin/main...refs/tri/<n>` contra os
+   arquivos dos outros candidatos.
+2. **O teto do CHANGELOG** (seção abaixo). Os fragmentos do merge automático ficam na `main`
+   esperando o próximo corte. Antes de montar um lote, conte `ls .changes/*.md | wc -l`: se a
+   faixa leve já encheu o teto, **corte a versão antes do lote**.
+3. **A rede é o CI da `main`**, que roda depois de cada merge. `main` vermelha por causa de um
+   merge automático é a primeira coisa que a rodada conserta, antes de qualquer lote.
+4. **Janela de corte de versão.** Enquanto um corte está anunciado e ainda não saiu, PR cujo
+   fragmento declara `impacto: capacidade_nova` ou `exige_acao` **não recebe `--auto`**, e o que já
+   tinha recebido é desligado até o corte (`gh pr merge <n> --disable-auto`). O merge automático não
+   olha o calendário: entrando no meio da janela, ele converte o patch anunciado numa minor — foi o
+   ponto levantado em 18/09, com a 1.35.1 esperando o #1196. PR `nada_mudou` segue normal.
+
+   **Ausência de fragmento não é `nada_mudou`.** PR que toca `app/`, `lib/`, `components/`,
+   `workers/`, `hooks/` ou `supabase/` e não traz fragmento com `impacto:` é **NÃO CLASSIFICADO**:
+   não recebe `--auto` na janela de corte até alguém escrever o fragmento — o triador escreve,
+   creditando o autor (§12). A sonda anterior
+   (`git diff --name-only origin/main...refs/tri/<n> -- .changes/ | xargs -r grep -h '^impacto:'`)
+   devolvia **vazio** nesse caso, e o vazio foi lido como "não é `capacidade_nova`": o #1211
+   (`utm_adset`/`utm_ad`/`utm_placement`, capacidade nova) entrou assim, sem nota, no meio da janela
+   da 1.35.1. Ela tinha um segundo ponto cego: o `grep` lia o fragmento na árvore de quem roda a
+   sonda, onde o arquivo do PR não existe. A sonda que distingue os três desfechos:
+
+   Um segundo sinal, barato e complementar ao diff (ideia da sessão Maestro PRs): PR cujo **título**
+   começa com `feat` ou traz "capacidade" e não tem fragmento é NÃO CLASSIFICADO mesmo que o diff pareça
+   pequeno ou fique fora das pastas do produto. Título que não se consegue ler conta como NÃO
+   CLASSIFICADO — a sonda falha fechada. A sonda que distingue os desfechos:
+
+   ```bash
+   sonda_da_janela() {  # uso: sonda_da_janela origin/main refs/tri/<n> <n>
+     local base=$1 head=$2 n=${3:-} arquivos fragmentos toca impactos titulo motivos=""
+     arquivos=$(git diff --name-only "$base...$head")
+     toca=$(printf '%s\n' "$arquivos" | grep -cE '^(app|lib|components|workers|hooks|supabase)/')
+     fragmentos=$(git diff --name-only --diff-filter=AM "$base...$head" -- '.changes/*.md')
+     # O fragmento é lido do PR (git show), nunca da árvore de quem roda a sonda.
+     impactos=$(printf '%s\n' "$fragmentos" | while read -r f; do
+       [ -n "$f" ] && git show "$head:$f" | grep -h '^impacto:'; done)
+     if [ -n "$impactos" ]; then
+       printf '%s\n' "$impactos" | sort -u
+       return
+     fi
+     [ "$toca" -gt 0 ] && motivos="toca $toca arquivo(s) do produto"
+     if [ -n "$n" ]; then
+       if titulo=$(gh pr view "$n" --json title --jq .title 2>/dev/null) && [ -n "$titulo" ]; then
+         printf '%s' "$titulo" | grep -qiE '^feat|capacidade' &&
+           motivos="${motivos:+$motivos; }o título diz \"$titulo\""
+       else
+         motivos="${motivos:+$motivos; }título do #$n não lido"
+       fi
+     fi
+     if [ -n "$motivos" ]; then
+       echo "NÃO CLASSIFICADO: $motivos — e não traz fragmento com impacto"
+     else
+       echo "sem fragmento; não toca o produto; título sem sinal de capacidade"
+     fi
+   }
+   ```
+
+   Controle positivo, medido em 18/09 — a sonda tem de acusar o #1211 antes de ser usada:
+
+   ```console
+   $ sonda_da_janela 976707c3a 1594de0d6 1211      # o #1211, sem fragmento
+   NÃO CLASSIFICADO: toca 3 arquivo(s) do produto; o título diz "feat(atribuicao): conjunto, anúncio e posicionamento atravessam o link do site" — e não traz fragmento com impacto
+   $ sonda_da_janela origin/main refs/tri/1202 1202  # fragmento nada_mudou
+   impacto: nada_mudou
+   ```
+
+   Só `impacto: nada_mudou` libera o `--auto` na janela. `capacidade_nova`, `exige_acao` e
+   **NÃO CLASSIFICADO** esperam o corte.
+
 ### ⚠️ O gate que o lote esconde: `build`
 
 `typecheck`, `lint`, `lint:channels`, `test:unit`, `test:shell` e `test:db` **não constroem o
@@ -527,10 +629,17 @@ Nada disso é alcançável por teste: o defeito mora no **emit**, não no import
 
 ### O teto do CHANGELOG impõe o ritmo do trem: um lote, uma release
 
-`tests/unit/changelog-cabe-na-tela-da-vps.test.ts` reprova quando a seção que os fragmentos de
-`.changes/` produziriam passa de **30.000 bytes** — o corte que o `agent.sh` aplica sobre o arquivo
-tagueado. Além dele, o dono da VPS recebe o texto cortado no meio, ou pior: a tela troca o histórico
-por *"este histórico pode não alcançar a sua versão"*.
+A seção que os fragmentos de `.changes/` produziriam tem um teto em bytes — o corte que o
+`agent.sh` aplica sobre o arquivo tagueado. Além dele, o dono da VPS recebe o texto cortado no
+meio, ou pior: a tela troca o histórico por *"este histórico pode não alcançar a sua versão"*.
+
+**Quem mede isso é `pnpm release:acervo-cabe`, e ele NÃO roda em `pull_request`.** Até 20/09/2026 a
+medição vivia dentro de `tests/unit/changelog-cabe-na-tela-da-vps.test.ts`, portanto no `verify` —
+status check obrigatório — e reprovava o PR de quem não podia consertá-lo: com 43 fragmentos
+acumulados, os PRs #1377 e #1363 ficaram vermelhos sem tocar `.changes/`, e a mensagem mandava o
+contribuidor enxugar fragmento de terceiro. Hoje o `ci.yml` cobra o acervo fora de `pull_request`,
+onde quem vê o vermelho é quem pode pagá-lo cortando release — e o comando **avisa antes de
+estourar**, quando outro ciclo do tamanho do atual já não caberia.
 
 Num trem de lotes isso vira uma **regra de ordem**, não um defeito a consertar. Medido em 14/09:
 
@@ -544,16 +653,24 @@ O vermelho do lote 3 não é do lote 3: é dele **carregando os fragmentos do lo
 entra e a release é cortada, os 31 são consumidos e o seguinte volta a caber.
 
 > **Logo: cada lote corta a sua versão antes de o próximo entrar.** Não é preferência de processo —
-> é o que o teto do changelog permite. Empilhar quatro lotes e cortar uma release só reprova, e a
-> mensagem do teste ("enxugue o corpo dos fragmentos") aponta para o conserto errado nesse caso: o
-> problema não é fragmento gordo, é lote empilhado.
+> é o que o teto do changelog permite. Empilhar quatro lotes e cortar uma release só estoura o teto,
+> e o problema nunca é fragmento gordo: é lote empilhado.
 
-Antes de declarar vermelho num lote, confira se o vermelho some com o corte anterior:
+**Isto mudou de lugar, não de valor: o lote não fica mais vermelho por acervo cheio.** Como a
+medição saiu do `pull_request`, o PR de integração passa verde e o vermelho só aparece depois, no
+push da `main`. O remédio continua sendo o mesmo e continua sendo seu — então rode o comando **antes
+de mesclar o lote**, em vez de esperar o CI da `main` avisar:
 
 ```bash
 ls .changes/*.md | wc -l          # quantos fragmentos este lote carrega
 pnpm release:conferir             # e que versão eles produzem juntos
+pnpm release:acervo-cabe          # e se essa versão ainda cabe na tela da VPS
 ```
+
+O último sai com `::warning::` enquanto ainda há folga e com `::error::` quando já não há — nos dois
+casos o conserto é `pnpm release:cortar`, nunca subir o `head -c` do `agent.sh`: quem corta o texto é
+o script JÁ instalado na VPS do cliente, e subir o número aqui troca um vermelho honesto por um
+cliente sem aviso.
 
 ---
 

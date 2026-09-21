@@ -127,6 +127,7 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
       serviceBoundary: ctx.serviceBoundary,
       organizationId: ctx.organization_id,
       reason: "requested_human",
+      origem: "legado_pedido",
       leadId,
       metadata: { message_id: ctx.message_id, source: "g1_regex" },
     });
@@ -139,6 +140,7 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
       serviceBoundary: ctx.serviceBoundary,
       organizationId: ctx.organization_id,
       reason: "legal_mention",
+      origem: "legado_juridico",
       leadId,
       metadata: { message_id: ctx.message_id, source: "g4_legal_regex" },
     });
@@ -152,6 +154,7 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
       serviceBoundary: ctx.serviceBoundary,
       organizationId: ctx.organization_id,
       reason: "critical_stage",
+      origem: "legado_etapa",
       leadId,
       metadata: { message_id: ctx.message_id, source: "g4_stage_requires_human" },
     });
@@ -242,7 +245,10 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
     // ── G3 — bot's own response signals low confidence / uncertainty.
     //    Persist the message (may serve as a draft for the human) but DO NOT
     //    dispatch via WAHA, and trigger handoff. ----------------------------
-    const confidence = response.citations[0]?.similarity ?? 0;
+    // `?? null`, nunca `?? 0`: sem citação não houve medição de similaridade, e
+    // zero é uma AFIRMAÇÃO ("o material é péssimo") que escala para humano toda
+    // resposta que não consultou a base. Ver o cabeçalho de `checkG3`.
+    const confidence = response.citations[0]?.similarity ?? null;
     const confidenceThreshold =
       typeof ctx.agent.config?.["confidence_threshold"] === "number"
         ? (ctx.agent.config["confidence_threshold"] as number)
@@ -263,6 +269,7 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
         serviceBoundary: ctx.serviceBoundary,
         organizationId: ctx.organization_id,
         reason: "low_confidence",
+        origem: "legado_confianca",
         leadId,
         metadata: {
           message_id: ctx.message_id,
@@ -502,6 +509,7 @@ async function vetoPorTetoDeGasto(alvo: {
     serviceBoundary: alvo.serviceBoundary,
     organizationId: orgId,
     reason: HANDOFF_REASON_ORCAMENTO,
+    origem: "legado_teto",
     leadId: alvo.leadId,
     metadata: {
       source: "teto_de_gasto",

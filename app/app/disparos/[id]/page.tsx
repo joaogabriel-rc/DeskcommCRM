@@ -1,5 +1,5 @@
 /**
- * Automações → Disparos → um disparo.
+ * Canais → Disparos → um disparo.
  *
  * Três blocos, na ordem em que a decisão acontece: PÚBLICO (quem), MENSAGEM (o
  * quê), AGENDAMENTO (quando) — e, depois de agendado, o ANDAMENTO.

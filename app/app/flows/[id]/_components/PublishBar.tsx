@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useFlowExecutions, useUpdateFlowStatus, type FlowDetailRow } from "@/hooks/flows/useFlow";
 import { useTagDeIdioma } from "@/hooks/i18n/useLocaleDeData";
+import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { useT } from "@/lib/i18n/IdiomaProvider";
 import { ClockCounterClockwise } from "@/lib/ui/icons";
 import { resumoDoGatilho } from "@/lib/flows/triggers";
@@ -86,7 +87,7 @@ export function PublishBar({ flowId, flow, onSave, saving }: Props) {
               <div key={e.id} className="rounded-md border border-border p-3 text-sm">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium">
-                    {e.contacts?.display_name || e.contacts?.name || e.contacts?.phone_number || t("Contato")}
+                    {rotuloDoContato(e.contacts, t)}
                   </span>
                   <Badge variant={e.status === "failed" ? "destructive" : "secondary"}>{e.status}</Badge>
                 </div>

@@ -40,18 +40,13 @@
 import { logger } from "@/lib/logger";
 import { configuracaoDoGoogleAds } from "./config";
 import { renovarToken } from "./token";
+import { VERSAO_DA_API_DO_GOOGLE_ADS } from "./versao-da-api";
 import type {
   ConversaoOffline,
   CredencialDeConversao,
   ResultadoDeEnvio,
   TransporteDeConversao,
 } from "../types";
-
-/**
- * Fixada no código, como a versão da Meta. A API do Google Ads descontinua
- * versões antigas por cronograma público; bump é manutenção esperada, não bug.
- */
-const VERSAO_DA_API = "v17";
 
 const ENDERECO_BASE = "https://googleads.googleapis.com";
 
@@ -91,6 +86,27 @@ function lerErro(bruto: unknown): ErroDoGoogle {
     status: typeof e.status === "string" ? e.status : undefined,
     message: typeof e.message === "string" ? e.message : undefined,
   };
+}
+
+/**
+ * O corpo do erro, lido como o Google o manda — ou um motivo que alguém
+ * consegue ler quando ele NÃO vem em JSON.
+ *
+ * Quando a versão da API foi desativada (ou o endereço está errado), o Google
+ * responde 404 com uma página HTML inteira. Copiar esse HTML para `detalhe`
+ * punha 400 caracteres de marcação na tela de Conversões, e a pista que
+ * importava — "a versão pode ter saído do ar" — não aparecia em lugar nenhum.
+ */
+function lerCorpoDeErro(status: number, texto: string): ErroDoGoogle {
+  try {
+    return lerErro(JSON.parse(texto));
+  } catch {
+    const pista =
+      status === 404
+        ? ` — endereço não encontrado; a versão ${VERSAO_DA_API_DO_GOOGLE_ADS} da API pode ter sido desativada pelo Google`
+        : "";
+    return { message: `o Google respondeu HTTP ${status} sem o formato de erro esperado${pista}` };
+  }
 }
 
 /**
@@ -153,7 +169,7 @@ async function enviar(
     partialFailure: false,
   };
 
-  const url = `${ENDERECO_BASE}/${VERSAO_DA_API}/customers/${customerId}:uploadClickConversions`;
+  const url = `${ENDERECO_BASE}/${VERSAO_DA_API_DO_GOOGLE_ADS}/customers/${customerId}:uploadClickConversions`;
 
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -180,12 +196,7 @@ async function enviar(
   if (resposta.ok) return { tipo: "ok" };
 
   const texto = await resposta.text().catch(() => "");
-  let corpoErro: ErroDoGoogle = {};
-  try {
-    corpoErro = lerErro(JSON.parse(texto));
-  } catch {
-    corpoErro = { message: texto.slice(0, 400) };
-  }
+  const corpoErro = lerCorpoDeErro(resposta.status, texto);
 
   logger.warn("[conversoes.google] envio recusado", {
     status: resposta.status,
@@ -202,4 +213,4 @@ export const transporteGoogle: TransporteDeConversao = {
 };
 
 /** Exportados para o teste vigiar as regras sem falar com a rede. */
-export const INTERNOS = { formatarDataDeConversao, classificaErro, soDigitos, VERSAO_DA_API } as const;
+export const INTERNOS = { formatarDataDeConversao, classificaErro, lerCorpoDeErro, soDigitos } as const;

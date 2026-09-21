@@ -27,6 +27,7 @@ export type { InboxRefKind } from '@/lib/ai/inbox-destino';
  */
 export type InboxKind =
   | 'case_stale'
+  | 'canal_mudo_sem_numero'
   | 'appointment_outcome_required'
   | 'appointment_recovery_review'
   | 'qr_rescan'
@@ -57,6 +58,10 @@ export type InboxKind =
   | 'midia_nao_lida'
   | 'promise_unfulfilled'
   | 'contact_proposal_expired'
+  // (migration 0292) O aviso de caso não chegou ao WhatsApp da equipe, em
+  // definitivo. Nasce com `ref_kind='agent_case'` para levar AO CASO, que
+  // continua esperando — um aviso que não leva ao assunto é meio aviso.
+  | 'aviso_de_caso_nao_entregue'
   // (migration 0159) O degrau de AVISO do teto de gasto de IA — o que a
   // organização vê antes de qualquer parada. Existe separado de
   // `budget_exceeded` porque diz coisa diferente: um relata que algo
@@ -72,6 +77,12 @@ export type InboxKind =
   // não distingue "tocou e ninguém pegou" de "o operador recusou", e para quem
   // lê a Central os dois pedem a mesma coisa: alguém precisa ligar de volta.
   | 'voice_call_missed'
+  // (migration 0312) O fluxo de follow-up PUBLICADO que nunca vai disparar:
+  // gatilho automático só enrolla se um agente publicado arma o ponteiro, e sem
+  // esse vínculo os produtores saem por `pointers_armados = 0` em silêncio —
+  // `active` na tela, morto no motor. Quem abre e quem FECHA é o mesmo cron
+  // (`followup-sem-agente`): o aviso some sozinho quando o vínculo aparece.
+  | 'followup_sem_agente'
   | 'other';
 
 export interface InboxItemRow {

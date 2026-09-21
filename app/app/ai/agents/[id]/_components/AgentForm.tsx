@@ -46,6 +46,10 @@ import { ToolPicker } from "./ToolPicker";
 import { TriggerEditor, type TriggerValue } from "./TriggerEditor";
 import { HandoffKeywordsInput } from "./HandoffKeywordsInput";
 import { FollowupFlowPicker } from "./FollowupFlowPicker";
+import {
+  FollowupWindowEditor,
+  type FollowupWindowValue,
+} from "./FollowupWindowEditor";
 import { PainelDoOperador } from "./PainelDoOperador";
 import { PainelDeSeguranca } from "./PainelDeSeguranca";
 import { BasesDoAgente, type MaterialDoAcervo } from "./BasesDoAgente";
@@ -178,9 +182,15 @@ interface FormState {
 interface FollowupValue {
   enabled: boolean;
   flow_pointer_ids: string[];
+  /** Ausente em versões antigas; null = sem janela própria. */
+  send_window?: FollowupWindowValue | null;
 }
 
-const DEFAULT_FOLLOWUP: FollowupValue = { enabled: false, flow_pointer_ids: [] };
+const DEFAULT_FOLLOWUP: FollowupValue = {
+  enabled: false,
+  flow_pointer_ids: [],
+  send_window: null,
+};
 
 const DEFAULT_TRIGGER: TriggerValue = {
   events: ["message"],
@@ -471,8 +481,11 @@ export function AgentForm(props: Props) {
     setSaving(true);
     try {
       if (isEdit) {
-        // A mesma régua do servidor, aqui, para o erro aparecer no campo em vez
-        // de voltar como 500 depois de a versão já ter sido gravada.
+        // A mesma régua do cadastro que a Server Action valida de novo
+        // (_actions.ts, `agentMcpPatchSchema` — não a da rota REST, que é
+        // `agentPatchSchema` e diverge em name/description), aqui só para o erro
+        // aparecer no campo em vez de voltar como 500 depois de a versão já ter
+        // sido gravada.
         const cadastro = agentMcpPatchSchema.safeParse(toCadastroPayload(form));
         if (!cadastro.success) {
           toast.error(t("Validação falhou."));
@@ -1187,6 +1200,13 @@ export function AgentForm(props: Props) {
                 "Os fluxos abaixo só entram em ação para um cliente se este agente estiver publicado com follow-up habilitado.",
               )}
             </p>
+            <FollowupWindowEditor
+              value={form.followup.send_window ?? null}
+              onChange={(send_window) =>
+                patch({ followup: { ...form.followup, send_window } })
+              }
+              disabled={disabled || !form.followup.enabled}
+            />
             <FollowupFlowPicker
               value={form.followup.flow_pointer_ids}
               onChange={(ids) =>

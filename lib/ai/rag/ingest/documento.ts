@@ -42,12 +42,20 @@ export type ExtensaoAceita = (typeof EXTENSOES_ACEITAS)[number];
 /**
  * Falha de extração com motivo LEGÍVEL — ela vai direto para a linha da fonte e
  * para a Central de avisos, onde quem lê é o dono do negócio.
+ *
+ * `message` é também uma CHAVE DE UI: a rota de upload passa esse texto por
+ * `traduzir()`. Por isso ele precisa ser estável, nunca conter extensão, texto
+ * de exceção ou outro dado de runtime. `detalhe` preserva esse diagnóstico sem
+ * misturá-lo ao texto que a pessoa vê.
  */
 export class ErroDeExtracao extends Error {
   readonly code = "extracao_falhou";
-  constructor(message: string) {
+  readonly detalhe?: string;
+
+  constructor(message: string, detalhe?: string) {
     super(message);
     this.name = "ErroDeExtracao";
+    this.detalhe = detalhe;
   }
 }
 
@@ -88,7 +96,12 @@ export async function extrairTextoDoArquivo(
       );
     }
     throw new ErroDeExtracao(
-      `não sei ler arquivos "${extBruta}" — envie PDF, Markdown, CSV ou texto`,
+      // As DUAS intenções ficam: a chave é FIXA (só chave fixa tem tradução — é o
+      // ponto do #1049 e da issue #1046) e o texto é o da main, que passou a
+      // aceitar CSV. A extensão recusada sai da frase e vai para o `detalhe`,
+      // que é quem leva a causa ao log e à linha da fonte.
+      "Não sei ler esse tipo de arquivo. Envie PDF, Markdown (.md), CSV (.csv) ou texto (.txt).",
+      extBruta || extensaoDeclarada || blobPath.split(".").pop() || "extensão desconhecida",
     );
   }
 
@@ -97,7 +110,8 @@ export async function extrairTextoDoArquivo(
 
   if (error || !blob) {
     throw new ErroDeExtracao(
-      `o arquivo não está mais guardado (${error?.message ?? "não encontrado"}) — envie de novo`,
+      "O arquivo não está mais guardado. Envie de novo.",
+      error?.message ?? "arquivo não encontrado no Storage",
     );
   }
 
@@ -118,7 +132,8 @@ export async function extrairTextoDoArquivo(
         // instalação real em 2026-09-17: "Cannot find package 'pdfjs-dist'"
         // (pacote inteiro fora do tracing do `next build standalone`) virava
         // "só imagens escaneadas" pro operador, sem rastro nenhum em log.
-        if (err.message !== "pdfjs-dist extracted no text (possibly image-only PDF)") {
+        // A distinção é pelo `motivo`, nunca pela frase: a frase é traduzível.
+        if (err.motivo !== "sem_texto") {
           console.error("[extracao-pdf] falha de infraestrutura, não de conteúdo:", err.message);
         }
         throw new ErroDeExtracao(
@@ -127,18 +142,23 @@ export async function extrairTextoDoArquivo(
         );
       }
       throw new ErroDeExtracao(
-        `falhou ao ler o PDF: ${err instanceof Error ? err.message : String(err)}`,
+        "Falha ao processar o envio do arquivo.",
+        err instanceof Error ? err.message : String(err),
       );
     }
   } else if (extensao === "csv") {
     try {
       texto = extractCsvText(buffer);
     } catch (err) {
+      // Mesma regra, e ela não é estilo: esta mensagem chega à tela pela rota de
+      // upload, que a passa por `t()`. Texto montado em tempo de execução nunca
+      // casa no dicionário e sai em português para quem usa em espanhol.
       if (err instanceof CsvExtractError) {
-        throw new ErroDeExtracao(err.message);
+        throw new ErroDeExtracao("Falha ao processar o envio do arquivo.", err.message);
       }
       throw new ErroDeExtracao(
-        `falhou ao ler o CSV: ${err instanceof Error ? err.message : String(err)}`,
+        "Falha ao processar o envio do arquivo.",
+        err instanceof Error ? err.message : String(err),
       );
     }
   } else {

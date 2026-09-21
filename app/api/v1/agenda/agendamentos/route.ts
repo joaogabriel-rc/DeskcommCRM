@@ -84,6 +84,8 @@ const marcarSchema = z.object({
   conversation_id: z.string().uuid().optional(),
   title: z.string().min(1).max(200).optional(),
   notes: z.string().max(2000).optional(),
+  description: z.string().max(2000).optional(),
+  location_details: z.string().max(300).optional(),
   guest_email: emailDoConvidado.optional(),
 });
 

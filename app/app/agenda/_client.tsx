@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 
 import { EntradaDaAgenda } from "@/components/agenda/EntradaDaAgenda";
+import { EnderecoDaMarcacao } from "@/components/agenda/EnderecoDaMarcacao";
 import { VinculoDaMarcacao } from "@/components/agenda/VinculoDaMarcacao";
 import { useLocaleDeData } from "@/hooks/i18n/useLocaleDeData";
 
@@ -21,6 +22,8 @@ import type { Agendamento, HorarioLivre, VisaoDaAgenda } from "@/components/agen
 import { EmptyAgenda } from "@/components/empty";
 import { rotuloDoLocal } from "@/lib/agenda/locais";
 import { ancoraAoFecharPainel } from "@/lib/agenda/ancora-depois-de-marcar";
+import { ancoraLocalDoDia } from "@/lib/agenda/semana-semente";
+import { janelaDoMesVisivel } from "@/lib/agenda/janela-do-mes-visivel";
 import { resolverResponsavelDoPainel } from "@/lib/agenda/responsavel-do-painel";
 import { useVinculoDaMarcacao } from "@/lib/agenda/vinculo-da-marcacao";
 import { Button } from "@/components/ui/button";
@@ -71,6 +74,7 @@ const VISOES: Array<{ id: VisaoDaAgenda; rotulo: string }> = [
  */
 export function AgendaClient({
   fusoDeApresentacao,
+  hojeNaOrganizacao,
   usuarioId,
   googleConfigurado,
   contaConectada,
@@ -82,6 +86,11 @@ export function AgendaClient({
   podeMarcar,
 }: {
   fusoDeApresentacao: string | null;
+  /**
+   * A data de HOJE no fuso da ORGANIZAÇÃO, resolvida pelo servidor
+   * (`yyyy-MM-dd`). É a mesma que gerou a semente de compromissos.
+   */
+  hojeNaOrganizacao: string;
   /** Id de quem está logado — a única fonte para o rótulo "Você". */
   usuarioId: string;
   googleConfigurado: boolean;
@@ -166,8 +175,9 @@ export function AgendaClient({
   // o que a equipe lê ao ver o horário vago.
   const [cancelandoId, setCancelandoId] = React.useState<string | null>(null);
   const [motivo, setMotivo] = React.useState("");
-  // O CONVIDADO, opcional. Vazio mantém o comportamento de sempre: evento no
-  // Google do atendente, sem `attendees` e sem convite saindo para ninguém.
+  // O CONVIDADO, opcional. O e-mail da ficha do cliente já vai no convite
+  // do Google quando existe. Este campo é a outra pessoa (acompanhante).
+  // Vazio = só o cliente (se tiver e-mail) ou só a agenda do atendente.
   const [emailConvidado, setEmailConvidado] = React.useState("");
   const emailConvidadoLimpo = emailConvidado.trim();
   // A MESMA pergunta que a rota faz, feita aqui só para não gastar um 422 com
@@ -176,6 +186,10 @@ export function AgendaClient({
   // (o e-mail de verdade se prova entregando, não com regex).
   const emailConvidadoInvalido =
     emailConvidadoLimpo.length > 0 && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailConvidadoLimpo);
+  // `null` = ainda não mexeu: o campo mostra o local do TIPO. String (mesmo
+  // vazia) = a pessoa editou, e o tipo novo não pode devolver o que ela apagou.
+  const [enderecoEditado, setEnderecoEditado] = React.useState<string | null>(null);
+  const [observacao, setObservacao] = React.useState("");
   const marcar = useMarcarAgendamento();
   const remarcar = useRemarcarAgendamento();
   const cancelar = useCancelarAgendamento();
@@ -188,6 +202,7 @@ export function AgendaClient({
   // uma. Achado escrevendo a spec de marcar, não lendo o código.
   const [tipoId, setTipoId] = React.useState<string | null>(() => tiposIniciais[0]?.id ?? null);
   const tipo = tiposIniciais.find((t) => t.id === tipoId) ?? tiposIniciais[0] ?? null;
+  const endereco = enderecoEditado ?? tipo?.localDetalhes ?? "";
   const [visao, setVisao] = React.useState<VisaoDaAgenda>("semana");
   /**
    * No CELULAR a agenda abre no DIA, não na semana.
@@ -210,35 +225,69 @@ export function AgendaClient({
     if (window.matchMedia("(max-width: 767px)").matches) setVisao("dia");
   }, []);
   const [isolada, setIsolada] = React.useState<string | null>(null);
-  const [ancora, setAncora] = React.useState(() => new Date());
+  /**
+   * A ÂNCORA NASCE DO RELÓGIO DA ORGANIZAÇÃO, não do navegador.
+   *
+   * Era `useState(() => new Date())`. O servidor desenha a semana no fuso da
+   * organização (decisão do dono em #1350) e o cliente recalculava no fuso do
+   * NAVEGADOR: das 21h de sábado à meia-noite em São Paulo, com servidor em UTC,
+   * os dois discordavam e a tela piscava a semana seguinte — e, para quem abre o
+   * CRM fora do fuso da empresa, discordava sempre.
+   *
+   * O que atravessa a fronteira é a DATA (`hojeNaOrganizacao`), nunca o
+   * instante: `domingo 00:00` em São Paulo é `sábado 22:00` em UTC-5, e
+   * `startOfWeek` sobre esse instante, em hora local, cairia na semana anterior.
+   * `ancoraLocalDoDia` transforma a data numa `Date` local ao meio-dia — a doze
+   * horas de qualquer borda de horário de verão.
+   */
+  const [ancora, setAncora] = React.useState(() => ancoraLocalDoDia(hojeNaOrganizacao));
 
-  // AS PESSOAS SÃO REAIS: vêm de `/api/v1/team`, com a trilha de cor derivada do
-  // `user_id`. Até esta linha o filtro por pessoa era invisível na tela do
-  // produto — `FiltroDePessoas` devolve `null` com menos de duas pessoas, e a
-  // lista estava vazia. Ele existia, estava provado na vitrine, e ninguém o via
-  // aqui.
+  // AS PESSOAS SÃO REAIS, e vêm da lista MÍNIMA da agenda — `/api/v1/agenda/pessoas`
+  // (`ROTA_DA_LISTA_DE_PESSOAS`, `lib/agenda/lista-de-pessoas.ts`), papel mínimo
+  // `agent` e só id/nome. Com a trilha de cor derivada do `user_id`.
+  //
+  // ⚠️ ESTA LINHA DIZIA `/api/v1/team`, E A FRASE MENTIA. Ela descrevia o estado
+  // de antes do item 1 da issue 896, quando a agenda pedia a equipe à rota de
+  // administração — que é `manager+` e devolve e-mail e último acesso — e o
+  // Atendente levava 403 só por abrir a tela (virava aviso de falta de
+  // permissão sobre uma grade que continuava lá). A rota mínima consertou isso;
+  // a prosa ficou. Medido nesta rodada:
+  //   grep -rn "api/v1/team" app/app/agenda/ | grep -v "\(//\|\*\)"  → vazio
+  // É por isso que a frase foi reescrita em vez de apagada: quem lê o código
+  // para entender o 403 do Atendente precisa saber que ele JÁ não existe, e um
+  // comentário que afirma o contrário é o defeito de novo.
   const { data: pessoas = [] } = usePessoasDaAgenda();
 
-  // A JANELA DE BUSCA PRECISA SER ESTÁVEL, e não era.
+  // A JANELA ACOMPANHA O MÊS QUE O PAINEL MOSTRA.
   //
-  // ⚠️ Isto era `de: new Date().toISOString()` calculado no CORPO do render. A
-  // chave do React Query inclui o recorte, e `new Date()` devolve milissegundos
-  // diferentes a cada passagem — então cada resposta causava re-render, que
-  // gerava chave nova, que disparava outra busca. O painel nunca estabilizava:
-  // `horarios` ficava `undefined` entre as idas, `horariosPorDia` nascia vazio e
-  // TODO dia aparecia "sem horário" — com a rota respondendo 200 e slots reais.
+  // ⚠️ Isto era `hoje + 30 dias`, fixo na abertura. O mês visível era estado
+  // LOCAL do painel, a consulta não ia junto, e "Próximo mês" desligava assim
+  // que acabavam os dias já pedidos — daqui a dois meses o calendário parava
+  // e a ocupação do Google acusava período sem cobertura, mesmo com a janela
+  // de agendamento do tipo (60 dias por padrão, até 365) ainda valendo.
   //
-  // Medido pela spec de marcar, que capturou as respostas: cinco 200 seguidos
-  // com vagas, e a tela mostrando 42 dias apagados. Em produção isto é um laço
-  // de requisições por usuário com o painel aberto.
-  //
-  // `useMemo` sem dependência de tempo: a janela é fixada quando o painel abre.
-  const janelaDeBusca = React.useMemo(
-    () => ({ de: new Date().toISOString(), ate: addDays(new Date(), 30).toISOString() }),
-    // A janela só precisa mudar quando o painel REABRE ou o tipo muda — nunca a
-    // cada render. `marcando` na lista é o que a renova entre duas aberturas.
+  // A estabilidade continua: a chave do React Query só muda quando o mês, o
+  // tipo ou a abertura mudam — nunca a cada render. `new Date()` aqui corre
+  // uma vez por essas mudanças, não no corpo.
+  // Mesmo relógio da grade: o mini-calendário abre no mês da ORGANIZAÇÃO.
+  const [mesDoPainel, setMesDoPainel] = React.useState(() =>
+    startOfMonth(ancoraLocalDoDia(hojeNaOrganizacao)),
+  );
+  const onMesVisivel = React.useCallback((mes: Date) => {
+    const proximo = startOfMonth(mes);
+    setMesDoPainel((atual) => (atual.getTime() === proximo.getTime() ? atual : proximo));
+  }, []);
+  // Reabrir o painel ou trocar o tipo pede `agora` novo. O relógio não entra
+  // na chave do React Query por milissegundo — só quando estes mudam.
+  const agoraDaAbertura = React.useMemo(
+    () => new Date(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `new Date()` é o ponto: o valor só pode mudar quando a abertura ou o tipo mudam.
     [marcando, tipo?.id],
   );
+  const janelaDeBusca = React.useMemo(() => {
+    const { de, ate } = janelaDoMesVisivel(mesDoPainel, agoraDaAbertura);
+    return { de: de.toISOString(), ate: ate.toISOString() };
+  }, [mesDoPainel, agoraDaAbertura]);
 
   // Os horários vêm da rota real — a mesma que a IA usa, então tela e agente
   // oferecem exatamente os mesmos horários. Só consulta quando o painel abre.
@@ -390,7 +439,14 @@ export function AgendaClient({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setAncora(new Date())}>
+          {/* "Hoje" é o hoje DA ORGANIZAÇÃO. Com `new Date()` o botão desfazia a
+              âncora do servidor e devolvia a semana do navegador — o defeito que
+              a tela acabou de fechar, a um clique de distância. */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAncora(ancoraLocalDoDia(hojeNaOrganizacao))}
+          >
             {t("Hoje")}
           </Button>
           {/*
@@ -536,6 +592,8 @@ export function AgendaClient({
             // não usado reapareceria na PRÓXIMA marcação, que é de outro
             // cliente — convite para a pessoa errada, sem ninguém ter pedido.
             setEmailConvidado("");
+            setEnderecoEditado(null);
+            setObservacao("");
             // E o próprio cliente, que é o pior dos quatro a sobrar: medido numa
             // instalação real em 2026-09-12, "Novo agendamento" abriu com um
             // contato JÁ selecionado, herdado de uma abertura anterior feita a
@@ -606,87 +664,124 @@ export function AgendaClient({
               {remarcandoId ? t("Remarcar agendamento") : t("Novo agendamento")}
             </SheetTitle>
           </SheetHeader>
-          {!remarcandoId ? (
-            <VinculoDaMarcacao
-              contactId={contactId}
-              conversationId={conversationId}
-              onChange={(contact, conversation) => escolherVinculo({ contact, conversation })}
-            />
-          ) : null}
-          {tiposIniciais.length > 1 && (
-            <div className="mt-4" data-testid="tipos-de-agendamento">
-              <p className="mb-2 text-xs font-medium text-text-muted">{t("Tipo de agendamento")}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {tiposIniciais.map((opcao) => (
-                  <button
-                    key={opcao.id}
-                    type="button"
-                    data-testid={`tipo-${opcao.id}`}
-                    aria-pressed={opcao.id === tipo?.id}
-                    onClick={() => setTipoId(opcao.id)}
-                    className={cn(
-                      "rounded-full border px-3 py-1 text-xs transition-colors duration-fast",
-                      opcao.id === tipo?.id
-                        ? "border-transparent bg-accent text-accent-foreground"
-                        : "border-border text-text-muted hover:border-border-strong hover:text-text",
-                    )}
-                  >
-                    {opcao.nome}
-                    <span className="ml-1 tabular-nums opacity-70">{opcao.duracaoMin}min</span>
-                  </button>
-                ))}
+          <div className="grid shrink-0 gap-3 rounded-lg border p-3 lg:grid-cols-2">
+            {!remarcandoId ? (
+              <div className="lg:col-span-2">
+              <VinculoDaMarcacao
+                contactId={contactId}
+                conversationId={conversationId}
+                onChange={(contact, conversation) => escolherVinculo({ contact, conversation })}
+              />
               </div>
-            </div>
-          )}
-          {/*
-            O CONVIDADO — opcional, e é o que faz o convite do Google existir.
-            Sem e-mail aqui o evento nasce só na agenda do atendente, que é o
-            comportamento que este produto teve desde sempre.
+            ) : null}
+            {tiposIniciais.length > 1 && (
+              <div className="lg:col-span-2" data-testid="tipos-de-agendamento">
+                <p className="mb-2 text-sm font-medium">{t("Tipo de agendamento")}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {tiposIniciais.map((opcao) => (
+                    <button
+                      key={opcao.id}
+                      type="button"
+                      data-testid={`tipo-${opcao.id}`}
+                      aria-pressed={opcao.id === tipo?.id}
+                      onClick={() => {
+                        setTipoId(opcao.id);
+                        // Tipo novo, local novo — senão a Sala 2 do tipo anterior
+                        // viaja para um atendimento online que não tem sala.
+                        setEnderecoEditado(null);
+                      }}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-xs transition-colors duration-fast",
+                        opcao.id === tipo?.id
+                          ? "border-transparent bg-accent text-accent-foreground"
+                          : "border-border text-text-muted hover:border-border-strong hover:text-text",
+                      )}
+                    >
+                      {opcao.nome}
+                      <span className="ml-1 tabular-nums opacity-70">{opcao.duracaoMin}min</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/*
+              O CONVIDADO — opcional. O e-mail da ficha do cliente já entra no
+              convite do Google; este campo é para outra pessoa (acompanhante).
+              Sem os dois, o evento nasce só na agenda do atendente — o lembrete
+              do cliente segue no WhatsApp.
 
-            Fica ACIMA do painel de horários de propósito: quem vai convidar
-            alguém decide isso ANTES de escolher o horário, e um campo abaixo de
-            uma lista rolável de horários é um campo que ninguém vê.
-          */}
-          <div className="mt-4">
-            <label
-              className="block text-xs font-medium text-text-muted"
-              htmlFor="email-do-convidado"
-            >
-              {t("E-mail do convidado")}{" "}
-              <span className="font-normal opacity-70">({t("opcional")})</span>
-            </label>
-            <input
-              id="email-do-convidado"
-              data-testid="email-do-convidado"
-              type="email"
-              inputMode="email"
-              autoComplete="off"
-              value={emailConvidado}
-              onChange={(e) => setEmailConvidado(e.target.value)}
-              className={cn(
-                // `outline-hidden`, não `outline-none`: no Tailwind 4 os dois
-                // trocaram de significado, e o `outline-none` do v4 apaga o
-                // contorno que o modo de alto contraste do sistema usa.
-                "mt-1 w-full rounded-md border bg-surface p-2 text-sm outline-hidden",
-                emailConvidadoInvalido
-                  ? "border-danger focus:border-danger"
-                  : "border-border focus:border-border-strong",
-              )}
-              placeholder={t("cliente@empresa.com")}
-              aria-invalid={emailConvidadoInvalido || undefined}
-              aria-describedby="ajuda-do-convidado"
-            />
-            <p id="ajuda-do-convidado" className="mt-1 text-xs text-text-muted">
-              {emailConvidadoInvalido
-                ? t("Endereço inválido — confira antes de marcar.")
-                : t("Preenchido, o Google envia o convite por e-mail para esta pessoa.")}
-            </p>
+              Fica ACIMA do painel de horários de propósito: quem vai convidar
+              alguém decide isso ANTES de escolher o horário, e um campo abaixo de
+              uma lista rolável de horários é um campo que ninguém vê.
+            */}
+            <div>
+              <label className="block" htmlFor="email-do-convidado">
+                {t("E-mail do convidado")}{" "}
+                <span className="font-normal opacity-70">({t("opcional")})</span>
+              </label>
+              <input
+                id="email-do-convidado"
+                data-testid="email-do-convidado"
+                type="email"
+                inputMode="email"
+                autoComplete="off"
+                value={emailConvidado}
+                onChange={(e) => setEmailConvidado(e.target.value)}
+                className={cn(
+                  // `outline-hidden`, não `outline-none`: no Tailwind 4 os dois
+                  // trocaram de significado, e o `outline-none` do v4 apaga o
+                  // contorno que o modo de alto contraste do sistema usa.
+                  "mt-1 w-full rounded-md border bg-surface p-2 outline-hidden",
+                  emailConvidadoInvalido
+                    ? "border-danger focus:border-danger"
+                    : "border-border focus:border-border-strong",
+                )}
+                placeholder={t("cliente@empresa.com")}
+                aria-invalid={emailConvidadoInvalido || undefined}
+                aria-describedby="ajuda-do-convidado"
+              />
+              <p id="ajuda-do-convidado" className="mt-1 text-xs text-text-muted">
+                {emailConvidadoInvalido
+                  ? t("Endereço inválido — confira antes de marcar.")
+                  : t(
+                      "O cliente com e-mail na ficha já recebe o convite. Preencha só se quiser chamar mais alguém.",
+                    )}
+              </p>
+            </div>
+            {!remarcandoId ? (
+              <>
+                <EnderecoDaMarcacao
+                  value={endereco}
+                  onChange={setEnderecoEditado}
+                />
+                <div>
+                  <label className="block" htmlFor="observacao-do-compromisso">
+                    {t("Observação")}{" "}
+                    <span className="font-normal opacity-70">({t("opcional")})</span>
+                  </label>
+                  <textarea
+                    id="observacao-do-compromisso"
+                    data-testid="observacao-do-compromisso"
+                    rows={1}
+                    value={observacao}
+                    onChange={(e) => setObservacao(e.target.value)}
+                    className="mt-1 w-full resize-none rounded-md border bg-surface p-2 outline-hidden"
+                    placeholder={t("O que a equipe precisa lembrar neste horário")}
+                    aria-describedby="ajuda-da-observacao"
+                  />
+                  <p id="ajuda-da-observacao" className="mt-1 text-xs text-text-muted">
+                    {t("Aparece na descrição do compromisso.")}
+                  </p>
+                </div>
+              </>
+            ) : null}
           </div>
           {tipo && (
             <div className="mt-4 lg:min-h-0 lg:flex-1">
               <PainelDeMarcacao
                 className="lg:h-full"
-                ancora={new Date()}
+                // O mês que abre é o da organização, como a grade ao lado.
+                ancora={ancoraLocalDoDia(hojeNaOrganizacao)}
                 agora={new Date()}
                 responsavel={
                   // O DONO DO TIPO, não o primeiro da lista. A tela dizia "com
@@ -713,7 +808,7 @@ export function AgendaClient({
                 // `fuso_da_regra` já vinha da rota e já era tipado pelo hook;
                 // ninguém em tela o lia. Chutar São Paulo para quem atende em
                 // Manaus é uma hora de diferença no horário oferecido ao cliente.
-                local={rotuloDoLocal(tipo.localKind, tipo.localDetalhes)}
+                local={rotuloDoLocal(tipo.localKind, endereco.trim() || tipo.localDetalhes)}
                 fuso={horarios?.fuso_da_regra}
                 horariosPorDia={horariosPorDia}
                 publicouHorarios={horarios?.publicou_horarios ?? true}
@@ -721,6 +816,7 @@ export function AgendaClient({
                 fusoSuposto={horarios?.fuso_suposto ?? false}
                 fontesDefasadas={horarios?.fontes_defasadas}
                 googleCoberturaParcial={horarios?.google_cobertura_parcial}
+                onMesVisivel={onMesVisivel}
                 horarioInicial={horarioEscolhido ?? undefined}
                 // O ENCAIXE é desta tela, e só dela: aqui quem marca é uma
                 // pessoa da equipe com sessão, que é exatamente o ator a quem a
@@ -766,6 +862,8 @@ export function AgendaClient({
                         setRemarcandoId(null);
                         setMarcando(false);
                         setEmailConvidado("");
+                        setEnderecoEditado(null);
+                        setObservacao("");
                         return r;
                       });
                   }
@@ -776,9 +874,13 @@ export function AgendaClient({
                       conversation_id: conversationId || undefined,
                       starts_at: instante,
                       guest_email: convidado,
+                      location_details: endereco.trim(),
+                      description: observacao.trim() || undefined,
                     })
                     .then((r) => {
                       setEmailConvidado("");
+                      setEnderecoEditado(null);
+                      setObservacao("");
                       // Guardado para o fechamento saber para onde levar a grade.
                       setMarcadoEm(instante);
                       return r;

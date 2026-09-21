@@ -199,8 +199,11 @@ export function CredentialCard({ credential, canWrite, usageCount }: Props) {
                 <TooltipTrigger asChild>
                   <span tabIndex={0}>{deleteButton}</span>
                 </TooltipTrigger>
-                <TooltipContent>
-                  {t("Em uso por")} {usageCount} {t("versão(ões) de agente")}. {t("Para trocar a chave, use editar; para excluir, aponte essas versões para outra chave.")}
+                {/* Sem largura máxima o Radix desenha `minWidth: max-content`: esta
+                    frase, de 267 caracteres, vira UMA linha de ~1467px e o fim dela sai
+                    da tela em 1280, 1366 e 1440. Mesmo padrão de PlatformAdminsTable. */}
+                <TooltipContent className="max-w-xs break-words">
+                  {t("Em uso por")} {usageCount} {t("versão(ões) de agente")}. {t("Para trocar a chave, use editar. Para excluir, nenhuma versão pode estar usando a chave — e versão já publicada ou substituída não aceita mais apontar para outra chave, então a exclusão fica travada enquanto esse histórico existir.")}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>

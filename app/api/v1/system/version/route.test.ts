@@ -428,6 +428,94 @@ describe("GET /api/v1/system/version", () => {
     expect(body.data.run.superseded).toBe(false);
   });
 
+  it("reinstalar a MESMA versão que falhou: o app respondendo nela solta a tela", async () => {
+    // O caso que a prova temporal não alcança por construção — o host reporta
+    // `to_version`, que é uma das duas do run. Medido em produção (18/09): a
+    // 1.33.0 falhou porque as imagens ainda não estavam publicadas, meia hora
+    // depois o mesmo `update.sh --force` instalou a 1.33.0 e o app voltou
+    // saudável nela; a tela seguiu anunciando a falha e, sem botão, bloqueou a
+    // 1.35.0 já publicada. Quem desmente é a imagem deste contêiner.
+    // A versão vem de DENTRO da imagem (`APP_VERSION`, gravada no build), não
+    // do `APP_IMAGE` do `.env` — ver o caso do rollback do agente, abaixo.
+    vi.stubEnv("APP_VERSION", "1.33.0");
+    // `v1.33.0` como o `git describe` do host escreve — igual ao `to_version`
+    // do run, que é o que faz a prova temporal empatar.
+    versionRow.current_version = "v1.33.0";
+    versionRow.latest_version = "1.35.0";
+    versionRow.updated_at = "2026-09-18T22:20:02.000Z";
+    runRow = {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      status: "failed_rolled_back",
+      last_step: "app",
+      dispatched_at: "2026-09-18T03:13:07.000Z",
+      finished_at: "2026-09-18T03:23:24.000Z",
+      from_version: "v1.32.1",
+      to_version: "v1.33.0",
+      log_tail: "",
+    };
+    vi.mocked(loadAuthUser).mockResolvedValue(OWNER as never);
+    const { GET } = await import("../version/route");
+    const body = await (await GET(get())).json();
+    expect(body.data.run.superseded).toBe(true);
+    // E a versão no ar deixa de ser a `from_version` do rollback.
+    expect(body.data.current_version).toBe("v1.33.0");
+    expect(body.data.update_available).toBe(true);
+    vi.unstubAllEnvs();
+  });
+
+  it("rollback do agente: `APP_IMAGE` ainda nomeia a versão que falhou, e o aviso FICA", async () => {
+    // O estado que o `agent.sh` PRODUZ, e que nenhum outro caso cobre: o
+    // `update.sh` grava `APP_IMAGE=…:<alvo>` no `.env` antes de puxar e subir
+    // (`update.sh:291,307,343`), e o rollback passa a imagem anterior só pelo
+    // shell (`agent.sh:313-316`), corrigindo o `.env` depois (`:323`). Como o
+    // compose usa `env_file: .env` (`docker-compose.prod.yml:38`), o contêiner
+    // revertido responde com `APP_IMAGE` apontando para a versão que FALHOU.
+    // Ler dali daria o rollback por desmentido bem quando ele é real: o aviso
+    // sumiria e a tela anunciaria como no ar a versão que quebrou.
+    vi.stubEnv("APP_IMAGE", "ghcr.io/org/app:1.33.0");
+    vi.stubEnv("APP_VERSION", "1.32.1");
+    versionRow.current_version = "v1.33.0";
+    versionRow.updated_at = "2026-09-18T22:20:02.000Z";
+    runRow = {
+      id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      status: "failed_rolled_back",
+      last_step: "app",
+      dispatched_at: "2026-09-18T03:13:07.000Z",
+      finished_at: "2026-09-18T03:23:24.000Z",
+      from_version: "v1.32.1",
+      to_version: "v1.33.0",
+      log_tail: "",
+    };
+    vi.mocked(loadAuthUser).mockResolvedValue(OWNER as never);
+    const { GET } = await import("../version/route");
+    const body = await (await GET(get())).json();
+    expect(body.data.run.superseded).toBe(false);
+    expect(body.data.current_version).toBe("v1.32.1");
+    vi.unstubAllEnvs();
+  });
+
+  it("rollback de verdade: o app roda a versão anterior e o aviso continua de pé", async () => {
+    vi.stubEnv("APP_VERSION", "1.32.1");
+    versionRow.current_version = "v1.33.0";
+    versionRow.updated_at = "2026-09-18T22:20:02.000Z";
+    runRow = {
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      status: "failed_rolled_back",
+      last_step: "app",
+      dispatched_at: "2026-09-18T03:13:07.000Z",
+      finished_at: "2026-09-18T03:23:24.000Z",
+      from_version: "v1.32.1",
+      to_version: "v1.33.0",
+      log_tail: "",
+    };
+    vi.mocked(loadAuthUser).mockResolvedValue(OWNER as never);
+    const { GET } = await import("../version/route");
+    const body = await (await GET(get())).json();
+    expect(body.data.run.superseded).toBe(false);
+    expect(body.data.current_version).toBe("v1.32.1");
+    vi.unstubAllEnvs();
+  });
+
   it("terminou BEM e o host ainda não bateu: a tela diz que o pedido terminou — sem afirmar a versão nova", async () => {
     // O defeito: `run_result` com sucesso fecha o run e NÃO toca
     // `current_version` — quem escreve essa coluna é o heartbeat do host, de 5

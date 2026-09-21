@@ -66,10 +66,11 @@ export function isRunStale(dispatchedAt: string, now: Date): boolean {
  * outra coisa. Então o run só é superado quando o host reporta uma versão que
  * **o run não descreve** — nem a que tentou instalar, nem a que restaurou.
  *
- * O caso que fica de fora é reinstalar À MÃO exatamente a versão que falhou e
- * dessa vez funcionar: ali o rodapé segue nomeando a anterior. Falha
- * conservadora e de propósito — ela empurra para atualizar, enquanto o erro
- * oposto seria anunciar como no ar justamente a versão que quebrou.
+ * Esta prova sozinha não alcança reinstalar À MÃO exatamente a versão que
+ * falhou e dessa vez funcionar: ali o host volta a reportar `to_version`, que o
+ * run descreve, e nada separa. Quem alcança é o segundo degrau,
+ * `rollbackDesmentidoPeloApp`, que pergunta qual versão o processo que responde
+ * está rodando (`APP_VERSION`, gravada dentro da imagem).
  *
  * Falso sempre que falta uma das datas — ausência de prova não é prova de
  * deploy, e o run continua sendo a informação mais específica sobre o que subiu.
@@ -261,4 +262,59 @@ export function textoDaRodadaDoBanco(
   // caso que não existe — e o caso de teste, a de que estava coberto. Silêncio é
   // o degrau certo, o mesmo de todo número impossível.
   return null;
+}
+
+/** `v1.33.0` e `1.33.0` são a mesma versão — a versão da imagem não leva o `v`. */
+function semPrefixoV(versao: string): string {
+  return versao.trim().replace(/^v/i, "");
+}
+
+/**
+ * O app EM EXECUÇÃO desmente o rollback deste run?
+ *
+ * ## O caso que `rollbackFoiSuperado` não alcança, medido em produção
+ *
+ * Aquela função separa os dois mundos pela versão que o host REPORTA: o run só
+ * é superado quando o host nomeia uma versão que o run não descreve. O caso que
+ * sobra está escrito lá como falha conservadora: reinstalar À MÃO exatamente a
+ * versão que falhou e dessa vez funcionar. O host volta a reportar
+ * `to_version`, que é uma das duas do run, e o rollback segue de pé.
+ *
+ * Aconteceu numa VPS em 18/09, e não por acaso: a 1.33.0 falhou porque as
+ * imagens ainda não estavam publicadas no registry (o `update.sh` avisa
+ * `not found` e recua). Meia hora depois elas existiam, o mesmo `update.sh
+ * --force` subiu a MESMA 1.33.0 e o app voltou saudável nela. A tela seguiu
+ * anunciando a falha — e, sem botão, bloqueou a 1.35.0 que já havia saído.
+ * "Falhou porque ainda não dava para instalar" é o modo de falha em que
+ * reinstalar a mesma versão é a AÇÃO CORRETA, então o buraco não é raro.
+ *
+ * ## Por que a imagem decide, e decide sozinha
+ *
+ * No rollback de verdade, o contêiner volta para a imagem ANTERIOR: quem
+ * responde é `from_version`. Se quem responde é `to_version`, a imagem nova
+ * subiu — e ninguém precisa contar isso, porque é o próprio processo que está
+ * respondendo. Não há relógio aqui, e é de propósito: a imagem não envelhece
+ * como um heartbeat, então este degrau não precisa de fim de validade.
+ *
+ * ## A versão vem de DENTRO da imagem (`APP_VERSION`), nunca de `APP_IMAGE`
+ *
+ * `APP_VERSION` é gravada no build (`Dockerfile:97-102`) e viaja com a imagem;
+ * é a mesma que o `/api/v1/health` informa. `APP_IMAGE` não serve, e o motivo é
+ * a ORDEM do rollback: o `update.sh` grava `APP_IMAGE=…:<alvo>` no `.env`
+ * ANTES de puxar e subir, e o `agent.sh` volta a imagem passando `APP_IMAGE`
+ * só pelo SHELL (`agent.sh:313-316`), corrigindo o `.env` DEPOIS (`:323`).
+ * Como o compose usa `env_file: .env` (`docker-compose.prod.yml:38`) e o valor
+ * literal do arquivo vence o do shell, o contêiner revertido responde com
+ * `APP_IMAGE` nomeando a versão que FALHOU — e ler dali daria o rollback por
+ * desmentido justamente quando ele é real, escondendo o aviso e anunciando
+ * como no ar a versão que quebrou.
+ */
+export function rollbackDesmentidoPeloApp(
+  run: { status?: string | null; to_version?: string | null } | null | undefined,
+  versaoEmExecucao: string | null | undefined,
+): boolean {
+  if (run?.status !== "failed_rolled_back" && run?.status !== "failed") return false;
+  const alvo = run?.to_version;
+  if (!alvo || !versaoEmExecucao) return false;
+  return semPrefixoV(alvo) === semPrefixoV(versaoEmExecucao);
 }

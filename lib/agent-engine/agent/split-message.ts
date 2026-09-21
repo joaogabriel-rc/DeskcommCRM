@@ -50,7 +50,7 @@ export function splitIntoBubbles(text: string, maxChars: number): string[] {
  * que a bolha seguinte às vezes junta com espaço espúrio ("R$ 7. 990") e às
  * vezes manda em bolhas do WhatsApp SEPARADAS — e um cliente que só via a
  * primeira lia "R$ 10" como preço fechado de um produto de R$ 10.990.
- * Medido em produção (YADEA, 2026-09-04): a moto DT3 (R$ 10.990) anunciada
+ * Medido em produção (2026-09-04): a moto DT3 (R$ 10.990) anunciada
  * como "R$ 10" reais.
  */
 function splitSentences(text: string): string[] {

@@ -1,6 +1,6 @@
 /**
  * GET/POST /api/v1/tags/vocabulario — o vocabulário de etiquetas da organização
- * ativa, e as três operações que faltavam nele (issue #852, fatia S4).
+ * ativa, e as operações que faltavam nele (issue #852, fatia S4; cor: #1271, S6).
  *
  * ── Por que manager, e não agent ─────────────────────────────────────────────
  *
@@ -8,6 +8,12 @@
  * organização, inclusive as regras `add_tag` dos agentes — é decisão de
  * configuração, não de atendimento. Mesmo gate do roteamento de filas
  * (`settings_routing`), que também é configuração de organização.
+ *
+ * `definir_cor` é configuração pelo mesmo motivo, ainda que não toque em linha
+ * nenhuma: quem escolhe a cor de "reclamação" está dizendo como a organização
+ * inteira lê a lista. A leitura leve das cores para o CHIP tem portão próprio
+ * (`GET /api/v1/tags/cores`, `viewer`) — o que muda ali é a pergunta, não o
+ * dado: "de que cor é esta etiqueta" não é "posso mexer nesta etiqueta".
  *
  * ── Por que a rota existe, se o Inbox já lê `GET /conversation-tags` ─────────
  *
@@ -81,18 +87,18 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const parsed = vocabularioDeTagsSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
-    return fail("validation_failed", "Confira a etiqueta e o novo nome.", 422, {
+    return fail("validation_failed", "Confira a etiqueta, o novo nome e a cor.", 422, {
       requestId,
       details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
     });
   }
-  const { acao, tag, destino } = parsed.data;
+  const { acao, tag, destino, cor } = parsed.data;
 
   const db = await createClient();
   // Uma chamada só. Renomear a etiqueta e trocar o nome nas regras `add_tag` dos
   // agentes acontece na MESMA transação — é isto que impede o estado que a issue
   // descreve: contato renomeado com o agente ainda escrevendo o nome antigo.
-  // `fn_tag_operar` (0312) e não `fn_vocabulario_de_tags_operar` direto: o
+  // `fn_tag_operar` (0383) e não `fn_vocabulario_de_tags_operar` direto: o
   // invólucro faz a MESMA operação e, na mesma transação, mantém o registro de
   // etiquetas (`public.tags`) em sincronia — preservando o id no rename.
   //
@@ -100,17 +106,23 @@ export async function POST(req: NextRequest): Promise<Response> {
   // linha do registro com o nome velho: as duas metades da mesma tela passariam
   // a discordar, e a integração que guardou o uuid apontaria para um nome que
   // não existe mais.
+  //
+  // `p_cor` vai sempre (nulo fora do `definir_cor`), e o invólucro o repassa à
+  // função de baixo: a cor é do VOCABULÁRIO (`settings.tags[]`, migration 0336),
+  // que é a fonte única dela — o registro não guarda cor. Mandar o campo
+  // explícito evita depender de como o PostgREST resolve argumento faltando.
   const { data, error } = await db.rpc("fn_tag_operar", {
     p_org: auth.org.orgId,
     p_acao: acao,
     p_tag: tag,
     p_destino: destino ?? null,
+    p_cor: cor ?? null,
   });
   if (error) {
     if (error.code === "42501")
       return fail("forbidden", "Esta sessão não pode mudar as etiquetas da organização.", 403, { requestId });
     if (error.code === "22023")
-      return fail("validation_failed", "Confira a etiqueta e o novo nome.", 422, { requestId });
+      return fail("validation_failed", "Confira a etiqueta, o novo nome e a cor.", 422, { requestId });
     // Índice único do REGISTRO de etiquetas: renomear para um nome já
     // declarado. A transação volta atrás inteira (ver `fn_tag_operar`), então
     // nada ficou pela metade — é só dizer ao operador qual é a saída.
@@ -132,7 +144,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     resourceType: "organization",
     resourceId: auth.org.orgId,
     requestId,
-    metadata: { acao, tag, destino: destino ?? null, ...resultado },
+    metadata: { acao, tag, destino: destino ?? null, cor: cor ?? null, ...resultado },
   });
   return ok(resultado, { requestId });
 }

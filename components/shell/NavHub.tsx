@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import { Card } from "@/components/ui/card";
 import type { Role } from "@/lib/auth/types";
+import { permissaoDaCapacidade } from "@/lib/extensions/capacidades";
+import { portasLegiveis } from "@/lib/extensions/portas-legiveis";
 import { localize, type ExtensionManifest } from "@/lib/extensions/manifest";
 import type { ExtensionGuideView } from "@/lib/extensions/view";
 import { traduzir } from "@/lib/i18n/dicionario";
@@ -205,7 +207,10 @@ export function NavHub({
                             </p>
                           ) : null}
                           <p className="mt-2 text-[11px] text-text-subtle">
-                            {traduzir("Abre Tarefas; não lê seus dados.", locale)}
+                            {portasLegiveis(
+                              [permissaoDaCapacidade(contribution.action.capability)],
+                              (texto) => traduzir(texto, locale),
+                            )}
                           </p>
                         </div>
                       </Card>

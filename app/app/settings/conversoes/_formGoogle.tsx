@@ -35,9 +35,15 @@ const ERRO_EM_PORTUGUES: Record<string, string> = {
 export function FormularioDeConversoesGoogle({
   estado,
   idioma,
+  configurado,
+  falta,
 }: {
   estado: EstadoDaConexaoGoogle;
   idioma: Idioma;
+  /** A instalação tem as três variáveis do Google Ads? Ver `config.ts`. */
+  configurado: boolean;
+  /** O que falta, PELO NOME — para a tela dizer em vez de só esconder o botão. */
+  falta: string[];
 }) {
   const t = (texto: string) => traduzir(texto, idioma);
   const router = useRouter();
@@ -68,6 +74,37 @@ export function FormularioDeConversoesGoogle({
       }
       toast.error(t(ERRO_EM_PORTUGUES[resultado.error] ?? "Não consegui salvar agora."));
     });
+  }
+
+  /*
+   * Sem as credenciais da INSTALAÇÃO, o botão não existe — mesmo quando a
+   * organização já conectou antes: sem elas o envio recusa toda venda
+   * (`conversions.ts`), e mostrar o formulário diria que está tudo de pé. O
+   * molde é o cartão da Agenda (`CartaoDaConexaoGoogle`): não é "você não
+   * pode", é "esta instalação ainda não tem", e quem lê pode repassar o que
+   * falta a quem instalou.
+   */
+  if (!configurado) {
+    return (
+      <Card className="p-6" data-testid="google-ads-nao-configurado">
+        <div className="flex flex-col gap-2">
+          <h3 className="font-medium">{t("Google Ads")}</h3>
+          <p className="text-sm text-muted-foreground">
+            {t("Enviar vendas para o Google Ads ainda não está disponível nesta instalação — não é nada que você tenha feito. Quem instalou o sistema precisa configurar")}
+            {falta.length > 0 ? (
+              <>
+                {" "}
+                <span data-testid="google-ads-o-que-falta" className="font-mono text-xs">
+                  {falta.join(` ${t("e")} `)}
+                </span>
+              </>
+            ) : (
+              ` ${t("as credenciais")}`
+            )}
+          </p>
+        </div>
+      </Card>
+    );
   }
 
   if (!estado.temRefreshToken) {

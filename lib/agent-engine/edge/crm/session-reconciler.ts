@@ -13,7 +13,7 @@
  *      e a sessão parada — o envio exige WORKING, então inbound e auto-resposta
  *      morrem até alguém clicar Reconectar. FAILED não entra: pode ser banimento,
  *      e religar sozinho piora; SCAN_QR_CODE também não — tem gente no celular.
- *   3. REDRIVE: mensagens `sent_via='ai'` presas em `queued` cuja sessão está
+ *   3. REDRIVE: mensagens `sent_via in ('ai','automation','system')` presas em `queued` cuja sessão está
  *      WORKING são reenviadas pelo WAHA (com espaçamento anti-rajada) e marcadas
  *      `sent`. Só linhas ainda `queued` entram, então nada é reenviado duas vezes
  *      pelo mesmo caminho — e, desde 14/09/2026, o eco da mensagem reenviada não
@@ -310,7 +310,7 @@ export async function redriveQueued(
      join channel_sessions s on s.id = m.channel_session_id and s.organization_id = m.organization_id
      join conversations v on v.id = m.conversation_id and v.organization_id = m.organization_id
      join contacts c on c.id = m.contact_id and c.organization_id = m.organization_id
-     where m.sent_via = 'ai' and m.status = 'queued'
+     where m.sent_via in ('ai', 'automation', 'system') and m.status = 'queued'
        and s.status = 'WORKING'
        and c.is_blocked = false
        -- ─── Só as sessões que ESTE resgate consegue alcançar ───────────────
@@ -339,7 +339,7 @@ export async function redriveQueued(
     `select count(*)::text as n
      from messages m
      join channel_sessions s on s.id = m.channel_session_id
-     where m.sent_via = 'ai' and m.status = 'queued'
+     where m.sent_via in ('ai', 'automation', 'system') and m.status = 'queued'
        and s.status = 'WORKING'
        and s.waha_session_name is null
        and m.created_at < now() - make_interval(secs => $1 / 1000.0)`,

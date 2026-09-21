@@ -72,6 +72,17 @@ const LEAD_FIELDS: CuratedField[] = [
   // utm_* entram pelo webhook em source_metadata (decisão da rota inbound),
   // não em custom_fields — o path aqui tem que apontar pra onde o dado mora.
   { value: "lead.source_metadata.utm_source", label: "Origem (utm_source)", op: "eq" },
+  // Os quatro níveis que a ficha do contato mostra, com as MESMAS palavras —
+  // dois vocabulários para o mesmo dado fariam o operador montar a regra sobre
+  // um campo e ler o resultado em outro.
+  { value: "lead.source_metadata.utm_campaign", label: "Campanha (utm_campaign)", op: "eq" },
+  { value: "lead.source_metadata.utm_adset", label: "Conjunto (utm_adset)", op: "eq" },
+  { value: "lead.source_metadata.utm_ad", label: "Anúncio (utm_ad)", op: "eq" },
+  {
+    value: "lead.source_metadata.utm_placement",
+    label: "Posicionamento (utm_placement)",
+    op: "eq",
+  },
 ];
 const STAGE_FIELD: CuratedField = {
   value: "event.to_stage_id",

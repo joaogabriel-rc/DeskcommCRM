@@ -89,21 +89,12 @@ test.describe("navegação agrupada", () => {
 
     // Organização não aparece como título aqui: seu hub (Configurações) vive no
     // rodapé fixo — ver o teste de dobra abaixo.
-    // ⚠️ "Automações" entrou entre Canais e Análise quando Fluxos saiu de dentro
-    // de Canais e ganhou Disparos ao lado: os dois são trabalho que acontece sem
-    // ninguém clicando, e nenhum dos dois é um canal.
-    //
-    // A seção custou dois destinos no sidebar — o orçamento é fixo, e o teste de
-    // dobra logo abaixo é quem o cobra. "Meta Ads" e "Atividades" passaram a
-    // viver no hub do grupo Análise ("Ver tudo em Análise") e no ⌘K, como
-    // "Evolução da IA" e "Audit Log" já faziam. As rotas não mudaram.
     const titulos = sidebar(page).getByRole("heading");
     await expect(titulos).toHaveText([
       "Atendimento",
       "CRM",
       "Agente de IA",
       "Canais",
-      "Automações",
       "Análise",
     ]);
 

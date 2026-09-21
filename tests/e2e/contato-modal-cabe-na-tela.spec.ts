@@ -13,7 +13,7 @@
  * ── O defeito que originou ──────────────────────────────────────────────────
  *
  * Medido em 1280×800 numa organização com ~20 campos declarados (o registro de
- * `contact_fields` chegou na migration 0312; antes dele as definições só vinham
+ * `contact_fields` chegou na migration 0383; antes dele as definições só vinham
  * do funil e eram poucas): o diálogo ficava com 1563px de altura,
  * `overflow-y: visible`, e o botão Salvar em y=1120 — fora da tela, sem
  * rolagem, impossível de clicar. O contato não tinha como ser editado.

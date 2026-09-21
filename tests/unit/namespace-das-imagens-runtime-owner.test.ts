@@ -3,6 +3,12 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  corridaInternaDeFork,
+  donoConfiavelDoRunner,
+  donoDo,
+} from "./_identidade-deste-repo";
+
 /**
  * Âncora EXTERNA do namespace das imagens (#616).
  *
@@ -30,29 +36,33 @@ function imgNs(): string {
   return m[1];
 }
 
-function donoDoNamespace(namespace: string): string {
-  const partes = namespace.split("/");
-  if (partes.length !== 2 || !partes[1]) {
-    throw new Error(`IMG_NS precisa ter forma <registry>/<dono>; recebido: ${namespace}`);
-  }
-  return partes[1];
-}
-
-function donoConfiavelDoRunner(): string | null {
-  if (process.env.GITHUB_ACTIONS !== "true") return null;
-  const dono = process.env.GITHUB_REPOSITORY_OWNER?.trim();
-  if (!dono) {
-    throw new Error(
-      "GITHUB_ACTIONS=true sem GITHUB_REPOSITORY_OWNER: o gate perdeu a âncora externa do runner",
-    );
-  }
-  return dono;
-}
-
 describe("o namespace das imagens é ancorado fora do diff do PR", () => {
-  it("no GitHub Actions, IMG_NS pertence ao dono do repositório que executa o workflow", () => {
+  it("no GitHub Actions, IMG_NS pertence ao dono do repositório que executa o workflow", (ctx) => {
     const donoDoRunner = donoConfiavelDoRunner();
     if (donoDoRunner === null) return;
+
+    // ── A DEFERÊNCIA AO FORK (18/09/2026, decisão do dono do produto) ───────
+    //
+    // Este caso e o de `namespace-das-imagens.test.ts` diziam coisas OPOSTAS
+    // sobre a MESMA corrida: lá o caso deferia ao fork, aqui ele cobrava. Medido
+    // com `GITHUB_REPOSITORY_OWNER=outrodono`: lá `1 skipped` e exit 0, aqui
+    // `1 failed` e exit 1. A decisão de não cobrar do fork NÃO era entregue —
+    // o vermelho chegava por este arquivo.
+    //
+    // A mensagem de erro abaixo já ADMITIA o caso ("é o gate medindo um cenário
+    // que não é o seu"), e isso não basta: quem lê um check obrigatório vermelho
+    // não conclui "não é o meu cenário", conclui que quebrou o projeto. E é o
+    // fork MAIS COMUM — o que roda o CI e não republica imagens — que recebia.
+    //
+    // `ctx.skip` e não `return` silencioso: caso não medido tem de se REPORTAR
+    // como não medido. `return` daria verde, que é a mentira pior.
+    if (corridaInternaDeFork()) {
+      ctx.skip(
+        `corrida interna do fork de ${donoDoRunner}: a âncora externa não mede ` +
+          "este cenário, e cobrar aqui reprovaria um fork que está certo",
+      );
+      return;
+    }
 
     // Minúsculas nos DOIS lados: o namespace de GHCR é obrigatoriamente minúsculo, e
     // `GITHUB_REPOSITORY_OWNER` devolve o login com a caixa original do dono. Sem isto, um
@@ -60,7 +70,7 @@ describe("o namespace das imagens é ancorado fora do diff do PR", () => {
     // vermelho estando certo — e o gate passaria a reprovar fork legítimo, justamente o que
     // o #397 consertou de propósito.
     expect(
-      donoDoNamespace(imgNs()).toLowerCase(),
+      donoDo(imgNs()).toLowerCase(),
       [
         `IMG_NS=${imgNs()} não pertence ao dono confiável deste workflow (${donoDoRunner}).`,
         "Num PR para o DeskcommCRM upstream, não troque o namespace das imagens do projeto.",

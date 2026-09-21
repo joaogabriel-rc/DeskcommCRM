@@ -165,10 +165,30 @@ describe("motivos de perda configurados no funil", () => {
     expect(screen.getByText(/cadastre em Configurações/)).toBeTruthy();
   });
 
-  it("sem funil configurado a frase NÃO aparece — ali 'Outro' aceita texto livre", () => {
+  it("sem funil configurado a frase NÃO aparece antes de digitar — nada a corrigir ainda", () => {
     abrir(comFunil({}));
     fireEvent.click(radio("other"));
     expect(screen.queryByText(/cadastre em Configurações/)).toBeNull();
+  });
+
+  it("BUG REPRODUZIDO (crm.fabrasoftware.com.br): sem funil configurado, texto livre em 'Outro' é recusado ANTES do clique, não 500 depois", () => {
+    // `fn_validate_lost_reason_required` não abre exceção para funil sem
+    // `lost_reasons` cadastrado — o conjunto aceito ali é só o canônico (8
+    // códigos em inglês). Um texto livre em português nunca é um deles, então
+    // a API sempre recusava com 22023 `lost_reason_invalid` — só que DEPOIS do
+    // clique, porque a tela só validava isto quando o funil tinha cadastro.
+    abrir(comFunil({}));
+
+    fireEvent.click(radio("other"));
+    const detalhe = screen.getByLabelText(/Detalhe \(opcional\)/);
+    fireEvent.change(detalhe, { target: { value: "Lead optou em outra solução" } });
+
+    expect(confirmar().disabled).toBe(true);
+    expect(apiPost).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Esse motivo de perda não está na lista deste funil — escolha um dos motivos configurados.",
+    );
+    expect(screen.getByText(/cadastre em Configurações/)).toBeTruthy();
   });
 
   it("sem funil configurado, o padrão do produto e o 'other' vazio continuam valendo", async () => {

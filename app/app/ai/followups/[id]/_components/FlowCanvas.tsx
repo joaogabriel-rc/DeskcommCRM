@@ -343,7 +343,13 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
             onPaneClick={onPaneClick}
             defaultEdgeOptions={{ type: "smoothstep" }}
             connectionLineType={ConnectionLineType.SmoothStep}
-            fitView
+            // Enquadrar só o que já existia ao abrir. Num fluxo vazio o XYFlow
+            // guarda o enquadramento para quando o PRIMEIRO nó for medido — e
+            // enquadrar um nó só é ampliá-lo ao zoom máximo (2x): quem acabou de
+            // criar o fluxo clica em "Gatilho" e a tela salta para 200%, com os
+            // nós seguintes nascendo fora da vista (medido no trace do e2e
+            // followup-cartoes: scale 1 → 2 logo após o primeiro clique).
+            fitView={initial.nodes.length > 0}
           >
             <Background />
             <Controls />

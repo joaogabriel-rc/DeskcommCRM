@@ -1,4 +1,5 @@
 import { googleRpc } from "./google/sync-store";
+import { lerCorposDoLembrete } from "./lembretes";
 /**
  * OS HORÁRIOS LIVRES DE UMA ORGANIZAÇÃO — a coleta, num lugar só.
  *
@@ -796,6 +797,12 @@ export interface TipoDeAtendimento {
   lembreteAntecedenciaMin: number;
   /** Degraus ADICIONAIS, somados ao principal. Vazio = um lembrete só. */
   lembreteDegrausExtras: number[];
+  /** Texto próprio do lembrete principal. null = a frase padrão do cron. */
+  lembreteMensagem: string | null;
+  /** Texto de cada extra, chave = minutos antes. Vazio = nenhum extra tem texto próprio. */
+  lembreteMensagens: Record<string, string>;
+  /** Preço padrão em centavos, ou null quando o negócio digita na hora. */
+  precoPadraoCents: number | null;
 }
 
 export type ResultadoDosTipos =
@@ -825,7 +832,7 @@ export async function listaTiposDeAtendimento(
   let q = supabase
     .from("calendar_event_types")
     .select(
-      "id, name, slug, description, category, duration_minutes, location_kind, location_details, requires_confirmation, is_active, default_owner_user_id, buffer_before_minutes, buffer_after_minutes, minimum_notice_minutes, booking_window_days, reminder_enabled, reminder_minutes_before, reminder_extra_offsets_minutes",
+      "id, name, slug, description, category, duration_minutes, location_kind, location_details, requires_confirmation, is_active, default_owner_user_id, buffer_before_minutes, buffer_after_minutes, minimum_notice_minutes, booking_window_days, reminder_enabled, reminder_minutes_before, reminder_extra_offsets_minutes, reminder_body, reminder_bodies, default_price_cents",
     )
     // Service role bypassa a RLS: este filtro é a única proteção no caminho da
     // ferramenta MCP (ver o cabeçalho do arquivo).
@@ -866,6 +873,14 @@ export async function listaTiposDeAtendimento(
       lembreteDegrausExtras: Array.isArray(t.reminder_extra_offsets_minutes)
         ? t.reminder_extra_offsets_minutes.map(Number)
         : [],
+      lembreteMensagem: t.reminder_body === null || t.reminder_body === undefined
+        ? null
+        : String(t.reminder_body),
+      lembreteMensagens: lerCorposDoLembrete(t.reminder_bodies),
+      precoPadraoCents:
+        t.default_price_cents === null || t.default_price_cents === undefined
+          ? null
+          : Number(t.default_price_cents),
     })),
   };
 }

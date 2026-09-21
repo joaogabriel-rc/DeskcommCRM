@@ -151,7 +151,6 @@ describe("as telas de Configurações oferecem o que o registro deixa aparecer",
             media_retention_days: 365,
             dpo_email: null,
             privacy_policy_url: null,
-            lost_reasons_extra: [],
           }}
         />
       </IdiomaProvider>,

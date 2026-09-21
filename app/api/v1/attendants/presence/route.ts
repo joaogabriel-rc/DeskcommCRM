@@ -26,10 +26,24 @@
  * `tests/unit/attendant-presence-route.test.ts` — se alguém acrescentar
  * `is_available` a este payload, o teste fica vermelho.
  *
- * Não há audit log: um sinal por minuto por aba viraria a tabela de auditoria
- * mais barulhenta do produto, e não há decisão para auditar — a decisão de
- * plantão continua auditada no PATCH que a muda. O rastro da presença é o
- * próprio `last_heartbeat_at`, visível na tela da equipe.
+ * ─── O que audita, e por quê só isso ──────────────────────────────────────
+ *
+ * A régua é a que o CLAUDE.md já escreve para o cron, na seção Audit log:
+ * "Rodada de cron que não fez nada NÃO é mutação e não audita — e a que fez,
+ * audita (…) A guarda certa é auditar quando houve efeito, nunca parar de
+ * auditar". Aqui é o mesmo critério, não uma exceção nova:
+ *
+ * - a PRIMEIRA batida de quem nunca tocou a chave faz INSERT, e esse insert
+ *   dispara `trg_routing_availability_changed` — ou seja, acorda o roteamento,
+ *   que é efeito que outra pessoa sente. Audita, uma linha.
+ * - da segunda em diante é UPDATE de uma coluna fora da lista do trigger:
+ *   ninguém sente nada, e um sinal por minuto por aba viraria a tabela de
+ *   auditoria mais barulhenta do produto. Não audita.
+ * - a ausência (expirar a presença) é derivada em LEITURA, não é escrita, e
+ *   por isso não há o que auditar nela.
+ *
+ * A decisão de plantão continua auditada no PATCH que a muda. O rastro da
+ * presença em si é o próprio `last_heartbeat_at`, visível na tela da equipe.
  *
  * ─── Sem corpo, e por quê ─────────────────────────────────────────────────
  *
@@ -50,6 +64,7 @@ import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 
 import { ok, fail } from "@/lib/api/wrappers";
+import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { PRESENCA_EXPIRA_SEGUNDOS } from "@/lib/atendimento/presenca";
 import { requireSupportWrite } from "@/lib/impersonate/support";
@@ -75,6 +90,17 @@ export async function POST(_req: NextRequest): Promise<Response> {
   const agora = new Date();
   const supabase = await createClient();
 
+  // Ler ANTES para saber se esta é a primeira batida: o `upsert` do PostgREST
+  // devolve a linha, e não diz se ela nasceu agora. É a primeira que INSERE e
+  // acorda o roteamento — e é só ela que audita (ver o cabeçalho).
+  const { data: linhaAnterior } = await supabase
+    .from("attendant_availability")
+    .select("user_id")
+    .eq("organization_id", activeOrg.orgId)
+    .eq("user_id", authUser.id)
+    .maybeSingle();
+  const primeiraBatida = linhaAnterior === null;
+
   const { data, error } = await supabase
     .from("attendant_availability")
     .upsert(
@@ -89,6 +115,18 @@ export async function POST(_req: NextRequest): Promise<Response> {
     .single();
 
   if (error) return fail("internal_error", error.message, 500, { requestId });
+
+  if (primeiraBatida) {
+    void audit({
+      action: "attendant.presence_started",
+      actorUserId: authUser.id,
+      organizationId: activeOrg.orgId,
+      resourceType: "attendant_availability",
+      resourceId: authUser.id,
+      requestId,
+      metadata: { last_heartbeat_at: data.last_heartbeat_at },
+    });
+  }
 
   // A resposta diz o que foi carimbado e até quando vale — e nada sobre
   // disponibilidade: o cliente não tem como concluir desta rota que o plantão

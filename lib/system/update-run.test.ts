@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   canTransition,
   isRunStale,
+  rollbackDesmentidoPeloApp,
   rollbackFoiSuperado,
   sucessoJaInstalado,
   RUN_STALE_AFTER_MS,
@@ -174,5 +175,34 @@ describe("sucessoJaInstalado", () => {
     // conservador é o comportamento de antes desta função existir.
     expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", null, RUN, DENTRO)).toBe(false);
     expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", "isso não é data", RUN, DENTRO)).toBe(false);
+  });
+});
+
+describe("rollbackDesmentidoPeloApp", () => {
+  const ROLLBACK = { status: "failed_rolled_back", to_version: "v1.33.0" };
+
+  it("o app respondendo NA versão que o run diz ter falhado desmente o rollback", () => {
+    // Medido em produção (18/09): a 1.33.0 falhou porque as imagens ainda não
+    // estavam publicadas; meia hora depois o mesmo `update.sh --force` subiu a
+    // MESMA 1.33.0, e a tela seguia anunciando a falha — sem botão, bloqueando
+    // a 1.35.0. O host reporta `to_version`, então a prova temporal não separa;
+    // a imagem separa.
+    expect(rollbackDesmentidoPeloApp(ROLLBACK, "1.33.0")).toBe(true);
+    // O `v` da tag do run não existe na tag da imagem — mesma versão.
+    expect(rollbackDesmentidoPeloApp(ROLLBACK, "v1.33.0")).toBe(true);
+    expect(rollbackDesmentidoPeloApp({ status: "failed", to_version: "1.33.0" }, "1.33.0")).toBe(true);
+  });
+
+  it("rollback de verdade: quem responde é a versão anterior", () => {
+    // O contêiner voltou para `from_version` — é disso que o rollback trata, e
+    // aqui o aviso da tela está CERTO.
+    expect(rollbackDesmentidoPeloApp(ROLLBACK, "1.32.1")).toBe(false);
+  });
+
+  it("sem versão legível, ou run que não falhou, não afirma nada", () => {
+    expect(rollbackDesmentidoPeloApp(ROLLBACK, null)).toBe(false);
+    expect(rollbackDesmentidoPeloApp({ status: "success", to_version: "1.33.0" }, "1.33.0")).toBe(false);
+    expect(rollbackDesmentidoPeloApp({ status: "failed_rolled_back" }, "1.33.0")).toBe(false);
+    expect(rollbackDesmentidoPeloApp(null, "1.33.0")).toBe(false);
   });
 });

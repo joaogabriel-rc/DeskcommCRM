@@ -134,6 +134,13 @@ export const crmListHumanCases: McpToolDefinition<typeof listaChamadosInputShape
     const { chamados, abertos } = await listarChamados(ctx.supabase, ctx.organizationId, {
       estado: input.state,
       limite: input.limit,
+      // `"todas"`, e não o recorte por atendente que a TELA aplica: `ctx.supabase`
+      // é admin por contrato (o agente não é um usuário com sessão, e a org vem
+      // do `ctx`, nunca do input). Recortar aqui faria o agente de IA enxergar
+      // MENOS casos do que enxerga hoje — ele abriu esses casos e é quem
+      // acompanha a fila inteira. A divergência com a tela é deliberada e está
+      // declarada no tipo (`ConversasVisiveis`), não escondida num default.
+      visiveisPara: "todas",
     });
     return { cases: chamados, open_count: abertos };
   },
@@ -158,7 +165,12 @@ export const crmGetHumanCase: McpToolDefinition<typeof chamadoInputShape> = {
   requiresRole: "agent",
   requiresScope: "mcp:read",
   handler: async (input, ctx) => {
-    const chamado = await lerChamado(ctx.supabase, ctx.organizationId, input.case_id);
+    // `"todas"` pela mesma razão de `crm_list_human_cases`: cliente admin por
+    // contrato, e um caso que o agente abriu não pode sumir para ele porque a
+    // conversa não está atribuída a ninguém.
+    const chamado = await lerChamado(ctx.supabase, ctx.organizationId, input.case_id, {
+      visiveisPara: "todas",
+    });
     if (!chamado) throw new Error("case_not_found");
 
     const continuidade = await lerContinuidadeHumana(

@@ -4,7 +4,7 @@ secao: adicionado
 titulo: Fluxos — monte automações de WhatsApp arrastando passos numa tela
 ---
 
-Uma tela nova, **Fluxos** (menu Automações), onde você monta o caminho que o
+Uma tela nova, **Fluxos** (menu Canais), onde você monta o caminho que o
 contato percorre sem escrever regra nenhuma: escolhe o que INICIA a automação,
 adiciona os passos e liga um no outro.
 

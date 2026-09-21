@@ -53,11 +53,23 @@ import { describe, expect, it } from "vitest";
  *
  * ## Escopo, escrito para não ser lido maior do que é
  *
- * Nome literal, com ou sem `if exists`, mais o laço `foreach t in array[...]`
- * com `format('… %s … public.%I')`. Outras formas dinâmicas ficam fora. CHECK e
- * FOREIGN KEY ficam fora: não constroem índice, e as instâncias medidas validam
- * coluna recriada vazia. Função, grant e trigger ficam fora — a mesma classe
- * existe neles (medido na mesma revisão) e é trabalho próprio.
+ * Nome literal, com ou sem `if exists`, mais DUAS formas de laço com
+ * `execute format(…)`:
+ *
+ * - `foreach t in array[...]`, com a lista de tabelas LITERAL — expandido por
+ *   tabela, porque o conjunto é conhecível ao ler o arquivo;
+ * - `for r in <select …> loop`, a varredura de CATÁLOGO — expandido para UMA
+ *   chave simbólica por comando (a tabela vira `<r>`), porque o conjunto NÃO é
+ *   conhecível estaticamente. Preserva a ordem criar↔derruba dentro do corpo,
+ *   que é o que esta régua cobra, sem inventar uma lista que o SQL não declara.
+ *
+ * A segunda entrou em 2026-09-19: a migration 0325 trocou o laço de 30 tabelas
+ * literais pela varredura, e o controle de vivacidade acusou que o instrumento
+ * tinha ficado cego. Outras formas dinâmicas (um `execute` montado por
+ * concatenação, por exemplo) continuam fora. CHECK e FOREIGN KEY ficam fora:
+ * não constroem índice, e as instâncias medidas validam coluna recriada vazia.
+ * Função, grant e trigger ficam fora — a mesma classe existe neles (medido na
+ * mesma revisão) e é trabalho próprio.
  *
  * Lê texto; que o ciclo install→update sai 0 é o job `invariants` quem mede, e
  * `tests/invariants/indices-redundantes-saem.test.ts` mede o estado final.
@@ -226,10 +238,61 @@ function policiesEmLaco(sql: string, verbo: "create" | "drop"): Ocorrencia[] {
   return achadas;
 }
 
+/**
+ * `for r in select … from pg_class … loop … format('… policy x_%s_y on public.%I …')`
+ * — o laço que varre o CATÁLOGO em vez de uma lista literal.
+ *
+ * A lista de tabelas NÃO é conhecível estaticamente, e isso é de propósito: a
+ * migration 0325 trocou o `foreach … in array[30 nomes]` por esta forma
+ * justamente para a proteção alcançar tabela que ainda não existe quando o
+ * baseline é escrito. Expandir por tabela aqui seria inventar uma lista que o
+ * SQL não declara.
+ *
+ * O que o parser faz então é emitir UMA ocorrência SIMBÓLICA por comando, com a
+ * tabela substituída pela variável do laço (`r`). Isso preserva exatamente o que
+ * este arquivo cobra — a ORDEM entre criar e derrubar o MESMO nome dentro do
+ * MESMO corpo — sem afirmar nada sobre quais tabelas serão alcançadas em tempo
+ * de execução. Duas policies de nomes diferentes no mesmo laço continuam sendo
+ * chaves diferentes; a mesma policy criada antes do próprio drop continua sendo
+ * um par proibido.
+ *
+ * O cabeçalho exige `select` para não casar com `for all using (…)` dentro da
+ * definição de uma policy, e `\bfor\s` não alcança `foreach` — as duas formas
+ * não se sobrepõem.
+ */
+function policiesEmLacoDeCatalogo(sql: string, verbo: "create" | "drop"): Ocorrencia[] {
+  const achadas: Ocorrencia[] = [];
+  const laco = /\bfor\s+(\w+)\s+in\s+(?=[\s\S]{0,2000}?\bselect\b)([\s\S]*?)\bloop\b([\s\S]*?)end\s+loop/gi;
+  // O `%s` no NOME é opcional, ao contrário da forma de array. Medido no arquivo
+  // real: a varredura da 0325 usa `tenant_isolation_%s_all` (nome derivado da
+  // tabela), e a das travas de suporte (0274) usa `support_write_insert` — nome
+  // LITERAL sobre tabela dinâmica. Exigir `%s`, como a forma de array faz,
+  // deixava a segunda invisível: 1 ocorrência vista de 4 existentes.
+  const comando =
+    verbo === "create"
+      ? /create policy\s+((?:[a-z0-9_]|%s)+)\s+on\s+public\.%I/gi
+      : /drop policy\s+(?:if exists\s+)?((?:[a-z0-9_]|%s)+)\s+on\s+public\.%I/gi;
+  for (const m of sql.matchAll(laco)) {
+    const variavel = m[1]!;
+    const corpo = m[3]!;
+    const inicioDoCorpo = m.index! + m[0].lastIndexOf(corpo);
+    for (const f of corpo.matchAll(comando)) {
+      const nomeDaPolicy = f[1]!.replaceAll("%s", `<${variavel}>`);
+      achadas.push({
+        chave: `${nomeDaPolicy} on <catálogo:${variavel}>`,
+        nomeProprio: nomeDaPolicy,
+        pos: inicioDoCorpo + f.index!,
+      });
+    }
+  }
+  return achadas;
+}
+
 function criacoesDePolicy(sql: string): Ocorrencia[] {
   return [
     ...ocorrencias(sql, new RegExp(String.raw`create policy\s+` + ALVO_DE_POLICY, "gi"), nomeNaTabela),
     ...policiesEmLaco(sql, "create"),
+    ...policiesEmLacoDeCatalogo(sql, "create"),
   ];
 }
 
@@ -238,6 +301,7 @@ function paresDePolicy(sql: string): Par[] {
   const drops = [
     ...ocorrencias(sql, new RegExp(String.raw`drop policy\s+(?:if exists\s+)?` + ALVO_DE_POLICY, "gi"), nomeNaTabela),
     ...policiesEmLaco(sql, "drop"),
+    ...policiesEmLacoDeCatalogo(sql, "drop"),
   ];
   return pares(sql, drops, criacoes, criacoes);
 }
@@ -439,14 +503,29 @@ describe("o instrumento, contra formas conhecidas", () => {
 describe("baseline.sql não reconstrói o que ele mesmo derruba ou substitui", () => {
   it("o instrumento está vivo no arquivo real: acha pares, laços e redefinições", () => {
     expect(paresDeIndice(SQL).length, "nenhum par cria→derruba encontrado — o parser mudou?").toBeGreaterThan(0);
-    expect(policiesEmLaco(SQL, "create").length, "nenhum laço de policy encontrado — o parser mudou?").toBeGreaterThan(10);
+    // ⚠️ ESTE CONTROLE JÁ DISPAROU DE VERDADE, e a história explica o formato de
+    // agora. Ele exigia `policiesEmLaco(create) > 10`, contando SÓ a forma
+    // `foreach t in array[...]`. A migration 0325 trocou o laço de 30 tabelas
+    // literais pela varredura de catálogo de `fn_proteger_tabelas_de_organizacao`
+    // — e o número caiu de 34 para ZERO num PR que não introduziu defeito
+    // nenhum. O controle fez o que devia: acusou que o instrumento tinha ficado
+    // cego para a única forma que passou a existir.
+    //
+    // A saída NÃO foi baixar o número, que é a cura que satisfaz a catraca pelo
+    // motivo errado: o parser aprendeu a forma nova (`policiesEmLacoDeCatalogo`).
+    // A soma é que se cobra, porque QUAL das duas formas o arquivo usa é decisão
+    // de quem escreve SQL, e trocar uma pela outra não pode reprovar o PR.
+    const emLaco = policiesEmLaco(SQL, "create").length + policiesEmLacoDeCatalogo(SQL, "create").length;
+    expect(emLaco, "nenhum laço de policy encontrado, nas DUAS formas — o parser mudou?").toBeGreaterThan(0);
     // A LIGAÇÃO, e não só a função: sem ela o caso das policies do arquivo real
     // passa por omissão (foi o que a sabotagem que desligou a expansão mostrou —
-    // `policiesEmLaco` sozinha continuava verde).
+    // `policiesEmLaco` sozinha continuava verde). A âncora saiu de uma tabela
+    // nomeada (`lead_state`, que vinha do array literal de 30) para a chave
+    // simbólica da varredura, porque é ela que existe hoje.
     expect(
       criacoesDePolicy(SQL).map((c) => c.chave),
       "a expansão do laço não chega ao localizador de pares",
-    ).toContain("tenant_isolation_lead_state_all on lead_state");
+    ).toContain("tenant_isolation_<r>_all on <catálogo:r>");
   });
 
   it("nenhuma criação de índice antes do próprio drop, fora de condição de verdade", () => {

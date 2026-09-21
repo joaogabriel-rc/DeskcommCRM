@@ -54,7 +54,11 @@ preserve o trabalho do contribuidor e registre a dependência.
    estrutura, não uma jornada: nenhuma prova em tela cria tarefa numa organização sem extensão.
 
 2. **Extensão pede capacidade; não importa o código interno nem lê o banco.** O contrato é uma ação
-   nomeada e estável (hoje, `tasks.open`), revalidada no servidor a cada uso. O pacote não recebe
+   nomeada e estável, de uma **lista fechada** que o host publica, revalidada no servidor a cada
+   uso. Quais portas existem hoje não se afirma em prosa, que envelhece:
+   `grep -n 'EXTENSION_CAPABILITIES' -A10 lib/extensions/capacidades.ts`. A régua para uma porta
+   nova é escrita lá: tela de TRABALHO, sujeita à autorização normal de quem clica — configuração,
+   credencial, cobrança, webhook e administração ficam fora. O pacote não recebe
    cliente Supabase, variável de ambiente, shell, JavaScript, SQL nem dados do CRM. Uma capacidade
    só abre uma porta que o núcleo já tem, com a autorização habitual dela.
 
@@ -81,6 +85,14 @@ preserve o trabalho do contribuidor e registre a dependência.
 6. **Toda troca de ponteiro exige a precondição do que a tela viu.** Atualizar, trocar, desfazer,
    remover e reinstalar levam a revisão da instalação exibida; divergência recusa e recarrega. Uma
    aba antiga nunca rebaixa versão nem desfaz uma remoção em silêncio.
+
+6-bis. **Versão nova não troca o conjunto de portas.** Enquanto existia uma permissão só, a
+   troca era impossível por construção. Com a lista fechada (ADR-0003) ela passou a ser
+   possível — e é **recusada**: atualizar ou desfazer para uma versão com outro conjunto
+   devolve `extension_permissions_changed` (migration 0282, em `fn_extensions_finish_install`
+   e `fn_extensions_revert_install`). Sem isso, a 1.1 abriria portas que ninguém na
+   organização reviu, furando pela lateral a própria lista que a tela existe para mostrar.
+   Quem precisa de outro conjunto publica outra extensão.
 
 7. **Tirar é lógico e preserva dados; apagar é outra ação.** Desativar preserva a configuração.
    Remover da instalação desliga os vínculos ativos, marca o motivo e mantém recibos, artefatos e
@@ -141,7 +153,7 @@ preserve o trabalho do contribuidor e registre a dependência.
 | Existe (perfil declarativo v1) | Ainda não existe | O que pede antes |
 |---|---|---|
 | Catálogo admitido manualmente, download preso à origem com guarda de SSRF | Distribuição pública verificada (TUF) e catálogo compartilhado revisado | Prova (PROG-017 §11; DEC-004 §1) |
-| Pacote JSON estrito com cards de orientação e a capacidade `tasks.open` | Execução de código de terceiros em executor isolado | Prova: a escolha do executor é por evidência (PROG-017 §7 e §14) |
+| Pacote JSON estrito com cards de orientação e as portas de navegação da lista fechada (ADR-0003) | Execução de código de terceiros em executor isolado | Prova: a escolha do executor é por evidência (PROG-017 §7 e §14) |
 | Instalar, atualizar, trocar, desfazer a última troca, remover e reinstalar | Histórico de mais de um passo | Recusado por escrito na spec; volta pelo catálogo |
 | Uma versão por instalação, ativação por organização | Versão por organização | Recusada sem necessidade comprovada (PROG-017 §5) |
 | Nenhum dado de domínio de extensão | Schema próprio de extensão | Módulo nativo oficial: migration + baseline + MANIFEST; tabelas de módulo opcional num banco só, criadas ao instalar o módulo: [ADR-0002](../adr/0002-tabelas-de-modulo-num-banco-so.md), **aceita em 17/09/2026, ainda não construída**; dados de extensão de terceiro: marco 4 (PROG-017 §8) |

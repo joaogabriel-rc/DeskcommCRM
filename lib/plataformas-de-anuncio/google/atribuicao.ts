@@ -59,9 +59,13 @@ export async function extrairEEstamparAtribuicaoGoogle(
     return;
   }
 
-  await estamparAtribuicaoDoContato(admin, contactId, {
+  await estamparAtribuicaoDoContato(admin, organizationId, contactId, {
     plataforma: "google_ads",
     sourceId: casado.gclid,
+    // Não há id de anúncio neste caminho, e não é lacuna a preencher depois: o
+    // `gclid` é o clique, e o token de `[ref:XXXXXX]` não carrega peça criativa
+    // nenhuma. Repetir o `gclid` aqui diria "o anúncio é este clique".
+    adId: null,
     titulo: null,
     corpo: null,
     sourceUrl: null,

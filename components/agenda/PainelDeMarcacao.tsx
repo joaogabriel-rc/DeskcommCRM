@@ -81,6 +81,7 @@ export function PainelDeMarcacao({
   fusoSuposto = false,
   fontesDefasadas,
   googleCoberturaParcial,
+  onMesVisivel,
   quemSeraAtendido,
   horarioInicial,
   permiteEncaixe = false,
@@ -141,7 +142,15 @@ export function PainelDeMarcacao({
   /** O fuso veio do padrão, ninguém escolheu — e o agente oferece horário com ele. */
   fusoSuposto?: boolean;
   /** Agenda conectada que parou de atualizar: o horário fica bloqueado, e a tela diz desde quando. */
+  /** Ocupação do Google ainda não lida para o recorte pedido — aviso, não trava. */
   googleCoberturaParcial?: boolean;
+  /**
+   * O mês que o calendário está mostrando. Quem consulta os horários livres
+   * precisa disto: a busca acompanha o mês visível, senão "Próximo mês" ou
+   * entrega 42 dias mortos ou desliga para não produzir esse estado.
+   */
+  onMesVisivel?: (mes: Date) => void;
+  /** Agenda conectada que parou de atualizar: o horário fica bloqueado, e a tela diz desde quando. */
   fontesDefasadas?: Array<{ nome?: string; desde?: string }>;
   /**
    * Quem vai ser atendido, e se ele aceita receber mensagem.
@@ -211,6 +220,9 @@ export function PainelDeMarcacao({
   const [mes, setMes] = React.useState(() =>
     startOfMonth(horarioInicial ? new Date(horarioInicial.instante) : ancora),
   );
+  React.useEffect(() => {
+    onMesVisivel?.(mes);
+  }, [mes, onMesVisivel]);
   const [encaixeAberto, setEncaixeAberto] = React.useState(false);
   // O que a pessoa DIGITOU sobrevive a "Voltar", à troca de dia e à recusa do
   // servidor: quem ouviu "ocupado" quer corrigir dez minutos, não redigitar.
@@ -286,26 +298,11 @@ export function PainelDeMarcacao({
    *
    *   - instalação fresca: ninguém em `attendant_availability` ⇒ a rota devolve
    *     422 ⇒ o hook joga o erro num toast e `data` fica `undefined` ⇒ o
-   *     `?? true` do chamador diz "publicou" ⇒ 42 dias mortos, zero aviso;
-   *   - navegar para frente: a consulta pede 30 dias e o mês visível é estado
-   *     LOCAL deste painel. Dois cliques em "Próximo mês", numa organização
-   *     perfeitamente configurada, e a grade some — sem toast e sem aviso.
+   *     `?? true` do chamador diz "publicou" ⇒ 42 dias mortos, zero aviso.
    *
    * `nenhumDiaClicavel` é LITERALMENTE a expressão do `disponivel` de cada dia,
    * negada e universal. Por construção os dois não voltam a divergir.
    */
-  /**
-   * Existe algum dia CONSULTADO depois do mês visível?
-   *
-   * Deriva das chaves de `horariosPorDia`, que é o recorte que a consulta de
-   * fato cobriu — e não de uma constante de 30 dias copiada para cá, que
-   * envelheceria no dia em que a janela mudasse.
-   */
-  const temDiaConsultadoDepois = React.useMemo(() => {
-    const fimDoMes = startOfMonth(addDays(startOfMonth(mes), 32));
-    return Object.keys(horariosPorDia).some((chave) => new Date(`${chave}T12:00:00`) >= fimDoMes);
-  }, [horariosPorDia, mes]);
-
   const encaixeLigado = permiteEncaixe && Boolean(fuso) && publicouHorarios && !erroAoCarregar;
   const inicioDeHoje = startOfDay(agora).getTime();
 
@@ -636,15 +633,6 @@ export function PainelDeMarcacao({
               size="icon"
               aria-label={t("Próximo mês")}
               data-testid="mes-seguinte"
-              // NÃO leva a um mês que a consulta nunca cobriu.
-              //
-              // O mês visível é estado LOCAL deste painel e navegar não
-              // reconsulta nada: a busca pede 30 dias a partir de hoje. Dois
-              // cliques aqui, numa organização perfeitamente configurada,
-              // entregavam 42 dias mortos sem toast e sem aviso. O bloco de
-              // motivo acima já explica quando acontece; desabilitar evita
-              // PRODUZIR o estado, que é melhor que explicá-lo.
-              disabled={!temDiaConsultadoDepois}
               onClick={() => setMes((m) => startOfMonth(addDays(startOfMonth(m), 32)))}
             >
               <CaretRight size={16} weight="bold" aria-hidden />
@@ -719,9 +707,7 @@ export function PainelDeMarcacao({
               {t("Nenhum horário livre em")} {format(mes, "MMMM", { locale: localeDaData })}
             </p>
             <p className="mt-1 text-xs leading-4 text-text-muted">
-              {t(
-                "Os próximos 30 dias são o que está publicado hoje — meses adiante aparecem conforme a data se aproxima.",
-              )}
+              {t("Não há horário livre publicado neste mês.")}
             </p>
           </div>
         )}

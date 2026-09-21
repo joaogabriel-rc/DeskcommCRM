@@ -237,6 +237,20 @@ describe("crm_manage_tags", () => {
     expect(cap.updates).toContainEqual({ table: "contacts", values: { tags: ["novo"] } });
   });
 
+  // O que já estava gravado pode estar em caixa mista no banco (dado anterior à
+  // #1224): sem normalizar o que está lá, `remove: ["vip"]` não alcança o "VIP" e
+  // o marcador fica impossível de tirar pela MCP.
+  it("contact: remove alcança o marcador gravado em caixa mista", async () => {
+    const cap = makeCap();
+    const res = (await crmManageTags.handler(
+      { target_kind: "contact", target_id: CONV, add: undefined, remove: ["vip"] },
+      makeCtx(withTags("contacts", ["VIP"]), cap),
+    )) as { tags: string[] };
+
+    expect(res.tags).toEqual([]);
+    expect(cap.updates).toContainEqual({ table: "contacts", values: { tags: [] } });
+  });
+
   it("tag > 40 chars rejeitada", async () => {
     const cap = makeCap();
     await expect(
