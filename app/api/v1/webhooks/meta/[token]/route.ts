@@ -1,5 +1,9 @@
 /**
- * GET|POST /api/v1/webhooks/meta/[token] — webhook da WhatsApp Cloud API.
+ * GET|POST /api/v1/webhooks/meta/[token] — webhook da WhatsApp Cloud API, rota de
+ * COMPATIBILIDADE. O endpoint principal é o universal, `/api/v1/webhooks/meta`, que
+ * descobre a organização pelo número no payload assinado. Esta continua viva porque
+ * o override por número (`webhook-da-sessao.ts`) ainda aponta para ela, e os dois
+ * processam pelo mesmo código (`lib/channels/meta/processar-evento.ts`).
  *
  * `GET` é o handshake de verificação: a Meta só começa a entregar eventos depois
  * que o endpoint devolve `hub.challenge` **em texto puro**. Envelopar em
@@ -31,11 +35,9 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { fail } from "@/lib/api/wrappers";
 import { appDaMeta } from "@/lib/channels/meta/app";
-import { lerEnvelopeMeta } from "@/lib/channels/meta/envelope";
-import { parseMetaWebhook, verificationChallenge, verifyMetaSignature } from "@/lib/channels/meta/webhook";
-import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
+import { lerEntregaDaMeta, processarEventoDaMeta } from "@/lib/channels/meta/processar-evento";
 import { metaSessionByWebhookToken } from "@/lib/channels/meta/session";
-import { logger } from "@/lib/logger";
+import { verificationChallenge } from "@/lib/channels/meta/webhook";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -72,97 +74,31 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
   const session = await metaSessionByWebhookToken(token);
   if (!session) return fail("not_found", "unknown webhook token", 404, { requestId });
 
-  const rawBody = await req.text();
-  // Do mesmo lugar que o handshake: BANCO primeiro, `.env` como piso (0257). Sem
-  // segredo nenhum configurado a verificação devolve `false` e a entrega morre em
-  // 401 — que é o desfecho de hoje, e não um 500.
-  const { appSecret } = await appDaMeta();
-  if (!verifyMetaSignature(rawBody, req.headers.get("x-hub-signature-256"), appSecret ?? "")) {
-    return fail("unauthorized", "invalid_signature", 401, { requestId });
-  }
-
-  // ─── O contrato do fio, ANTES do parser ───────────────────────────────────
-  //
-  // Isto era `JSON.parse(rawBody)` seguido de um `as`: cast, que não confere
-  // nada em execução. `parseMetaWebhook` então faz `for (const entry of
-  // envelope.entry ?? [])` — e `for...of` sobre um número LANÇA. Não há
-  // try/catch em volta: a exceção subia sem ninguém tratá-la (o framework
-  // responde 5xx) e a Meta reentregava em backoff um corpo que nunca melhora.
-  //
-  // 400 e não 200: o 200 generoso desta rota existe para EVENTO QUE NÃO NOS
-  // INTERESSA (a Meta reentrega o que não recebe 2xx), e um payload fora do
-  // contrato não é isso — é o fio ter mudado, que ninguém pode descobrir tarde.
-  // O schema é loose e todo campo é opcional, então chegar aqui exige um campo
-  // que a gente LÊ vir com o tipo errado. Ver lib/channels/meta/envelope.ts.
-  const leitura = lerEnvelopeMeta(rawBody);
+  // Assinatura, contrato do corpo e parse: os mesmos da rota universal
+  // (`lib/channels/meta/processar-evento.ts`).
+  const leitura = await lerEntregaDaMeta(await req.text(), req.headers.get("x-hub-signature-256"), requestId);
   if (!leitura.ok) {
-    if (leitura.motivo === "json_invalido") {
-      return fail("invalid_request", "invalid_json", 400, { requestId });
-    }
-    logger.error("[meta.webhook] payload fora do contrato do canal", {
-      request_id: requestId,
-      campos: leitura.campos,
-    });
-    return fail("validation_failed", "payload fora do contrato do canal", 400, {
+    return fail(leitura.codigo, leitura.mensagem, leitura.status, {
       requestId,
-      details: { campos: leitura.campos },
+      ...(leitura.detalhes !== undefined ? { details: leitura.detalhes } : {}),
     });
   }
 
-  const eventos = parseMetaWebhook(leitura.envelope);
+  const eventos = leitura.eventos;
   const admin = createAdminClient();
   const now = new Date().toISOString();
   /**
-   * Desfecho de cada ingestão. Existe porque a versão anterior fazia
-   * `await ingestMetaInbound(...)` e DESCARTAVA o retorno: um insert que falhava
-   * virava `{"received": 1}` com nada gravado, e "chegou e falhou" ficava
-   * indistinguível de "não chegou". Custou uma hora de diagnóstico no lugar errado.
+   * Desfecho de cada ingestão de mensagem recebida. Existe porque a versão
+   * anterior DESCARTAVA o retorno: um insert que falhava virava `{"received": 1}`
+   * com nada gravado, e "chegou e falhou" ficava indistinguível de "não chegou".
    */
   const desfechos: string[] = [];
 
   for (const e of eventos) {
-    // O evento chega carimbado com a WABA; se não for a desta sessão, ignoramos.
-    // Confiar no `entry.id` para escolher a org seria aceitar o corpo como fonte.
-    if (session.wabaId && e.wabaId && e.wabaId !== session.wabaId) continue;
-
-    if (e.kind === "inbound_message") {
-      // A metade que faltava: mensagem do contato vira linha no inbox, move lead,
-      // acorda o agente — e carimba `last_inbound_at`, que é o que ABRE a janela
-      // de 24h que o gate da Fase 4 calcula.
-      // A organização vem do TOKEN DO PATH, nunca do corpo: é a mesma fonte que
-      // decide onde os dois updates abaixo escrevem. Sem ela a ingestão
-      // resolvia a sessão só pelo `phone_number_id` do payload — e duas
-      // organizações com o mesmo número faziam a mensagem ser descartada para
-      // as duas, com 200 na resposta (issue #236).
-      const r = await ingestMetaInbound(admin, e, { organizationId: session.organizationId });
-      desfechos.push(r.status);
-      if (r.status === "failed" || r.status === "no_session") {
-        // 2xx continua (a Meta re-entregaria em loop), mas a falha NÃO fica muda:
-        // vai ao log estruturado e ao corpo da resposta.
-        console.error("[meta.ingest] inbound não ingerido", {
-          status: r.status,
-          reason: r.status === "failed" ? r.reason : undefined,
-          external_id: e.externalId,
-          phone_number_id: e.phoneNumberId,
-        });
-      }
-      continue;
-    }
-
-    if (e.kind === "template_status") {
-      await admin
-        .from("meta_templates")
-        .update({ status: e.event, rejected_reason: e.reason, updated_at: now })
-        .eq("organization_id", session.organizationId)
-        .eq("waba_id", e.wabaId)
-        .eq("name", e.templateName)
-        .eq("language", e.templateLanguage);
-    } else {
-      await admin
-        .from("messages")
-        .update({ status: e.status === "failed" ? "failed" : "sent", updated_at: now })
-        .eq("organization_id", session.organizationId)
-        .eq("external_id", e.externalId);
+    // A organização vem do TOKEN DO PATH, nunca do corpo (issue #236).
+    const desfecho = await processarEventoDaMeta(admin, e, session, now);
+    if (e.kind === "inbound_message" && desfecho && desfecho !== "waba_divergente") {
+      desfechos.push(desfecho);
     }
   }
 

@@ -135,6 +135,12 @@ export interface InboundMessageEvent {
 export interface MessageStatusEvent {
   kind: "message_status";
   wabaId: string;
+  /**
+   * O número que enviou a mensagem, de `value.metadata.phone_number_id`. É por ele
+   * que o endpoint universal descobre de quem é o status. Opcional: entrega sem
+   * `metadata` continua sendo lida (e a rota por token não precisa dele).
+   */
+  phoneNumberId?: string;
   externalId: string;
   status: string;
   recipient: string | null;
@@ -246,6 +252,7 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
       }
 
       if (change.field === "messages" && Array.isArray(v.statuses)) {
+        const numeroDoStatus = str(((v.metadata ?? {}) as Record<string, unknown>).phone_number_id);
         for (const raw of v.statuses as Record<string, unknown>[]) {
           const id = str(raw.id);
           if (!id) continue;
@@ -256,6 +263,7 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
           out.push({
             kind: "message_status",
             wabaId,
+            ...(numeroDoStatus ? { phoneNumberId: numeroDoStatus } : {}),
             externalId: id,
             status: str(raw.status) ?? "unknown",
             recipient: str(raw.recipient_id),

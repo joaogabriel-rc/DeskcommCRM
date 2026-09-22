@@ -78,6 +78,81 @@ export async function metaSessionByWebhookToken(
   };
 }
 
+type Admin = ReturnType<typeof createAdminClient>;
+
+/** Sem ambiguidade: o que o endpoint universal pode usar, e o que ele NÃO deve adivinhar. */
+export type SessaoDoNumero =
+  | { encontrada: true; sessao: MetaWebhookSession }
+  | { encontrada: false; motivo: "sem_sessao" | "ambigua" };
+
+const ID_DA_META = /^\d{5,25}$/;
+
+/**
+ * A sessão oficial ATIVA dona deste `phone_number_id`, em QUALQUER organização —
+ * é assim que o endpoint universal descobre o tenant de um evento.
+ *
+ * Buscar sem filtro de organização é o desenho, não descuido: a organização é o
+ * que se quer descobrir, e a fonte é o nosso banco. Só é seguro porque (1) o
+ * `phone_number_id` vem de um corpo com assinatura HMAC válida do App Secret da
+ * instalação e (2) o índice único parcial da migration 0165 garante no máximo uma
+ * sessão ativa por número.
+ *
+ * `limit(2)` e não `maybeSingle()`: num banco em que o índice não chegou, duas
+ * linhas não viram erro nem palpite — viram `ambigua`, e ninguém recebe o evento.
+ * **Lança quando a consulta falha**: a rota responde 5xx e a Meta reentrega, em vez
+ * de a mensagem se perder com um 200.
+ */
+export async function metaSessionByPhoneNumberId(admin: Admin, phoneNumberId: string): Promise<SessaoDoNumero> {
+  if (!ID_DA_META.test(phoneNumberId)) return { encontrada: false, motivo: "sem_sessao" };
+  const base = () =>
+    admin
+      .from("channel_sessions")
+      .select("id, organization_id, meta_waba_id")
+      .eq("provider", CHANNEL_PROVIDER_META)
+      .eq("meta_phone_number_id", phoneNumberId);
+  const { data, error } = await queryTolerantToMissingArchived(
+    () => base().is(ARCHIVED_AT, null).limit(2),
+    () => base().limit(2),
+  );
+  if (error) {
+    throw new Error(`sessao_do_numero: ${error.code ?? "sem_codigo"} ${error.message ?? ""}`.trim());
+  }
+  const linhas = (data ?? []) as Array<{ id: string; organization_id: string; meta_waba_id: string | null }>;
+  if (linhas.length === 0) return { encontrada: false, motivo: "sem_sessao" };
+  if (linhas.length > 1) return { encontrada: false, motivo: "ambigua" };
+  const [l] = linhas;
+  return { encontrada: true, sessao: { id: l!.id, organizationId: l!.organization_id, wabaId: l!.meta_waba_id ?? null } };
+}
+
+/**
+ * As sessões oficiais ATIVAS desta WABA — para o evento que não traz número, que é
+ * a mudança de estado de um template (`message_template_status_update`). O
+ * template é da WABA, e toda organização que tem sessão com ela espelha o mesmo
+ * template; por isso é uma LISTA, e cada uma recebe o update escopado a si.
+ * Lança quando a consulta falha, pelo mesmo motivo da busca por número.
+ */
+export async function metaSessionsByWabaId(admin: Admin, wabaId: string): Promise<MetaWebhookSession[]> {
+  if (!ID_DA_META.test(wabaId)) return [];
+  const base = () =>
+    admin
+      .from("channel_sessions")
+      .select("id, organization_id, meta_waba_id")
+      .eq("provider", CHANNEL_PROVIDER_META)
+      .eq("meta_waba_id", wabaId);
+  const { data, error } = await queryTolerantToMissingArchived(
+    () => base().is(ARCHIVED_AT, null),
+    () => base(),
+  );
+  if (error) {
+    throw new Error(`sessoes_da_waba: ${error.code ?? "sem_codigo"} ${error.message ?? ""}`.trim());
+  }
+  return ((data ?? []) as Array<{ id: string; organization_id: string; meta_waba_id: string | null }>).map((l) => ({
+    id: l.id,
+    organizationId: l.organization_id,
+    wabaId: l.meta_waba_id ?? null,
+  }));
+}
+
 /**
  * A sessão oficial ATIVA da organização (se houver). Usada pela tela de templates
  * para saber QUAL WABA espelhar — e para dizer ao operador o que fazer quando não

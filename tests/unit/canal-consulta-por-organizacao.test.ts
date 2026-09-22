@@ -50,6 +50,15 @@ const COLUNAS_DE_REF = CHANNEL_SESSION_REF_COLUMNS.split(",")
   .map((c) => c.trim())
   .filter((c) => c !== "provider");
 
+/**
+ * As colunas que, sem `organization_id`, também resolvem o tenant: as de ref e a
+ * WABA. `meta_waba_id` não é ref de sessão — a sessão é o NÚMERO, e por isso ela
+ * fica fora de `CHANNEL_SESSION_REF_COLUMNS` —, mas filtrar por ela devolve as
+ * sessões de TODA organização que conectou a mesma conta, que é o risco que esta
+ * varredura existe para pegar. Sem ela aqui, a busca por WABA passava sem ser vista.
+ */
+const COLUNAS_QUE_RESOLVEM_TENANT = [...COLUNAS_DE_REF, "meta_waba_id"];
+
 function arquivosTs(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const p = path.join(dir, e.name);
@@ -58,9 +67,38 @@ function arquivosTs(dir: string): string[] {
   });
 }
 
+/**
+ * EXCEÇÕES DECLARADAS — consultas que resolvem o tenant PELO identificador do
+ * provider, de propósito. A lista não é álibi: cada entrada nomeia a função, o
+ * porquê e quem decidiu, e os testes do fim deste arquivo prendem as condições
+ * que tornam a exceção segura (ambiguidade recusada, um único chamador).
+ */
+const RESOLVEM_O_TENANT: ReadonlyArray<{ arquivo: string; funcao: string; motivo: string }> = [
+  {
+    arquivo: "lib/channels/meta/session.ts",
+    funcao: "metaSessionByPhoneNumberId",
+    motivo:
+      "webhook UNIVERSAL da Meta (/api/v1/webhooks/meta): a organização é o que se quer descobrir. " +
+      "O phone_number_id vem de um corpo com assinatura HMAC do App Secret da instalação, o dono vem " +
+      "do banco (índice único 0165) e dono ambíguo não recebe nada. Decisão do dono do produto em " +
+      "22/09/2026, com o custo aceito: quem tiver o App Secret forja evento para qualquer tenant.",
+  },
+  {
+    arquivo: "lib/channels/meta/session.ts",
+    funcao: "metaSessionsByWabaId",
+    motivo:
+      "webhook UNIVERSAL da Meta: message_template_status_update não traz número, só a WABA. O " +
+      "template é da WABA e toda organização com sessão ativa nela o espelha (a conexão só aceita " +
+      "WABA que o token da organização alcança); cada escrita é escopada pelo organization_id da " +
+      "sessão. Várias linhas é o caso normal (agência), não ambiguidade. Mesma decisão de 22/09/2026.",
+  },
+];
+
 interface Consulta {
   arquivo: string;
   linha: number;
+  /** A função que contém a consulta — é por ela que uma exceção é declarada. */
+  funcao: string | null;
   /** Filtros da cadeia em si — é onde o escopo de tenant tem de estar. */
   filtros: string[];
   /** Filtros da cadeia MAIS os do terminal. Ver o comentário abaixo. */
@@ -104,9 +142,11 @@ function consultas(fonte: string, arquivo: string): Consulta[] {
     const fim2 = nasceEmClosure && fim !== -1 ? fonte.indexOf(";", fim + 1) : fim;
     const comTerminal = fonte.slice(i, fim2 === -1 ? fonte.length : fim2);
 
+    const funcoes = [...fonte.slice(0, i).matchAll(/function\s+([A-Za-z0-9_]+)\s*\(/g)];
     out.push({
       arquivo: path.relative(RAIZ, arquivo),
       linha: fonte.slice(0, i).split("\n").length,
+      funcao: funcoes.at(-1)?.[1] ?? null,
       filtros: colunasFiltradas(cadeia),
       filtrosComTerminal: colunasFiltradas(comTerminal),
     });
@@ -126,13 +166,17 @@ describe("lib/channels: consulta a channel_sessions por identificador do provide
     expect(COLUNAS_DE_REF).toContain("meta_phone_number_id");
     expect(COLUNAS_DE_REF).toContain("zernio_account_id");
     expect(COLUNAS_DE_REF).not.toContain("provider");
+    // A varredura tem de ENXERGAR a busca por WABA — senão a exceção abaixo não prende nada.
+    expect(COLUNAS_QUE_RESOLVEM_TENANT).toContain("meta_waba_id");
+    expect(TODAS.some((c) => c.filtros.includes("meta_waba_id"))).toBe(true);
   });
 
   it("quem filtra por identificador do provider filtra organization_id também", () => {
     const faltando = TODAS.filter(
       (c) =>
-        c.filtros.some((f) => COLUNAS_DE_REF.includes(f)) &&
-        !c.filtros.includes("organization_id"),
+        c.filtros.some((f) => COLUNAS_QUE_RESOLVEM_TENANT.includes(f)) &&
+        !c.filtros.includes("organization_id") &&
+        !RESOLVEM_O_TENANT.some((x) => x.arquivo === c.arquivo && x.funcao === c.funcao),
     ).map((c) => `${c.arquivo}:${c.linha} (filtros: ${c.filtros.join(", ") || "nenhum"})`);
 
     expect(
@@ -152,7 +196,7 @@ describe("lib/channels: consulta a channel_sessions por identificador do provide
     // linhas, justo no ponto em que o banco deixou de proteger.
     const semRecorte = TODAS.filter(
       (c) =>
-        c.filtros.some((f) => COLUNAS_DE_REF.includes(f)) &&
+        c.filtros.some((f) => COLUNAS_QUE_RESOLVEM_TENANT.includes(f)) &&
         !c.filtrosComTerminal.includes("archived_at"),
     ).map((c) => `${c.arquivo}:${c.linha}`);
 
@@ -185,3 +229,69 @@ describe("lib/channels: o erro da resolução não pode virar caminho feliz", ()
     });
   }
 });
+
+describe("lib/channels: as exceções que resolvem o tenant (número e WABA) continuam seguras", () => {
+  it("toda exceção declarada existe de verdade (lista sem entrada morta)", () => {
+    for (const x of RESOLVEM_O_TENANT) {
+      expect(
+        TODAS.some((c) => c.arquivo === x.arquivo && c.funcao === x.funcao),
+        `${x.arquivo}#${x.funcao} não tem mais consulta a channel_sessions — tire da lista`,
+      ).toBe(true);
+    }
+  });
+
+  it("metaSessionByPhoneNumberId recusa dono ambíguo em vez de escolher um", () => {
+    const fonte = fs.readFileSync(path.join(RAIZ, "lib/channels/meta/session.ts"), "utf8");
+    const corpo = fonte.slice(fonte.indexOf("export async function metaSessionByPhoneNumberId"));
+    const funcao = corpo.slice(0, corpo.indexOf("\n}\n") + 2);
+    // `limit(2)` e não `maybeSingle()`: duas linhas têm de virar recusa, nunca palpite.
+    expect(funcao).toMatch(/\.limit\(2\)/);
+    expect(funcao).not.toMatch(/maybeSingle\(/);
+    expect(funcao).toMatch(/linhas\.length > 1\) return \{ encontrada: false, motivo: "ambigua" \}/);
+    expect(funcao).toMatch(/if \(error\) \{\s*throw new Error\(/);
+  });
+
+  it("só o webhook universal a chama — e ele confere a assinatura antes", () => {
+    const chamadores = [...arquivosDoProduto(path.join(RAIZ, "app")), ...arquivosDoProduto(path.join(RAIZ, "lib"))]
+      .filter((a) => fs.readFileSync(a, "utf8").includes("metaSessionByPhoneNumberId("))
+      .map((a) => path.relative(RAIZ, a))
+      .filter((a) => a !== "lib/channels/meta/session.ts");
+    expect(chamadores).toEqual(["app/api/v1/webhooks/meta/route.ts"]);
+
+    const rota = fs.readFileSync(path.join(RAIZ, "app/api/v1/webhooks/meta/route.ts"), "utf8");
+    const post = rota.slice(rota.indexOf("export async function POST"));
+    expect(post.indexOf("lerEntregaDaMeta(")).toBeGreaterThan(-1);
+    expect(post.indexOf("lerEntregaDaMeta(")).toBeLessThan(post.indexOf("metaSessionByPhoneNumberId("));
+    expect(post).toMatch(/if \(!leitura\.ok\) \{\s*return fail\(/);
+  });
+
+  it("metaSessionsByWabaId: só o webhook universal a chama, depois da assinatura, e a escrita é escopada", () => {
+    const chamadores = [...arquivosDoProduto(path.join(RAIZ, "app")), ...arquivosDoProduto(path.join(RAIZ, "lib"))]
+      .filter((a) => fs.readFileSync(a, "utf8").includes("metaSessionsByWabaId("))
+      .map((a) => path.relative(RAIZ, a))
+      .filter((a) => a !== "lib/channels/meta/session.ts");
+    expect(chamadores).toEqual(["app/api/v1/webhooks/meta/route.ts"]);
+
+    const rota = fs.readFileSync(path.join(RAIZ, "app/api/v1/webhooks/meta/route.ts"), "utf8");
+    const post = rota.slice(rota.indexOf("export async function POST"));
+    expect(post.indexOf("lerEntregaDaMeta(")).toBeGreaterThan(-1);
+    expect(post.indexOf("lerEntregaDaMeta(")).toBeLessThan(post.indexOf("metaSessionsByWabaId("));
+
+    // A busca devolve sessões de VÁRIAS organizações: o que as separa é a escrita
+    // levar o organization_id da sessão, nunca o do corpo.
+    const processar = fs.readFileSync(path.join(RAIZ, "lib/channels/meta/processar-evento.ts"), "utf8");
+    const inicio = processar.indexOf('.from("meta_templates")');
+    expect(inicio).toBeGreaterThan(-1);
+    const escrita = processar.slice(inicio, processar.indexOf(";", inicio));
+    expect(escrita).toMatch(/\.update\(/);
+    expect(escrita).toMatch(/\.eq\("organization_id", sessao\.organizationId\)/);
+  });
+});
+
+function arquivosDoProduto(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) return e.name === "node_modules" ? [] : arquivosDoProduto(p);
+    return e.isFile() && /\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p) ? [p] : [];
+  });
+}

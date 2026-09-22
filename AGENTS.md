@@ -261,6 +261,13 @@ o controlador (`organizations.legal_name`) e o DPO.
   `git ls-files 'app/api/**/route.ts' | wc -l`. Toda query precisa filtrar
   `organization_id` manualmente, resolvido de fonte confiável
   (cookie/JWT/webhook secret/path token), **nunca do body**.
+  Exceção única e declarada: o webhook universal da Meta (`/api/v1/webhooks/meta`)
+  resolve o tenant pelo `phone_number_id` de um corpo com assinatura HMAC do App
+  Secret da instalação — dono vem do banco, dono ambíguo não recebe nada — ou,
+  para `message_template_status_update` (sem número), pela WABA: todas as sessões
+  ativas nela, cada escrita escopada pelo `organization_id` da sessão. Custo
+  aceito em 22/09/2026: o App Secret basta para forjar evento a qualquer tenant.
+  Presa por `tests/unit/canal-consulta-por-organizacao.test.ts`; ver `CLAUDE.md`.
 - **`lib/auth/public-paths.ts`** — adicionar path aqui remove a checagem de auth de borda.
   Só com guard próprio dentro da rota.
 - **`.env*`** — não abra, não copie valor, não logue. Só `.env.example` é template.
