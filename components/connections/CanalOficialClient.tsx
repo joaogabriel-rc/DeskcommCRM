@@ -15,6 +15,7 @@ import {
 } from "@/hooks/channels/useOfficialChannel";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useT } from "@/hooks/i18n/useT";
+import { BotaoCadastroIncorporado } from "./BotaoCadastroIncorporado";
 import { ChannelAiAccess } from "./ChannelAiAccess";
 import { ParaIntegrar } from "./ParaIntegrar";
 
@@ -68,8 +69,11 @@ export function CanalOficialClient() {
   const conectar = useConnectOfficialChannel();
   const registrarWebhook = useRegistrarWebhookOficial();
   const [form, setForm] = useState({ phone_number_id: "", waba_id: "", token: "" });
+  /** `null` = ninguém mexeu: aberto por padrão só quando a Meta não está disponível. */
+  const [manualAberto, setManualAberto] = useState<boolean | null>(null);
 
   const estado = data?.data;
+  const cadastro = estado?.cadastroIncorporado;
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
@@ -98,6 +102,11 @@ export function CanalOficialClient() {
             <Badge variant={estado.hasToken ? "outline" : "destructive"}>
               {estado.hasToken ? t("credencial guardada") : t("sem credencial")}
             </Badge>
+            {estado.tokenExpiraEm ? (
+              <Badge variant="outline" data-testid="token-expira-em">
+                {t("autorização vale até")} {new Date(estado.tokenExpiraEm).toLocaleDateString()}
+              </Badge>
+            ) : null}
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
             WABA <span className="font-mono">{estado.wabaId}</span> · {t("número")}{" "}
@@ -236,7 +245,26 @@ export function CanalOficialClient() {
         />
       ) : null}
 
-      <Card className="p-4">
+      <BotaoCadastroIncorporado
+        disponivel={Boolean(cadastro?.disponivel)}
+        faltando={cadastro?.faltando ?? []}
+        versaoDaGraph={cadastro?.versaoDaGraph ?? ""}
+        configurarNaInstalacao={Boolean(cadastro?.configurarNaInstalacao)}
+        jaConectado={Boolean(estado?.connected)}
+      />
+
+      {/* O formulário manual continua inteiro: é o caminho de quem não tem o app da
+          Meta configurado na instalação, ou já tem um token de usuário do sistema. */}
+      <details
+        className="rounded-xl border"
+        open={manualAberto ?? !cadastro?.disponivel}
+        onToggle={(e) => setManualAberto(e.currentTarget.open)}
+        data-testid="conexao-manual"
+      >
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+          {t("Conexão manual / avançado")}
+        </summary>
+      <Card className="border-0 p-4 pt-0 shadow-none">
         <h2 className="font-medium">
           {estado?.connected ? t("Trocar credencial") : t("Conectar canal oficial")}
         </h2>
@@ -289,6 +317,7 @@ export function CanalOficialClient() {
           </Button>
         </form>
       </Card>
+      </details>
     </div>
   );
 }

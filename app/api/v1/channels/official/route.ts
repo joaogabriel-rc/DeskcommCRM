@@ -30,16 +30,11 @@ import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
 import { appDaMeta, appDaMetaDoAmbiente } from "@/lib/channels/meta/app";
+import { disponibilidadeDoCadastroIncorporado } from "@/lib/channels/meta/cadastro-incorporado";
+import { conectarCanalOficial } from "@/lib/channels/meta/conectar";
 import { metaGraphBase } from "@/lib/channels/meta/credentials";
-import { validateMetaCredentials } from "@/lib/channels/meta/validate-credentials";
-import {
-  COLUNAS_DO_DESFECHO_DO_WEBHOOK,
-  registrarWebhookDaSessao,
-} from "@/lib/channels/meta/webhook-da-sessao";
-import { reactivateChannelSession } from "@/lib/channels/reactivate";
+import { COLUNAS_DO_DESFECHO_DO_WEBHOOK } from "@/lib/channels/meta/webhook-da-sessao";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { metadataInicialDoCanal } from "@/lib/ai/elegibilidade/pre-go-live";
-import { encryptWebhookSecret } from "@/lib/webhooks/secrets";
 import { basePublicaDaInstalacao } from "@/lib/webhooks/url-publica";
 import { traduzir } from "@/lib/i18n/dicionario";
 
@@ -77,6 +72,24 @@ async function lerDesfechoDoWebhook(
     .maybeSingle();
   if (error) return null;
   return data as DesfechoGravado | null;
+}
+
+/**
+ * A validade do token, em consulta própria pelo mesmo motivo de
+ * `lerDesfechoDoWebhook`: a coluna chega na migration 0384, e sem ela o select
+ * principal perderia o canal inteiro por causa de um dado acessório.
+ */
+async function lerValidadeDoToken(
+  admin: ReturnType<typeof createAdminClient>,
+  channelSessionId: string,
+): Promise<string | null> {
+  const { data, error } = await admin
+    .from("channel_sessions")
+    .select("meta_token_expires_at")
+    .eq("id", channelSessionId)
+    .maybeSingle();
+  if (error) return null;
+  return (data as { meta_token_expires_at?: string | null } | null)?.meta_token_expires_at ?? null;
 }
 
 /**
@@ -141,7 +154,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const base = basePublicaDaInstalacao(req);
   const desfecho = data?.id ? await lerDesfechoDoWebhook(admin, data.id) : null;
+  const tokenExpiraEm = data?.id ? await lerValidadeDoToken(admin, data.id) : null;
+  const cadastro = await disponibilidadeDoCadastroIncorporado();
   return ok({
+    /**
+     * O Cadastro Incorporado da Meta pode ser oferecido nesta instalação? O App ID
+     * e o Configuration ID chegam ao navegador pelo `<PublicEnvScript/>`; o que só
+     * o servidor sabe — se o App Secret existe — vem daqui, junto da versão da
+     * Graph que o SDK precisa usar (a mesma do resto do canal).
+     */
+    cadastroIncorporado: {
+      disponivel: cadastro.disponivel,
+      faltando: cadastro.disponivel ? [] : cadastro.faltando,
+      versaoDaGraph: cadastro.versaoDaGraph,
+      configurarNaInstalacao: authz.user.is_platform_admin && !authz.user.support,
+    },
+    /** Validade do token gravado. `null` = não expira ou desconhecida (fluxo manual). */
+    tokenExpiraEm,
     connected: Boolean(data),
     channel_session_id: data?.id ?? null,
     // `hasToken` em vez do token: uma vez gravado, a tela mostra que EXISTE, nunca
@@ -203,150 +232,50 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const { phone_number_id, waba_id, token } = parsed.data;
 
-  // VALIDA ANTES DE GRAVAR — a rota não sabe com quem fala; ela pergunta se a
-  // credencial presta e o canal responde.
-  //
-  // `wabaId` junto desde a fatia F1: a checagem do número sozinha aceita o par
-  // trocado (número de uma conta, id de outra), e o registro do webhook logo abaixo
-  // apontaria o override de um número que esta instalação não controla.
-  const validacao = await validateMetaCredentials({
+  // Validar, cifrar, gravar e registrar o webhook é o MESMO caso de uso do
+  // Cadastro Incorporado — mora em `lib/channels/meta/conectar.ts`, e a rota só
+  // traduz o desfecho. A validação vem ANTES de qualquer escrita: gravar primeiro
+  // e descobrir depois é o que faz o operador achar que conectou.
+  const desfecho = await conectarCanalOficial({
+    admin: createAdminClient(),
+    organizationId: orgId,
+    userId,
+    requestId,
     phoneNumberId: phone_number_id,
-    token,
     wabaId: waba_id,
+    token,
+    base: basePublicaDaInstalacao(req),
   });
-  if (!validacao.ok) {
-    return fail("invalid_request", validacao.motivo, 422, { requestId });
+
+  if (!desfecho.ok) {
+    switch (desfecho.motivo) {
+      case "credencial_recusada":
+        return fail("invalid_request", desfecho.detalhe, 422, { requestId });
+      case "cifra_indisponivel":
+        // Sem a GUC de cifra, gravar o token em claro seria pior que recusar.
+        return fail(
+          "invalid_request",
+          t("cifra indisponível nesta instalação (GUC app.nuvemshop_oauth_key ausente) — o token não foi gravado"),
+          422,
+          { requestId },
+        );
+      case "numero_em_outra_organizacao":
+        return fail(
+          "state_conflict",
+          t("Este número já está conectado em outra organização desta instalação."),
+          409,
+          { requestId },
+        );
+      case "falha_ao_gravar":
+        return fail("internal_error", desfecho.detalhe, 500, { requestId });
+    }
   }
 
-  const admin = createAdminClient();
-  const cifrado = await encryptWebhookSecret(admin, token);
-  if (!cifrado) {
-    // Sem a GUC de cifra configurada, gravar o token em claro seria pior que
-    // recusar. O operador precisa saber que falta uma configuração de servidor.
-    return fail(
-      "invalid_request",
-      t("cifra indisponível nesta instalação (GUC app.nuvemshop_oauth_key ausente) — o token não foi gravado"),
-      422,
-      { requestId },
-    );
-  }
-
-  // A busca NÃO filtra `archived_at`: um canal oficial excluído é exatamente o
-  // que este POST precisa achar para trazer de volta. Ignorá-lo criaria uma
-  // SEGUNDA linha oficial na org — e a linha velha continuaria segurando o par
-  // (org, número) na trava da 0106.
-  const buscarExistente = (colunas: string) =>
-    admin
-      .from("channel_sessions")
-      .select(colunas)
-      .eq("organization_id", orgId)
-      .eq("provider", CHANNEL_PROVIDER_META)
-      .maybeSingle();
-  const { data: existenteRaw } = await queryTolerantToMissingArchived(
-    () => buscarExistente(`id, ${ARCHIVED_AT}, webhook_path_token`),
-    () => buscarExistente("id, webhook_path_token"),
-  );
-  const existente = existenteRaw as {
-    id: string;
-    archived_at?: string | null;
-    webhook_path_token?: string | null;
-  } | null;
-
-  const linha = {
-    organization_id: orgId,
-    provider: CHANNEL_PROVIDER_META,
-    meta_phone_number_id: phone_number_id,
-    meta_waba_id: waba_id,
-    meta_token_encrypted: cifrado,
-    phone_number: validacao.displayPhoneNumber ? `+${validacao.displayPhoneNumber.replace(/\D/g, "")}` : null,
-    display_name: validacao.verifiedName ?? "Canal oficial",
-    status: "WORKING",
-  };
-
-  // `update` quando já existe em vez de upsert: a trava única de (org,
-  // phone_number) não serve de árbitro de `ON CONFLICT` aqui. Era DEFERRABLE
-  // (medido ao criar a sessão de teste da Fase 3b, e o Postgres recusa
-  // constraint deferível na inferência); a migration 0107 a trocou por um índice
-  // único PARCIAL (`where archived_at is null`), que só seria inferível se a
-  // cláusula repetisse o predicado — e o cliente do PostgREST não expõe isso.
-  // Mudou a razão, não a escolha.
-  //
-  // O update passa por `reactivateChannelSession` porque reconectar é
-  // ressuscitar: o mesmo patch que devolve status, credencial e número tem que
-  // devolver a linha à vida, ou o canal fica "conectado" na tela e excluído para
-  // todo o resto do sistema. Para o canal que já estava ativo é um no-op — e a
-  // auditoria de volta sai de lá, junto da ressurreição, não daqui.
-  let idDaSessao: string | null = existente?.id ?? null;
-  let webhookPathToken: string | null = existente?.webhook_path_token ?? null;
-  let error: { message?: string | null } | null = null;
-
-  if (existente) {
-    ({ error } = await reactivateChannelSession(
-      admin,
-      {
-        organizationId: orgId,
-        channelSessionId: existente.id,
-        archivedAt: existente.archived_at ?? null,
-      },
-      linha,
-      {
-        userId: userId,
-        requestId,
-        metadata: { provider: CHANNEL_PROVIDER_META, phone_number: linha.phone_number },
-      },
-    ));
-  } else {
-    // `select("id, webhook_path_token")` porque o registro do webhook logo abaixo
-    // precisa dos DOIS: o id para gravar o desfecho na mesma linha, e o token porque
-    // é ele que compõe a URL que a Meta vai chamar. O INSERT não os devolve sozinho,
-    // e reler a linha por (org, provider) seria uma segunda ida ao banco pelo dado
-    // que este INSERT acabou de criar.
-    const inserida = await admin
-      .from("channel_sessions")
-      .insert({
-        ...linha,
-        webhook_secret_encrypted: cifrado,
-        metadata: metadataInicialDoCanal(),
-      })
-      .select("id, webhook_path_token")
-      .maybeSingle();
-    error = inserida.error;
-    idDaSessao = inserida.data?.id ?? null;
-    webhookPathToken = inserida.data?.webhook_path_token ?? null;
-  }
-
-  if (error) {
-    return fail("internal_error", error.message ?? "channel_session_write_failed", 500, {
-      requestId,
-    });
-  }
-
-  // ─── O webhook DESTE número, registrado pela própria instalação (fatia F1) ──
-  // DEPOIS de gravar, nunca antes: o GET de verificação da Meta chega no instante
-  // em que o override é registrado e procura a sessão pelo `webhook_path_token` —
-  // registrar antes de a linha existir devolveria 404 e a Meta marcaria o webhook
-  // como inválido, que é pior que não registrar.
-  //
-  // E o desfecho volta na RESPOSTA, não só no log: quem colou as credenciais precisa
-  // saber que o canal envia mas ainda não entrega, com o motivo em mãos.
-  const webhook =
-    idDaSessao && webhookPathToken
-      ? await registrarWebhookDaSessao({
-          admin,
-          channelSessionId: idDaSessao,
-          phoneNumberId: phone_number_id,
-          wabaId: waba_id,
-          tokenCifrado: cifrado,
-          webhookPathToken,
-          base: basePublicaDaInstalacao(req),
-          requestId,
-        })
-      : null;
-
+  const webhook = desfecho.webhookRegistro;
   return ok({
     connected: true,
-    displayName: linha.display_name,
-    phoneNumber: linha.phone_number,
+    displayName: desfecho.displayName,
+    phoneNumber: desfecho.phoneNumber,
     /** `registrado: false` NÃO desfaz a conexão — o canal envia; falta a entrega. */
     webhookRegistro: webhook
       ? { registrado: webhook.registrado, url: webhook.url, erro: webhook.erro, em: webhook.em }

@@ -71,6 +71,11 @@ export async function PublicEnvScript({
     // `""`), então o navegador não precisa aprender um segundo jeito de dizer
     // "não tem logo".
     APP_LOGO_URL: marca.logoUrl ?? "",
+    // Cadastro Incorporado da Meta: o SDK do navegador precisa dos dois para abrir
+    // o fluxo. Identificadores públicos do app, não segredo — o App Secret nunca
+    // passa por aqui.
+    META_APP_ID: env.META_APP_ID,
+    META_EMBEDDED_SIGNUP_CONFIG_ID: env.META_EMBEDDED_SIGNUP_CONFIG_ID,
   })
     // Evita quebrar o </script> se algum valor contiver a sequência.
     .replace(/</g, "\\u003c");

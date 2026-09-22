@@ -4276,6 +4276,7 @@ export type Database = {
           last_status_change_at: string
           meta_phone_number_id: string | null
           meta_token_encrypted: string | null
+          meta_token_expires_at: string | null
           meta_waba_id: string | null
           meta_webhook_override_em: string | null
           meta_webhook_override_erro: string | null
@@ -4312,6 +4313,7 @@ export type Database = {
           last_status_change_at?: string
           meta_phone_number_id?: string | null
           meta_token_encrypted?: string | null
+          meta_token_expires_at?: string | null
           meta_waba_id?: string | null
           meta_webhook_override_em?: string | null
           meta_webhook_override_erro?: string | null
@@ -4348,6 +4350,7 @@ export type Database = {
           last_status_change_at?: string
           meta_phone_number_id?: string | null
           meta_token_encrypted?: string | null
+          meta_token_expires_at?: string | null
           meta_waba_id?: string | null
           meta_webhook_override_em?: string | null
           meta_webhook_override_erro?: string | null

@@ -405,6 +405,14 @@ const schema = z.object({
   GOOGLE_ADS_OAUTH_CLIENT_ID: z.string().optional().default(""),
   GOOGLE_ADS_OAUTH_CLIENT_SECRET: z.string().optional().default(""),
 
+  // Cadastro Incorporado da Meta (Embedded Signup) — opcionais. Não são segredo:
+  // vão ao navegador pelo <PublicEnvScript/>, porque o SDK da Meta precisa delas
+  // para abrir o fluxo. O App Secret NÃO entra aqui — é de `lib/channels/meta/app.ts`
+  // (banco acima do `.env`) e nunca sai do servidor. Sem as duas, a tela oferece
+  // só a conexão manual.
+  META_APP_ID: z.string().optional().default(""),
+  META_EMBEDDED_SIGNUP_CONFIG_ID: z.string().optional().default(""),
+
   // Nuvemshop — opcional (template genérico open-source). Só exigidas quando
   // NUVEMSHOP_ENABLED=true; o runtime já degrada via getConfig()==null.
   NUVEMSHOP_APP_ID: z.string().optional().default(""),

@@ -5,6 +5,19 @@ import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { apiClient } from "@/lib/api/client";
 
 export interface OfficialChannelState {
+  /**
+   * O Cadastro Incorporado da Meta pode ser oferecido aqui? `faltando` nomeia o que
+   * a instalação ainda não tem — a tela só mostra os nomes a quem administra a
+   * instalação. Opcional: servidor anterior a esta versão não manda.
+   */
+  cadastroIncorporado?: {
+    disponivel: boolean;
+    faltando: string[];
+    versaoDaGraph: string;
+    configurarNaInstalacao: boolean;
+  };
+  /** Até quando a autorização gravada vale. `null` = não expira ou desconhecida. */
+  tokenExpiraEm?: string | null;
   channel_session_id?: string | null;
   connected: boolean;
   /** Existe token gravado? O token em si NUNCA volta — ver a rota. */
@@ -49,6 +62,21 @@ export interface ConnectInput {
   phone_number_id: string;
   waba_id: string;
   token: string;
+}
+
+export interface ConclusaoDoCadastro {
+  state: string;
+  code: string;
+  evento?: string;
+  sugestao?: { waba_id?: string; phone_number_id?: string };
+}
+
+export interface CanalConectadoPeloCadastro {
+  connected: boolean;
+  displayName: string;
+  phoneNumber: string | null;
+  tokenExpiraEm: string | null;
+  webhookRegistro: { registrado: boolean; url: string | null; erro: string | null; em: string } | null;
 }
 
 export interface RegistroDoWebhook {
@@ -96,6 +124,37 @@ export function useRegistrarWebhookOficial() {
     mutationFn: async () =>
       apiClient.post<{ data: RegistroDoWebhook }>("/api/v1/channels/official/webhook", {}),
     onError: showApiError,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["official-channel"] });
+    },
+  });
+}
+
+/**
+ * Emite o `state` do Cadastro Incorporado. Chamado ANTES do clique: o popup da
+ * Meta só abre se o clique chamar o SDK sem esperar nada. Função simples e não
+ * mutação do react-query: não há cache a invalidar, e quem chama controla o
+ * próprio estado de "preparando".
+ */
+export function pedirEstadoDoCadastroIncorporado() {
+  return apiClient.post<{ data: { state: string; expira_em: string } }>(
+    "/api/v1/channels/official/cadastro/iniciar",
+    {},
+  );
+}
+
+/**
+ * Entrega o authorization code ao servidor. Sem `onError` genérico: a recusa traz
+ * uma frase acionável (code expirado, conta sem número...) e quem a mostra é a tela.
+ */
+export function useConcluirCadastroIncorporado() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: ConclusaoDoCadastro) =>
+      apiClient.post<{ data: CanalConectadoPeloCadastro }>(
+        "/api/v1/channels/official/cadastro/concluir",
+        input,
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["official-channel"] });
     },

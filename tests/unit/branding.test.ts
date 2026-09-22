@@ -847,6 +847,27 @@ const HOSTS_DECLARADOS: Record<string, EntradaDeHost> = {
     motivo:
       "endpoint da Graph API do WhatsApp Cloud — 6 arquivos: envio de template, sincronização de modelos, validação de credencial, conversões e insights. É contrato da Meta, não escolha nossa.",
   },
+  // ── Cadastro Incorporado da Meta (Embedded Signup v4) ──
+  "connect.facebook.net": {
+    categoria: "FORNECEDOR",
+    motivo:
+      "de onde o navegador carrega o SDK JavaScript oficial da Meta que abre o Cadastro Incorporado (`lib/channels/meta/cadastro-incorporado-navegador.ts`). É o único endereço em que a Meta publica o SDK; trocá-lo pelo domínio do revendedor faria o botão nunca abrir.",
+  },
+  "www.facebook.com": {
+    categoria: "FORNECEDOR",
+    motivo:
+      "origem da janela da Meta que conduz o Cadastro Incorporado: é a lista EXATA de origens cujas mensagens `WA_EMBEDDED_SIGNUP` o navegador aceita (`lib/channels/meta/cadastro-incorporado-navegador.ts`). Conferir contra ela — e não contra `endsWith('facebook.com')` — é o que impede `evilfacebook.com` de se passar pela Meta.",
+  },
+  "web.facebook.com": {
+    categoria: "FORNECEDOR",
+    motivo:
+      "mesma lista exata de origens do Cadastro Incorporado que `www.facebook.com`: é outro host em que a Meta serve a mesma janela de login. Fora da lista, a mensagem da Meta seria descartada e o fluxo concluiria sem sugestão.",
+  },
+  "business.facebook.com": {
+    categoria: "FORNECEDOR",
+    motivo:
+      "mesma lista exata de origens do Cadastro Incorporado: host do Gerenciador de Negócios, em que a Meta pode servir a etapa de escolha da conta. A mensagem continua sendo só sugestão — o servidor confirma WABA e número com a própria Meta.",
+  },
   "www.googleapis.com": {
     categoria: "FORNECEDOR",
     motivo:

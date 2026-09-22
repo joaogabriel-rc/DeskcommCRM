@@ -21,6 +21,9 @@ interface PublicEnv {
    */
   APP_NAME?: string;
   APP_LOGO_URL?: string;
+  /** Cadastro Incorporado da Meta — identificadores públicos do app. Vazio = indisponível. */
+  META_APP_ID?: string;
+  META_EMBEDDED_SIGNUP_CONFIG_ID?: string;
 }
 
 interface Window {

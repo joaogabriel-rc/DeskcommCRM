@@ -89,6 +89,19 @@ fonte só (`lib/onboarding/passos.ts`) — eram três listas que discordavam. Ga
 | J2.5 | WAHA derrubado (docker stop) | banner claro, botões desabilitados, 503 amigável |
 | J2.6 | Atendente (role agent) não vê botão de conectar | gate admin respeitado na UI |
 | J2.7 | AntiBanSheet: editar ritmo/janela/teto | salva, persiste em `channel_knobs`, validação de janela |
+| J2.8 | Canal oficial: "Conectar WhatsApp com Meta" (Embedded Signup v4) — popup da Meta, autorizar WABA e número | card "Conectado" com nome e número, webhook registrado, validade da autorização quando a Meta informa; nenhum ID ou token digitado |
+| J2.9 | Cadastro Incorporado cancelado no popup / conta sem número / número já em outra organização | mensagem acionável na tela, nada gravado |
+| J2.10 | Instalação sem `META_APP_ID`/`META_EMBEDDED_SIGNUP_CONFIG_ID` | botão substituído por aviso (nomes das variáveis só para quem administra a instalação); "Conexão manual / avançado" aberto e funcional |
+
+> **J2.8–J2.10 (2026-09-22):** cobertos por teste de componente
+> (`tests/unit/cadastro-incorporado-tela.test.tsx`, SDK da Meta dublado) e pela rota
+> (`tests/unit/cadastro-incorporado-rota.test.ts`). **Prova pela tela com a Meta real
+> AINDA NÃO FEITA:** exige o app buildado com `META_APP_ID`/`META_EMBEDDED_SIGNUP_CONFIG_ID`
+> no ambiente, domínio HTTPS permitido no app da Meta e uma conta com papel no app. Os
+> relatórios do spike guardados nesta VPS (2026-09-22) não chegaram ao fluxo (`FB.login`
+> voltou `status: "unknown"`, sem code e sem mensagem da Meta); o dono do produto relata
+> o Configuration ID validado depois, sem relatório aqui. Até a prova pela tela, os
+> payloads da v4 que o código trata são os DOCUMENTADOS pela Meta.
 
 ## J3 — Agentes de IA `[P0]` (criação) / `[P1]` (rotina)
 

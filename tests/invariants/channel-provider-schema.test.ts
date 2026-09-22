@@ -72,11 +72,14 @@ describe("0087 · o canal da sessão chega ao clone", () => {
                        where table_schema = 'public' and table_name = 'channel_sessions'
                          and column_name like 'meta\\_%' order by 1`).split("\n");
     // As três `meta_webhook_override_*` (migration 0311) entraram de propósito: são o
-    // desfecho do registro do webhook do número ao conectar o canal oficial. A cerca
-    // continua valendo — ela existe para pegar coluna que entrou SEM querer.
+    // desfecho do registro do webhook do número ao conectar o canal oficial. E
+    // `meta_token_expires_at` (migration 0384) é a validade do token que o Cadastro
+    // Incorporado da Meta informa. A cerca continua valendo — ela existe para pegar
+    // coluna que entrou SEM querer.
     expect(cols).toEqual([
       "meta_phone_number_id",
       "meta_token_encrypted",
+      "meta_token_expires_at",
       "meta_waba_id",
       "meta_webhook_override_em",
       "meta_webhook_override_erro",

@@ -37043,6 +37043,18 @@ comment on column public.channel_sessions.meta_webhook_override_erro is
   'Motivo da última falha ao registrar o webhook, como a Graph API devolveu. Não é falha da conexão: o canal envia normalmente; o que depende disto é a ENTREGA. Nulo = última tentativa deu certo.';
 comment on column public.channel_sessions.meta_webhook_override_em is
   'Quando foi a última TENTATIVA de registrar (sucesso ou falha). A tela usa a data para o operador saber se o estado que ele vê é o de agora.';
+
+-- ---- A validade do token do canal oficial (migration 0384) ----
+--
+-- O Cadastro Incorporado da Meta entrega um token cuja validade depende da
+-- configuração do app; o CRM pergunta à Meta (`debug_token.expires_at`) e guarda
+-- aqui. Nulo = não expira ou desconhecido (conexão manual). Uma data, não um
+-- segredo: herda o acesso das colunas vizinhas. Idempotente.
+alter table public.channel_sessions
+  add column if not exists meta_token_expires_at timestamptz;
+
+comment on column public.channel_sessions.meta_token_expires_at is
+  'Até quando o token do canal oficial vale, como a Meta respondeu no debug_token ao conectar pelo Cadastro Incorporado. Nulo = não expira ou desconhecido (conexão manual).';
 -- ---- a resposta revisada para de segurar a Zona de perigo (migration 0273) ----
 -- A FK inline da 0227 nasceu sem ação de exclusão (NO ACTION) e era a ÚNICA das
 -- quatro que apontam para `public.messages(id)` fora do padrão `on delete set
