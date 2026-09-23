@@ -1,6 +1,6 @@
 /**
  * PUT /api/v1/flows/[id]/graph — substitui nós+arestas atomicamente
- * (fn_flow_replace_graph, migration 0382). O canvas manda o grafo inteiro a
+ * (fn_flow_replace_graph, migration 0388). O canvas manda o grafo inteiro a
  * cada save — mesma semântica do editor de follow-up (draft_graph).
  *
  * Exige exatamente 1 nó TAG_TRIGGER (é o ponto de entrada que o engine usa em

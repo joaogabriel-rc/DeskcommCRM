@@ -210,7 +210,7 @@ describe("fatia S4 — vocabulário de tags (contrato do que foi escrito)", () =
     expect(rota).toContain('requireRole("manager"');
     expect(rota).toContain('rpc("fn_vocabulario_de_tags", {');
     // ⚠️ A ESCRITA MUDOU DE NOME, NÃO DE NATUREZA. Esta linha exigia
-    // `fn_vocabulario_de_tags_operar` direto. Desde a migration 0383 a rota
+    // `fn_vocabulario_de_tags_operar` direto. Desde a migration 0389 a rota
     // chama `fn_tag_operar`, um invólucro que executa AQUELA função e a
     // sincronia do registro de etiquetas (`public.tags`) no mesmo corpo — logo,
     // na mesma transação. É mais transacional do que era, não menos: antes a
@@ -224,7 +224,7 @@ describe("fatia S4 — vocabulário de tags (contrato do que foi escrito)", () =
   });
 
   it("o invólucro transacional chama MESMO a operação de vocabulário", () => {
-    const sql = ler("supabase/migrations/20260921130100_0383_tags_campos_disparos.sql");
+    const sql = ler("supabase/migrations/20260921130100_0389_tags_campos_disparos.sql");
     expect(sql).toMatch(/create or replace function public\.fn_tag_operar\(/);
     // `p_cor` (0336) é REPASSADO: a cor é do vocabulário (`settings.tags[]`), e
     // um invólucro que o engolisse faria `definir_cor` "funcionar" sem gravar.

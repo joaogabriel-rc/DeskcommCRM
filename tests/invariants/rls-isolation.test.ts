@@ -113,6 +113,7 @@ beforeAll(() => {
       v_method uuid;
       v_event_type uuid;
       v_sale uuid;
+      v_camp    uuid;
       v_sale_item uuid;
     begin
       foreach v_org in array array['${ORG_A}'::uuid, '${ORG_B}'::uuid] loop
@@ -352,7 +353,7 @@ beforeAll(() => {
             values (v_org, 'anthropic', 'rls-invariant', '\\x00'::bytea, '\\x00'::bytea, '\\x00'::bytea, '0000');
         end if;
 
-        -- Flow Builder (migration 0382): o flow inteiro — desenho (flows,
+        -- Flow Builder (migration 0388): o flow inteiro — desenho (flows,
         -- flow_nodes, flow_edges) e histórico (flow_executions,
         -- flow_execution_events). Vazar o desenho entrega ao vizinho o texto
         -- que a organização manda aos clientes dela; vazar a execução entrega
@@ -380,7 +381,7 @@ beforeAll(() => {
             values (v_org, v_exec, v_node_a, 'entered');
         end if;
 
-        -- Registro de vocabulario e disparos (migration 0383). Vazar tags e
+        -- Registro de vocabulario e disparos (migration 0389). Vazar tags e
         -- contact_fields entrega ao vizinho COMO a organizacao segmenta a
         -- carteira dela: os nomes das etiquetas e dos campos sao a estrategia
         -- comercial escrita. Vazar broadcasts entrega a campanha antes de ela
@@ -517,6 +518,38 @@ beforeAll(() => {
                     '\\x00'::bytea, '\\x000000000000000000000000'::bytea,
                     '\\x00000000000000000000000000000000'::bytea);
         end if;
+
+        -- migrations 0374/0375 -- a campanha e quem ela alcancou. A tabela
+        -- campaigns NAO entra na lista de TABLES porque nao tem FK para
+        -- contacts; as duas que guardam pessoa, sim. channel_session_id e
+        -- obrigatorio e reusa a sessao que esta semente ja criou.
+        if not exists (select 1 from public.campaigns where organization_id = v_org) then
+          -- um id por ORGANIZACAO: o loop roda para as duas, e um uuid sorteado
+          -- na declaracao seria o MESMO nas duas voltas (campaigns_pkey).
+          v_camp := gen_random_uuid();
+          insert into public.campaigns
+            (id, organization_id, name, channel_session_id, base_legal, lia_ref)
+            values (v_camp, v_org, 'RLS invariant campanha', v_sess,
+                    'legitimate_interest', 'LIA-RLS-INVARIANTE');
+
+          insert into public.campaign_recipients
+            (organization_id, campaign_id, contact_id, recipient_address, rendered_body)
+            values (v_org, v_camp, v_contact, '+5500000000000', 'RLS invariant mensagem');
+
+          insert into public.campaign_suppressions
+            (organization_id, contact_id, recipient_address_hash, address_tail, reason)
+            values (v_org, v_contact, md5(v_org::text || 'rls-invariante'), '0000', 'RLS invariant');
+
+          -- o texto salvo e o pool de numeros da campanha: as duas sao
+          -- tenant-aware e entram na lista abaixo pelo mesmo motivo.
+          insert into public.campaign_templates
+            (organization_id, name, body)
+            values (v_org, 'RLS invariant modelo', 'RLS invariant corpo');
+
+          insert into public.campaign_channel_sessions
+            (organization_id, campaign_id, channel_session_id)
+            values (v_org, v_camp, v_sess);
+        end if;
       end loop;
     end
     $seed$;
@@ -595,7 +628,7 @@ export const TABLES = [
   // positivo. O SELECT de `authenticated` é por COLUNA, sem as colunas cifradas:
   // a contagem abaixo usa só `organization_id` e mede o que um membro enxerga.
   "ai_provider_credentials",
-  // migration 0382 — o Flow Builder inteiro. O DESENHO (flows/flow_nodes/
+  // migration 0388 — o Flow Builder inteiro. O DESENHO (flows/flow_nodes/
   // flow_edges) é o texto que a organização manda para os clientes dela e as
   // regras de quando mandar; o HISTÓRICO (flow_executions/
   // flow_execution_events) diz QUEM recebeu, o que respondeu e por qual
@@ -609,7 +642,7 @@ export const TABLES = [
   "flow_edges",
   "flow_executions",
   "flow_execution_events",
-  // migration 0383 — o vocabulário e os disparos. `tags` e `contact_fields`
+  // migration 0389 — o vocabulário e os disparos. `tags` e `contact_fields`
   // são a ESTRATÉGIA comercial escrita em palavras ("cci_diz_que_pagou",
   // "produto_interesse"); `broadcasts` é a campanha antes de sair; e
   // `broadcast_recipients` é a lista de clientes de quem a campanha é. Leitura
@@ -677,6 +710,14 @@ export const TABLES = [
   // natural seria afrouxar a policy para caber no molde. A prova dela vive em
   // `tests/invariants/historico-de-captacao-rls.test.ts`, que mede as duas
   // direções MAIS o gate de papel (o `viewer` que não lê o formulário).
+  // migrations 0374/0375 — a campanha guarda o que foi DITO à pessoa
+  // (`rendered_body`) e o endereço para onde foi. Entram aqui no MESMO commit
+  // da migration, como a nota acima exige.
+  "campaign_recipients",
+  "campaign_suppressions",
+  "campaigns",
+  "campaign_templates",
+  "campaign_channel_sessions",
 ] as const;
 
 describe("RLS tenant isolation (fn_user_org_ids pattern)", () => {

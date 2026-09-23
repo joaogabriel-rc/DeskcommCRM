@@ -15,7 +15,7 @@
  * ── O que ele oferece ───────────────────────────────────────────────────────
  *
  * Os campos fixos do contato e TODOS os campos do registro da organização
- * (migration 0383), pelo nome que a pessoa deu, inserindo a chave correta. É a
+ * (migration 0389), pelo nome que a pessoa deu, inserindo a chave correta. É a
  * única coisa aqui que garante que o que está escrito na mensagem corresponde a
  * algo que existe.
  */

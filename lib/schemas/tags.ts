@@ -136,7 +136,7 @@ export type LinhaDeVocabulario = {
 };
 
 /* ────────────────────────────────────────────────────────────────────────────
- * O REGISTRO de etiquetas (migration 0383) — a tag como ENTIDADE, com id.
+ * O REGISTRO de etiquetas (migration 0389) — a tag como ENTIDADE, com id.
  *
  * O que muda em relação ao bloco acima: ali a etiqueta só existia depois de
  * alguém escrevê-la em algum lugar, e a tela mostrava o que já tinha sido

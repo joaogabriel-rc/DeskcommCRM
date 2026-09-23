@@ -13,7 +13,7 @@
  * componente não sabe de onde vieram e não deve saber — é ele que desenha, não
  * que decide.
  *
- * ── `datetime` e `list` entraram com o registro (migration 0383) ────────────
+ * ── `datetime` e `list` entraram com o registro (migration 0389) ────────────
  *
  * São dois dos seis tipos que a tela de Campos do Usuário oferece. Sem eles
  * aqui, um campo criado como "Data e hora" cairia no `default` do switch e

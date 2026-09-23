@@ -170,7 +170,7 @@ export async function conectarCanalOficial(entrada: EntradaDaConexao): Promise<D
 
 /**
  * Update PRÓPRIO, e não uma chave a mais em `linha`: num banco sem a migration
- * 0384 a coluna não existe, e levá-la junto faria o PostgREST recusar a escrita
+ * 0392 a coluna não existe, e levá-la junto faria o PostgREST recusar a escrita
  * inteira (42703) — o canal deixaria de conectar por causa de um dado acessório.
  */
 async function gravarValidadeDoToken(

@@ -26,7 +26,7 @@
  * ── A fronteira de serviço NÃO é criada aqui ────────────────────────────────
  *
  * Ela foi ancorada quando o operador AUTORIZOU o disparo (`fn_broadcast_materializar`,
- * migration 0383) e está gravada na linha do destinatário. O worker só
+ * migration 0389) e está gravada na linha do destinatário. O worker só
  * reconfere (`assertServiceBoundarySupabase`) e recusa se o mundo mudou. Um
  * tick que fabricasse autorização própria é exatamente o que
  * `beginServiceAtOrigin` proíbe — e com razão: retentativa não é consentimento

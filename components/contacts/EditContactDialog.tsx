@@ -103,7 +103,7 @@ export function EditContactDialog({ contact, open, onOpenChange, customFieldDefs
           organização que declarou vinte, este diálogo ficava com 1563px de
           altura, `overflow-y: visible`, e o botão Salvar em y=1120 — fora da
           tela, sem rolagem, impossível de clicar. Antes do registro de campos
-          (migration 0383) isso não aparecia: as definições só vinham do funil e
+          (migration 0389) isso não aparecia: as definições só vinham do funil e
           eram poucas.
 
           A primeira tentativa de conserto foi `max-h + overflow-y-auto` no

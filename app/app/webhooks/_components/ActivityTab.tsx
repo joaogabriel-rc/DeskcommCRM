@@ -106,7 +106,7 @@ const MOTIVO_DA_PARADA: Record<string, string> = {
     "O funil escolhido não está ativo, então a inscrição não foi feita. Ative o funil ou escolha outro na automação.",
   live_enrollment_exists: "O contato já está em um funil ativo — esta ação não inscreve duas vezes.",
   consent_declined: "O contato não autorizou o recebimento de mensagens de marketing.",
-  // Ações das automações visuais (migrations 0382/0383): iniciar fluxo, campo
+  // Ações das automações visuais (migrations 0388/0389): iniciar fluxo, campo
   // personalizado e conversa.
   missing_flow_id: "Esta ação não tem um fluxo escolhido. Abra a automação e escolha qual fluxo iniciar.",
   flow_not_found:

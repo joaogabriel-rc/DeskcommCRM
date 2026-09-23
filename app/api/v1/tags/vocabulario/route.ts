@@ -98,7 +98,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   // Uma chamada só. Renomear a etiqueta e trocar o nome nas regras `add_tag` dos
   // agentes acontece na MESMA transação — é isto que impede o estado que a issue
   // descreve: contato renomeado com o agente ainda escrevendo o nome antigo.
-  // `fn_tag_operar` (0383) e não `fn_vocabulario_de_tags_operar` direto: o
+  // `fn_tag_operar` (0389) e não `fn_vocabulario_de_tags_operar` direto: o
   // invólucro faz a MESMA operação e, na mesma transação, mantém o registro de
   // etiquetas (`public.tags`) em sincronia — preservando o id no rename.
   //

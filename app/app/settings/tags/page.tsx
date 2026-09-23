@@ -66,7 +66,7 @@ export default async function TagsPage() {
     p_org: activeOrg.orgId,
   });
 
-  // O REGISTRO (migration 0383) — a lista DECLARADA, com id. Lido aqui, no
+  // O REGISTRO (migration 0389) — a lista DECLARADA, com id. Lido aqui, no
   // servidor, e passado como `initialData` para o painel não piscar vazio antes
   // do primeiro fetch. Client da SESSÃO: quem recorta a organização é a RLS de
   // `public.tags`, e o `.eq` é defesa em profundidade.

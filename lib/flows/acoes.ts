@@ -12,7 +12,7 @@
  */
 /**
  * `campo` (o seletor de campo do contato) e `tags` (o seletor de etiqueta)
- * leem os REGISTROS da organização (migration 0383) em vez de aceitarem texto
+ * leem os REGISTROS da organização (migration 0389) em vez de aceitarem texto
  * solto. Antes disso a chave do campo era DIGITADA no painel, e um erro de
  * digitação gravava um campo fantasma que a mensagem seguinte renderizava
  * vazio — sem erro em lugar nenhum, porque gravar `custom_fields.prduto` é uma

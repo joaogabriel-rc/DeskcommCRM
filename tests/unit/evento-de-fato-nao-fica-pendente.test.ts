@@ -250,7 +250,7 @@ function tiposConsumidos(): Set<string> {
  * disco (nunca se edita migration aplicada), então o tipo removido seguia
  * aparecendo e o teste acusava "tipo com consumidor na lista" para sempre.
  * Medido quando `contact.created`/`contact.updated` ganharam consumidor
- * (Flow Builder, migration 0382) e saíram da lista: o schema estava certo e o
+ * (Flow Builder, migration 0388) e saíram da lista: o schema estava certo e o
  * gate, vermelho.
  *
  * O que vale é a ÚLTIMA definição do `baseline.sql` — é o arquivo que o

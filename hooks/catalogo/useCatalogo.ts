@@ -1,7 +1,7 @@
 "use client";
 /**
  * Os dois REGISTROS que toda a automação consulta: etiquetas e campos do
- * contato (migration 0383).
+ * contato (migration 0389).
  *
  * Um arquivo para os dois de propósito. Eles são a mesma ideia — "o que esta
  * organização declarou que existe" — e são consumidos SEMPRE juntos: o painel

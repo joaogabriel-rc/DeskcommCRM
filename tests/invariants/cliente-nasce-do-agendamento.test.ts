@@ -580,7 +580,7 @@ describe("a etiqueta tirada à mão é respeitada", () => {
     // quando o único horário era cancelado. O sistema apagava o que nunca pôs.
     const contato = await criarContato(ORG_A, "Cliente de antes da regra");
     await pool.query("update contacts set tags = array['cliente','vip'] where id = $1", [contato]);
-    // A partir daqui: DELTA, não absoluto. O Flow Builder (migration 0382)
+    // A partir daqui: DELTA, não absoluto. O Flow Builder (migration 0388)
     // instrumentou TODO escritor de contacts.tags — a linha acima, sendo uma
     // escrita manual de tag genuína, agora emite `contact.tag_added` de
     // propósito (é o próprio caso de uso do produto: uma tag posta à mão, ou

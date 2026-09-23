@@ -1,11 +1,11 @@
 /**
  * Motor do Flow Builder — terceiro relógio do produto (ver cabeçalho da
- * migration 0382 para o porquê de não fundir com automação nem follow-up).
+ * migration 0388 para o porquê de não fundir com automação nem follow-up).
  *
  * evento → encontrar flow ativo → criar execução → executar nó → persistir
  * estado → determinar próximo nó → continuar → pausar quando necessário →
  * retomar depois. Idempotência via índice único (flow_id, contact_id) em
- * execuções não-terminais (migration 0382) — a 2ª tentativa de iniciar o
+ * execuções não-terminais (migration 0388) — a 2ª tentativa de iniciar o
  * mesmo par recebe 23505 e é tratada como "já em andamento", não como erro.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";

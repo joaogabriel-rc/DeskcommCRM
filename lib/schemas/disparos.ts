@@ -1,5 +1,5 @@
 /**
- * Schemas dos DISPAROS — envio em massa de WhatsApp (migration 0383).
+ * Schemas dos DISPAROS — envio em massa de WhatsApp (migration 0389).
  *
  * A mensagem usa o MESMO vocabulário do nó MESSAGE do flow
  * (`lib/flows/types.ts`): `window_mode`, `body`, `template_*`. Um só jeito de
@@ -25,7 +25,7 @@ export const OPERADOR_DE_CAMPO_LABEL: Record<OperadorDeCampo, string> = {
 /**
  * O critério de CAMPO aponta pela CHAVE (`key`), não pelo uuid, porque é a
  * chave que indexa `contacts.custom_fields` — o filtro vira `custom_fields->>key`
- * direto no Postgres. Como a chave é imutável (0383), ela é tão estável quanto
+ * direto no Postgres. Como a chave é imutável (0389), ela é tão estável quanto
  * o id para este fim.
  */
 export const criterioDeCampoSchema = z.object({

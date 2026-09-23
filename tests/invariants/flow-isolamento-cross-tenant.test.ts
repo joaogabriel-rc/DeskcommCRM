@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it } from "vitest";
  * Encontrada na auditoria da branch `feature/flow-builder`, antes do commit.
  * Era uma CADEIA de duas metades, e cada metade sozinha parecia inofensiva:
  *
- *   ESCRITA · `fn_flow_replace_graph` (migration 0382) recebia `p_flow_id` e
+ *   ESCRITA · `fn_flow_replace_graph` (migration 0388) recebia `p_flow_id` e
  *     `p_organization_id` sem conferir que o primeiro pertence ao segundo. A
  *     RLS de `flow_nodes`/`flow_edges` não cobre esse buraco: o `with check`
  *     valida a COLUNA `organization_id` da linha escrita, nunca o dono do

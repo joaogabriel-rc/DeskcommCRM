@@ -13,7 +13,7 @@
  * vocabulário, e a leitura dela é `GET /api/v1/tags/cores`.
  *
  * A etiqueta APLICADA continua sendo string em `contacts.tags` — ver o
- * cabeçalho da migration 0383 e a doutrina de `lib/schemas/tags.ts`.
+ * cabeçalho da migration 0389 e a doutrina de `lib/schemas/tags.ts`.
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";

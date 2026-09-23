@@ -12,7 +12,7 @@
  *
  * Por isso o rename vai primeiro por `fn_vocabulario_de_tags_operar` (0264),
  * que reescreve tudo isso numa transação só, e só depois sincroniza o registro
- * por `fn_tag_registro_aplicar` (0383), PRESERVANDO o id. É o inverso do que a
+ * por `fn_tag_registro_aplicar` (0389), PRESERVANDO o id. É o inverso do que a
  * intuição sugere (mexer no registro primeiro), e é o que garante que o id
  * sobreviva: quem guardou o uuid continua apontando para a mesma etiqueta.
  *
@@ -72,7 +72,7 @@ export async function PATCH(
   const renomeou = !!novoNome && novoNome.toLowerCase() !== anterior.name.toLowerCase();
 
   if (renomeou) {
-    // UMA chamada, UMA transação: `fn_tag_operar` (0383) chama o rename do
+    // UMA chamada, UMA transação: `fn_tag_operar` (0389) chama o rename do
     // vocabulário (contatos, negócios, conversas e as regras `add_tag` dos
     // agentes) e o do registro no mesmo corpo. Se o segundo levantar, o
     // primeiro volta atrás junto — a versão anterior fazia duas chamadas, e

@@ -76,7 +76,7 @@ async function lerDesfechoDoWebhook(
 
 /**
  * A validade do token, em consulta própria pelo mesmo motivo de
- * `lerDesfechoDoWebhook`: a coluna chega na migration 0384, e sem ela o select
+ * `lerDesfechoDoWebhook`: a coluna chega na migration 0392, e sem ela o select
  * principal perderia o canal inteiro por causa de um dado acessório.
  */
 async function lerValidadeDoToken(

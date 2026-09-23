@@ -2,7 +2,7 @@
 
 /**
  * O REGISTRO de etiquetas — criar, pesquisar, editar, organizar em pastas e ver
- * o identificador (migration 0383).
+ * o identificador (migration 0389).
  *
  * ── Por que este painel é SEPARADO do que já estava na tela ─────────────────
  *

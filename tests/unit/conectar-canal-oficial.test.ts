@@ -3,7 +3,7 @@
  * Incorporado compartilham. Os caminhos do formulário (reativação, webhook,
  * ordem) já são medidos pelos testes da rota manual; aqui ficam os desfechos que
  * nasceram com a extração: `23505` com nome próprio e a validade do token num
- * update SEPARADO (banco sem a migration 0384 continua conectando).
+ * update SEPARADO (banco sem a migration 0392 continua conectando).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -121,7 +121,7 @@ describe("conectarCanalOficial", () => {
     expect(escritas.some((e) => "meta_token_expires_at" in e.patch)).toBe(false);
   });
 
-  it("banco sem a migration 0384: a validade não grava, a conexão continua", async () => {
+  it("banco sem a migration 0392: a validade não grava, a conexão continua", async () => {
     const { admin } = adminFalso({ erroDaValidade: 'column "meta_token_expires_at" does not exist' });
     const r = await conectarCanalOficial({ ...ENTRADA, admin, tokenExpiraEm: null });
     expect(r.ok).toBe(true);

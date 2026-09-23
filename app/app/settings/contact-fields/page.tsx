@@ -1,5 +1,5 @@
 /**
- * Configurações → Campos do Usuário (migration 0383).
+ * Configurações → Campos do Usuário (migration 0389).
  *
  * ── Por que esta tela precisou existir ──────────────────────────────────────
  *

@@ -1,5 +1,5 @@
 /**
- * Schemas do REGISTRO de campos do contato (migration 0383).
+ * Schemas do REGISTRO de campos do contato (migration 0389).
  *
  * ── A chave não é o nome ─────────────────────────────────────────────────────
  *
@@ -16,7 +16,7 @@ import { z } from "zod";
 
 /**
  * Os seis tipos que a TELA oferece. O banco aceita mais (o vocabulário legado
- * de `crm_pipelines.settings.fields[]`, que o backfill da 0383 trouxe), e a
+ * de `crm_pipelines.settings.fields[]`, que o backfill da 0389 trouxe), e a
  * tela mostra esses como somente-leitura em vez de fingir que não existem.
  */
 export const TIPOS_DE_CAMPO = ["text", "number", "date", "datetime", "boolean", "list"] as const;

@@ -3,12 +3,12 @@
  *
  * ── Duas fontes, e nenhuma pode ser descartada ──────────────────────────────
  *
- * Desde a migration 0383 a definição de campo do contato mora em
+ * Desde a migration 0389 a definição de campo do contato mora em
  * `public.contact_fields` — com id, tipo, pasta e arquivamento. Antes dela, a
  * única declaração possível era `crm_pipelines.settings.fields[]`, e é de lá
  * que vêm os campos de quem já usava o produto.
  *
- * O backfill da 0383 copiou os campos do funil para o registro, preservando a
+ * O backfill da 0389 copiou os campos do funil para o registro, preservando a
  * chave. Mas copiar uma vez não basta: o funil continua EDITÁVEL em
  * Configurações › Funis, e um campo acrescentado lá depois da atualização não
  * passa por lugar nenhum que alimente o registro. Descartá-lo aqui faria um
@@ -28,7 +28,7 @@ import type { CampoDoContato } from "@/lib/schemas/contact-fields";
 
 /**
  * Os tipos que o REGISTRO aceita e que o editor sabe desenhar são os mesmos —
- * o CHECK da 0383 foi escrito a partir desta lista, somando os seis tipos da
+ * o CHECK da 0389 foi escrito a partir desta lista, somando os seis tipos da
  * tela nova ao vocabulário legado do funil. Este mapa existe para o dia em que
  * divergirem: um tipo desconhecido vira `text`, que é editável e não perde
  * dado, em vez de derrubar a tela com um `switch` sem caso.

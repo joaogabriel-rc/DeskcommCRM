@@ -16,7 +16,7 @@
  * medido no código antes de escrever esta lista — não para um evento que seria
  * bom existir. Gatilho que aparece na tela e nunca dispara é pior que gatilho
  * ausente: o operador monta o fluxo, liga, e fica esperando. Onde o evento não
- * existia (`contact.tag_removed`), ele foi IMPLEMENTADO junto (migration 0382,
+ * existia (`contact.tag_removed`), ele foi IMPLEMENTADO junto (migration 0388,
  * no mesmo trigger que já emitia a adição) em vez de a opção ser oferecida a
  * seco.
  *
@@ -64,7 +64,7 @@ export interface FlowTriggerDefinition {
    * que só reconhece evento cuja origem ela sabe carimbar. `lead.won`/`lead.lost`
    * nascem DENTRO do trigger de `crm_leads`, e pôr o carimbo no caminho quente de
    * todo UPDATE de negócio é contenção que esta entrega não mediu — ver o bloco
-   * da fronteira na migration 0382. Nesses dois, ação/condição/webhook rodam e a
+   * da fronteira na migration 0388. Nesses dois, ação/condição/webhook rodam e a
    * mensagem recusa; a tela avisa ANTES, em vez de deixar o operador montar um
    * fluxo que só falha na hora H. Ausente = suportado.
    */

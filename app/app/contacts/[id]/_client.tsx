@@ -61,7 +61,7 @@ export function ContactDetailClient({ contactId }: Props) {
   // As DEFINIÇÕES continuam no funil (`crm_pipelines.settings.fields[]`) — só o
   // VALOR mora no contato. `camposDoFunil` é o mesmo leitor que o Kanban usa.
   const pipelineQuery = useDefaultPipeline(Boolean(activeOrg));
-  // O REGISTRO de campos do contato (migration 0383). Some com o funil em
+  // O REGISTRO de campos do contato (migration 0389). Some com o funil em
   // `camposDoContato()`: o registro manda, e o que só existe no funil
   // continua aparecendo — senão um campo visível numa tela sumiria da outra.
   const registroDeCampos = useCamposDoContato();
