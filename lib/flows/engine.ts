@@ -9,7 +9,7 @@
  * mesmo par recebe 23505 e é tratada como "já em andamento", não como erro.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ServiceBoundary } from "@/lib/atendimento/fronteira";
+import { parseServiceBoundary, type ServiceBoundary } from "@/lib/atendimento/fronteira";
 import type { EventRow } from "@/lib/event-log/dispatcher";
 import { motivoDoErro } from "@/lib/flows/erro";
 import { loadFlowGraph, nextNode } from "@/lib/flows/graph";
@@ -93,6 +93,10 @@ function buildNodeCtx(
     context: execution.context,
     requestId: `flow:${execution.id}`,
     serviceBoundaries,
+    // A permissão do disparo viaja NA EXECUÇÃO (coluna), e não em memória: é
+    // relida a cada retomada (delay, botão), e por isso a mensagem que sai
+    // depois de uma espera usa a MESMA permissão que o disparo materializou.
+    servicoAutorizado: parseServiceBoundary(execution.service_boundary ?? null),
   };
 }
 
@@ -236,6 +240,17 @@ export interface StartFlowResult {
 }
 
 /**
+ * De onde vem a permissão de falar com o contato numa execução iniciada por
+ * DISPARO (0394): a permissão materializada no agendamento, e o destinatário
+ * dono dela. O banco confere a coerência (`fn_flow_execution_do_disparo_coerente`):
+ * destinatário do disparo dono do fluxo, mesmo contato, mesma organização.
+ */
+export interface AutorizacaoDoDisparo {
+  serviceBoundary: ServiceBoundary;
+  broadcastRecipientId: string;
+}
+
+/**
  * Inicia uma execução para `contactId`. O nó de entrada é o (único) nó
  * TRIGGER do flow — quem valida que existe exatamente um é a API ao salvar o
  * grafo; aqui só se pega o primeiro.
@@ -247,6 +262,7 @@ export async function startFlowExecution(
     flowId: string;
     contactId: string;
     triggerEventId?: string | null;
+    autorizacao?: AutorizacaoDoDisparo;
   },
 ): Promise<StartFlowResult> {
   const graph = await loadFlowGraph(admin, params.organizationId, params.flowId);
@@ -266,6 +282,12 @@ export async function startFlowExecution(
       current_node_id: entry.id,
       context,
       trigger_event_id: params.triggerEventId ?? null,
+      ...(params.autorizacao
+        ? {
+            service_boundary: params.autorizacao.serviceBoundary,
+            broadcast_recipient_id: params.autorizacao.broadcastRecipientId,
+          }
+        : {}),
     })
     .select("id")
     .maybeSingle();

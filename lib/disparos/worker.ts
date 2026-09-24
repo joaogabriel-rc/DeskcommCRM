@@ -31,12 +31,24 @@
  * tick que fabricasse autorização própria é exatamente o que
  * `beginServiceAtOrigin` proíbe — e com razão: retentativa não é consentimento
  * novo.
+ *
+ * ── Modo FLUXO (migration 0394): o mesmo lote, o mesmo ritmo ────────────────
+ *
+ * Quando o disparo tem um fluxo próprio (`flows.broadcast_id`), cada
+ * destinatário do lote INICIA uma execução desse fluxo em vez de receber a
+ * mensagem direto. Nada mais muda: o claim, o lote de 12 por tick e a
+ * reconferência da permissão são os mesmos. A execução leva a permissão do
+ * destinatário (`flow_executions.service_boundary`) e o motor de fluxos
+ * (`lib/flows/engine.ts`) a entrega ao nó de mensagem, que a reconfere. Depois
+ * de uma espera, quem retoma é o relógio que o motor JÁ tem (`flow-worker`); a
+ * resposta a um botão, o handler de resposta que ele JÁ tem. Nenhum relógio novo.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { sendMessageHandler } from "@/app/api/v1/messages/_handler";
 import { assertServiceBoundarySupabase } from "@/lib/atendimento/origem";
 import { parseServiceBoundary } from "@/lib/atendimento/fronteira";
+import { startFlowExecution } from "@/lib/flows/engine";
 import { renderFlowTemplate } from "@/lib/flows/template";
 import { motivoDoErro } from "@/lib/flows/erro";
 import { logger } from "@/lib/logger";
@@ -109,6 +121,97 @@ export function entradaDeDisparo(
   const body = renderFlowTemplate(mensagem.body ?? "", contexto);
   if (!body.trim()) return { ok: false, error: "missing_body" };
   return { ok: true, input: { conversation_id: conversationId, type: "text", body } };
+}
+
+interface FluxoDoDisparo {
+  id: string;
+}
+
+/**
+ * Modo fluxo: o destinatário ENTRA no fluxo do disparo, carregando a permissão
+ * que o agendamento materializou para ele.
+ *
+ * As guardas são as mesmas do envio direto (contato ainda apto, permissão
+ * presente e ainda vigente), mais uma de escopo: a permissão é deste
+ * destinatário — organização e contato. O banco repete a conferência na
+ * inserção (`fn_flow_execution_do_disparo_coerente`) e amarra a execução ao
+ * disparo DONO do fluxo.
+ *
+ * Desfecho: `sent` = entrou no fluxo e o primeiro trecho rodou sem falha;
+ * `failed` = a execução falhou (o motivo real vai para o destinatário);
+ * `skipped` = nem entrou.
+ */
+async function iniciarNoFluxo(
+  admin: SupabaseClient,
+  destinatario: LinhaDeDestinatario,
+  fluxo: FluxoDoDisparo,
+): Promise<"sent" | "failed" | "skipped"> {
+  const agora = new Date().toISOString();
+  const marcar = (status: "sent" | "failed" | "skipped", error: string | null) =>
+    admin
+      .from("broadcast_recipients")
+      .update({ status, error, sent_at: status === "sent" ? agora : null, claimed_until: null, updated_at: agora })
+      .eq("id", destinatario.id)
+      .eq("organization_id", destinatario.organization_id);
+
+  const { data: contato } = await admin
+    .from("contacts")
+    .select("id, is_blocked, is_anonymized, is_merged_into")
+    .eq("id", destinatario.contact_id)
+    .eq("organization_id", destinatario.organization_id)
+    .maybeSingle();
+  if (!contato || contato.is_blocked || contato.is_anonymized || contato.is_merged_into !== null) {
+    await marcar("skipped", !contato ? "contato_nao_encontrado" : "contato_bloqueado_ou_anonimizado");
+    return "skipped";
+  }
+
+  const boundary = parseServiceBoundary(destinatario.service_boundary);
+  if (!boundary) {
+    await marcar("skipped", "sem_fronteira_de_servico");
+    return "skipped";
+  }
+  // A permissão é DESTE destinatário. Uma de outra organização ou de outro
+  // contato não serve — nem para começar.
+  if (boundary.organization_id !== destinatario.organization_id || boundary.contact_id !== destinatario.contact_id) {
+    await marcar("skipped", "service_scope_mismatch");
+    return "skipped";
+  }
+
+  try {
+    await assertServiceBoundarySupabase(admin, boundary);
+    const r = await startFlowExecution(admin, {
+      organizationId: destinatario.organization_id,
+      flowId: fluxo.id,
+      contactId: destinatario.contact_id,
+      autorizacao: { serviceBoundary: boundary, broadcastRecipientId: destinatario.id },
+    });
+    if (!r.ok) {
+      // `already_active`: o índice único por destinatário (ou por contato em
+      // voo) barrou uma segunda execução — um lease que venceu no meio do lote.
+      // A pessoa JÁ está no fluxo; não é falha, e não recebe de novo.
+      if (r.reason === "already_active") {
+        await marcar("sent", null);
+        return "sent";
+      }
+      await marcar("failed", r.reason ?? "flow_start_failed");
+      return "failed";
+    }
+    const { data: exec } = await admin
+      .from("flow_executions")
+      .select("status, last_error")
+      .eq("id", r.executionId!)
+      .eq("organization_id", destinatario.organization_id)
+      .maybeSingle();
+    if ((exec as { status?: string } | null)?.status === "failed") {
+      await marcar("failed", ((exec as { last_error?: string | null }).last_error ?? "flow_failed").slice(0, 300));
+      return "failed";
+    }
+    await marcar("sent", null);
+    return "sent";
+  } catch (err) {
+    await marcar("failed", motivoDoErro(err).slice(0, 300));
+    return "failed";
+  }
 }
 
 async function enviarUm(
@@ -234,6 +337,24 @@ export async function runBroadcastWorkerTick(admin: SupabaseClient): Promise<Res
       continue;
     }
 
+    // O fluxo do disparo, se houver — recortado pela organização DO DISPARO.
+    // Um fluxo de outra organização nunca é achado aqui, e a FK composta de
+    // `flows.broadcast_id` impede que ele exista.
+    const { data: fluxo, error: fluxoErr } = await admin
+      .from("flows")
+      .select("id")
+      .eq("organization_id", bruto.organization_id)
+      .eq("broadcast_id", bruto.id)
+      .maybeSingle();
+    if (fluxoErr) {
+      logger.error("[broadcast-worker] leitura do fluxo do disparo falhou", {
+        broadcast_id: bruto.id,
+        error: fluxoErr.message,
+      });
+      await admin.from("broadcasts").update({ claimed_until: null }).eq("id", bruto.id);
+      continue;
+    }
+
     if (!bruto.started_at) {
       await admin
         .from("broadcasts")
@@ -258,7 +379,15 @@ export async function runBroadcastWorkerTick(admin: SupabaseClient): Promise<Res
     let enviados = 0;
     let falhas = 0;
     for (const destinatario of (lote ?? []) as LinhaDeDestinatario[]) {
-      const desfecho = await enviarUm(admin, bruto, destinatario, parsed.data, requestId);
+      // O lote veio do claim POR DISPARO; ainda assim, destinatário de outra
+      // organização não passa daqui.
+      if (destinatario.organization_id !== bruto.organization_id || destinatario.broadcast_id !== bruto.id) {
+        falhas += 1;
+        continue;
+      }
+      const desfecho = fluxo
+        ? await iniciarNoFluxo(admin, destinatario, fluxo as FluxoDoDisparo)
+        : await enviarUm(admin, bruto, destinatario, parsed.data, requestId);
       if (desfecho === "sent") enviados += 1;
       else if (desfecho === "failed") falhas += 1;
     }

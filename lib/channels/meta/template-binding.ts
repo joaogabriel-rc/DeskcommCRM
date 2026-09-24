@@ -102,7 +102,7 @@ export function explainBindingState(
     case "not_approved":
       return `O template ${alvo} não está aprovado na Meta. Enquanto isso, nada será enviado por ele.`;
     case "stale":
-      return `O template ${alvo} mudou na Meta desde que foi configurado — os parâmetros precisam ser revistos antes do próximo disparo.`;
+      return `O template ${alvo} mudou na Meta desde que foi configurado — o conteúdo, os botões ou os parâmetros precisam ser revistos antes do próximo disparo.`;
     case "ok":
       return `O template ${alvo} está aprovado e com os parâmetros em dia.`;
   }

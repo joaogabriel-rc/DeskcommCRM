@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -9,10 +9,9 @@ import { useTagDeIdioma } from "@/hooks/i18n/useLocaleDeData";
 import { useT } from "@/lib/i18n/IdiomaProvider";
 import { FlowArrow, Plus } from "@/lib/ui/icons";
 import { resumoDoGatilho } from "@/lib/flows/triggers";
-import { useFlows, type FlowRow } from "@/hooks/flows/useFlows";
+import { useCreateFlow, useFlows, type FlowRow } from "@/hooks/flows/useFlows";
 import { DeleteFlowButton } from "./DeleteFlowButton";
 import { FlowStatusBadge } from "./FlowStatusBadge";
-import { NewFlowDialog } from "./NewFlowDialog";
 
 interface Props {
   initialData: FlowRow[];
@@ -25,12 +24,23 @@ export function FlowsList({ initialData, canWrite }: Props) {
   // mostrava 20/09/2026 para quem lê em espanhol.
   const tagDoIdioma = useTagDeIdioma();
   const { data } = useFlows({ initialData });
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const create = useCreateFlow();
+  const router = useRouter();
   const flows = data ?? [];
 
+  // "Novo fluxo" não pergunta nada: cria o rascunho e abre o construtor, onde o
+  // gatilho é a primeira escolha, no nó "Quando…". O nome se ajusta no
+  // cabeçalho do construtor.
+  function criarEAbrir() {
+    create.mutate(
+      { name: t("Sem título") },
+      { onSuccess: (created) => router.push(`/app/flows/${created.id}`) },
+    );
+  }
+
   const newFlowButton = (
-    <Button onClick={() => setDialogOpen(true)} className="w-full sm:w-auto">
-      <Plus size={14} aria-hidden className="mr-2" /> {t("Novo flow")}
+    <Button onClick={criarEAbrir} disabled={create.isPending} className="w-full sm:w-auto" data-testid="novo-fluxo">
+      <Plus size={14} aria-hidden className="mr-2" /> {create.isPending ? t("Criando…") : t("Novo flow")}
     </Button>
   );
 
@@ -47,7 +57,6 @@ export function FlowsList({ initialData, canWrite }: Props) {
           </p>
           {canWrite && <div className="mt-1">{newFlowButton}</div>}
         </Card>
-        {canWrite && <NewFlowDialog open={dialogOpen} onOpenChange={setDialogOpen} />}
       </>
     );
   }
@@ -83,8 +92,6 @@ export function FlowsList({ initialData, canWrite }: Props) {
           </li>
         ))}
       </ul>
-
-      {canWrite && <NewFlowDialog open={dialogOpen} onOpenChange={setDialogOpen} />}
     </div>
   );
 }

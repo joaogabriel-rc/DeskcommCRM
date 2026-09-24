@@ -3,9 +3,9 @@
  * `contract_hash`, e hash divergente = alguém editou o template na Meta.
  *
  * Os dois modos de errar são simétricos e ambos fatais:
- *   - hash INSTÁVEL (muda por reordenação de chave ou por vírgula no texto) faz
- *     toda config virar obsoleta a cada sync → alarme falso permanente → alguém
- *     desliga a trava;
+ *   - hash INSTÁVEL (muda por reordenação de chave ou pelo exemplo de revisão)
+ *     faz toda config virar obsoleta a cada sync → alarme falso permanente →
+ *     alguém desliga a trava;
  *   - hash SURDO (não muda quando o contrato muda) deixa a config obsoleta passar
  *     → o 132000 volta em produção, que é o estado atual do TomikCRM.
  */
@@ -31,10 +31,25 @@ describe("hashContract", () => {
     expect(hashContract(texto)).not.toBe(hashContract(imagem));
   });
 
-  it("é estável a mudança de texto que NÃO afeta parâmetro", () => {
-    // Corrigir uma vírgula no corpo não deve invalidar a config de ninguém.
+  it("MUDA quando o texto do corpo muda — é o que o contato vê", () => {
+    // Até 2026-09-23 este caso afirmava o contrário ("vírgula não invalida").
+    // A régua mudou com o consumidor: o nó de fluxo guarda o hash e precisa saber
+    // que o conteúdo aprovado mudou; e editar conteúdo na Meta já devolve o
+    // template para revisão. Ver o cabeçalho de lib/channels/meta/contract-hash.ts.
     const a = [{ type: "BODY", text: "Olá {{1}}, tudo bem?" }];
     const b = [{ type: "BODY", text: "Olá {{1}} tudo bem?" }];
+    expect(hashContract(a)).not.toBe(hashContract(b));
+  });
+
+  it("é estável ao EXEMPLO que a Meta guarda para a revisão — ele não chega a ninguém", () => {
+    const a = [{ type: "BODY", text: "Olá {{1}}", example: { body_text: [["Ana"]] } }];
+    const b = [{ type: "BODY", text: "Olá {{1}}", example: { body_text: [["Bruno"]] } }];
+    expect(hashContract(a)).toBe(hashContract(b));
+  });
+
+  it("é estável à ordem das chaves DENTRO de um botão", () => {
+    const a = [{ type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: "Sim" }] }];
+    const b = [{ type: "BUTTONS", buttons: [{ text: "Sim", type: "QUICK_REPLY" }] }];
     expect(hashContract(a)).toBe(hashContract(b));
   });
 

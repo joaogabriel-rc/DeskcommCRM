@@ -1,7 +1,9 @@
 import { requireSupportWrite } from "@/lib/impersonate/support";
 /**
  * GET  /api/v1/channels/templates — o espelho local + o CONTRATO derivado de cada um.
- * POST /api/v1/channels/templates — força um sync com a Graph API.
+ * POST /api/v1/channels/templates — força um sync com a Graph API; com
+ *      `{ acao: "criar", channel_session_id, name, language, category, components }`
+ *      CRIA o modelo na conta daquela conexão oficial (ver `criar-modelo.ts`).
  * PATCH /api/v1/channels/templates — salva (ou esquece) o link da mídia de um modelo.
  *
  * O contrato vai derivado no payload, e não guardado no banco, de propósito: guardar
@@ -13,14 +15,21 @@ import { requireSupportWrite } from "@/lib/impersonate/support";
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 import { fail, ok } from "@/lib/api/wrappers";
+import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
+import { criarModeloOficial, respostaDoErroDeCriacao } from "@/lib/channels/meta/criar-modelo";
 import { resolveMetaCreds } from "@/lib/channels/meta/credentials";
 import { metaSessionForOrg } from "@/lib/channels/meta/session";
-import { normalizeRejectedReason } from "@/lib/channels/meta/webhook";
-import { deriveTemplateContract, describeAddress } from "@/lib/channels/meta/template-contract";
-import { slotKey } from "@/lib/channels/meta/build-components";
+import {
+  conexoesComModelos,
+  modeloDaLinha,
+  type ConexaoComModelos,
+  type LinhaDoCatalogo,
+} from "@/lib/channels/catalogo-de-modelos";
+import { deriveTemplateContract } from "@/lib/channels/meta/template-contract";
 import { syncTemplates } from "@/lib/channels/meta/template-sync";
 import { mesclarValoresSalvos } from "@/lib/channels/meta/valores-salvos";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -70,37 +79,30 @@ export interface TemplateView {
   savedValues: Record<string, string>;
 }
 
-/** Textos com placeholder, achatados (inclui os de dentro de card de carrossel). */
-function textPreviews(components: unknown): Array<{ onde: string; text: string }> {
-  const out: Array<{ onde: string; text: string }> = [];
-  const visita = (lista: unknown, prefixo: string) => {
-    if (!Array.isArray(lista)) return;
-    for (const c of lista as Array<Record<string, unknown>>) {
-      const tipo = String(c.type ?? "").toUpperCase();
-      if (Array.isArray(c.cards)) {
-        (c.cards as Array<Record<string, unknown>>).forEach((card, i) =>
-          visita(card.components, `card ${i + 1} › `),
-        );
-        continue;
-      }
-      const texto = typeof c.text === "string" ? c.text : "";
-      if (!texto.includes("{{")) continue;
-      out.push({ onde: `${prefixo}${tipo === "HEADER" ? "cabeçalho" : "corpo"}`, text: texto });
-    }
-  };
-  visita(components, "");
-  return out;
-}
-
 type OrgGate =
-  | { autorizado: true; orgId: string }
+  | { autorizado: true; orgId: string; userId: string }
   | { autorizado: false; resposta: NextResponse };
 
 async function orgOrFail(requestId: string): Promise<OrgGate> {
   const authz = await requireRole("admin", { requestId, resource: "channels_templates" });
   if (!authz.ok) return { autorizado: false, resposta: authz.response };
-  return { autorizado: true, orgId: authz.org.orgId };
+  return { autorizado: true, orgId: authz.org.orgId, userId: authz.user.id };
 }
+
+/**
+ * Criar um modelo. `components` viaja como o formulário monta
+ * (`montarComponents`); a forma fina (o que a Meta aceita) é conferida por
+ * `validarRascunhoOficial`. A organização NÃO está aqui de propósito: vem da
+ * sessão — um `organization_id` no corpo é ignorado.
+ */
+const criarSchema = z.object({
+  acao: z.literal("criar"),
+  channel_session_id: z.string().uuid(),
+  name: z.string().trim().min(1).max(512),
+  language: z.string().trim().min(2).max(15),
+  category: z.enum(["AUTHENTICATION", "MARKETING", "UTILITY"]),
+  components: z.array(z.record(z.string(), z.unknown())).min(1).max(10),
+});
 
 export async function GET(): Promise<NextResponse> {
   const requestId = randomUUID();
@@ -109,10 +111,15 @@ export async function GET(): Promise<NextResponse> {
 
   const sessao = await metaSessionForOrg(r.orgId);
   const admin = createAdminClient();
+  // As conexões OFICIAIS em que se pode criar modelo — a mesma lista do
+  // catálogo central, recortada à fonte oficial.
+  const conexoes: ConexaoComModelos[] = await conexoesComModelos(admin, r.orgId, { fonte: "oficial" }).catch(
+    () => [],
+  );
   const { data, error } = await admin
     .from("meta_templates")
     .select(
-      "name, language, status, category, rejected_reason, quality_score, parameter_format, contract_hash, components, synced_at, saved_values",
+      "id, waba_id, channel_session_id, name, language, status, category, rejected_reason, quality_score, parameter_format, contract_hash, components, synced_at, saved_values",
     )
     .eq("organization_id", r.orgId)
     .order("status")
@@ -120,47 +127,29 @@ export async function GET(): Promise<NextResponse> {
 
   if (error) return fail("internal_error", error.message, 500, { requestId });
 
-  const templates: TemplateView[] = (data ?? []).map((row) => {
-    const contrato = deriveTemplateContract({
-      name: row.name,
-      language: row.language,
-      parameter_format: row.parameter_format,
-      components: row.components as never,
-    });
+  // A derivação é a do CATÁLOGO central (`lib/channels/catalogo-de-modelos.ts`):
+  // contrato, chave de cada espaço, prévias, links salvos. Esta rota só projeta
+  // no formato que a tela de Conexões já consome — a mesma leitura que o nó de
+  // mensagem dos Fluxos usa, para as duas telas nunca discordarem sobre o que
+  // um modelo pede.
+  const templates: TemplateView[] = ((data ?? []) as LinhaDoCatalogo[]).map((row) => {
+    const m = modeloDaLinha(row);
     return {
-      name: row.name,
-      language: row.language,
-      status: row.status,
-      category: row.category,
-      // Normaliza na LEITURA também: o "NONE" da Meta pode ter sido gravado por
-      // uma versão anterior ao conserto, e um clone atualizado ainda o carrega.
-      rejectedReason: normalizeRejectedReason(row.rejected_reason),
-      qualityScore: row.quality_score,
-      parameterFormat: contrato.parameterFormat,
-      contractHash: row.contract_hash,
-      syncedAt: row.synced_at,
-      slots: contrato.slots.map((s) => ({
-        key: s.key,
-        expects: s.expects,
-        onde: describeAddress(s.address),
-        valueKey: slotKey(s.address, s.key),
-      })),
-      previews: textPreviews(row.components),
-      // A DEFINIÇÃO crua, como a rota do canal intermediado já devolve.
-      //
-      // `previews` não serve para isto: ele filtra por `{{` (só interessa
-      // mostrar o que tem variável), então um modelo SEM variável sai com a
-      // lista vazia — e são exatamente esses que o operador consegue disparar
-      // sem preencher nada. O seletor da janela fechada monta o corpo da
-      // mensagem a partir daqui; sem o campo, ele caía no NOME TÉCNICO do
-      // modelo e era isso que o cliente recebia.
-      components: (row.components as unknown[]) ?? [],
-      // Filtrado pelo contrato de HOJE: link salvo para um cabeçalho que deixou
-      // de ser mídia não pode pré-preencher nada.
-      savedValues: (() => {
-        const r = mesclarValoresSalvos(contrato, (row.saved_values ?? {}) as Record<string, unknown>, {});
-        return r.ok ? r.valores : {};
-      })(),
+      name: m.name,
+      language: m.language,
+      status: m.status,
+      category: m.category,
+      rejectedReason: m.rejectedReason,
+      qualityScore: m.qualityScore,
+      parameterFormat: m.parameterFormat,
+      contractHash: m.contractHash,
+      syncedAt: m.syncedAt,
+      slots: m.espacos.map((e) => ({ key: e.key, expects: e.expects, onde: e.onde, valueKey: e.valueKey })),
+      previews: m.previews,
+      // A DEFINIÇÃO crua: o seletor da janela fechada monta o corpo a partir
+      // daqui — `previews` filtra por `{{` e sai vazio para modelo sem variável.
+      components: m.components,
+      savedValues: m.savedValues,
     };
   });
 
@@ -169,17 +158,23 @@ export async function GET(): Promise<NextResponse> {
     // nunca conectou, ou conectou e excluiu —, e a tela precisa distingui-lo de
     // "conectado, porém sem template".
     waba: sessao?.wabaId ?? null,
+    conexoes,
     templates,
   });
 }
 
-export async function POST(_req: NextRequest): Promise<NextResponse> {
+export async function POST(req: NextRequest): Promise<NextResponse> {
   const supportDenied = await requireSupportWrite();
   if (supportDenied) return supportDenied;
 
   const requestId = randomUUID();
   const r = await orgOrFail(requestId);
   if (!r.autorizado) return r.resposta;
+
+  // Corpo com `acao: "criar"` cria; qualquer outro (inclusive vazio, que é o
+  // que o botão de sincronizar manda) segue sincronizando como sempre.
+  const corpo = (await req.json().catch(() => null)) as { acao?: unknown } | null;
+  if (corpo?.acao === "criar") return criar(r.orgId, r.userId, corpo, requestId);
 
   const sessao = await metaSessionForOrg(r.orgId);
   if (!sessao?.wabaId) {
@@ -302,4 +297,44 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   }
 
   return ok({ savedValues: planos[0]!.valores });
+}
+
+async function criar(orgId: string, userId: string, corpo: unknown, requestId: string): Promise<NextResponse> {
+  const parsed = criarSchema.safeParse(corpo);
+  if (!parsed.success) {
+    return fail("validation_failed", "Faltam conexão, nome, idioma, categoria ou conteúdo.", 422, {
+      requestId,
+      details: parsed.error.flatten(),
+    });
+  }
+  const p = parsed.data;
+  try {
+    const { modelo, providerTemplateId } = await criarModeloOficial(createAdminClient(), {
+      organizationId: orgId,
+      channelSessionId: p.channel_session_id,
+      draft: { name: p.name, language: p.language, category: p.category, components: p.components },
+    });
+    await audit({
+      action: "template.created",
+      actorUserId: userId,
+      organizationId: orgId,
+      resourceType: "channel_session",
+      resourceId: p.channel_session_id,
+      requestId,
+      metadata: { name: modelo.name, language: modelo.language, status: modelo.status, provider_template_id: providerTemplateId },
+    });
+    return ok({ modelo, provider_template_id: providerTemplateId }, { requestId, status: 201 });
+  } catch (err) {
+    // A frase da Meta (ou a nossa) CHEGA ao operador: é ela que distingue nome
+    // inválido de token vencido de conta errada. Nunca carrega o token.
+    const mensagem = err instanceof Error ? err.message : "erro";
+    const { status, code } = respostaDoErroDeCriacao(mensagem);
+    // A frase vai limpa para a tela; o desfecho técnico (credencial, conta,
+    // rede…) vai em `details.motivo`, para quem integra e para o log.
+    const prefixo = /^([a-z_]+):\s*/.exec(mensagem);
+    return fail(code, prefixo ? mensagem.slice(prefixo[0].length) : mensagem, status, {
+      requestId,
+      details: { motivo: prefixo?.[1] ?? null },
+    });
+  }
 }

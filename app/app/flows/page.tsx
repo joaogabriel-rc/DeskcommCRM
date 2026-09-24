@@ -21,6 +21,8 @@ export default async function FlowsPage() {
     .from("flows")
     .select("*")
     .eq("organization_id", activeOrg.orgId)
+    // Fluxo de disparo (0394) mora no disparo, não em Automações.
+    .is("broadcast_id", null)
     .order("created_at", { ascending: false });
 
   const flows = (data ?? []) as FlowRow[];

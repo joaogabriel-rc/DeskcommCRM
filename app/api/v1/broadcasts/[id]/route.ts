@@ -33,7 +33,14 @@ import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { mfaEmDivida } from "@/lib/auth/server";
 import { requireSupportWrite } from "@/lib/impersonate/support";
+import {
+  criarFluxoDoDisparo,
+  fluxoDoDisparo,
+  prontidaoDoFluxo,
+  problemasDaMensagemGuiada,
+} from "@/lib/disparos/fluxo-do-disparo";
 import { listarPublico, resumoDoSegmento } from "@/lib/disparos/segmento";
+import type { MessageNodeConfig } from "@/lib/flows/types";
 import {
   atualizarDisparoSchema,
   porQueNaoPodeAgendar,
@@ -85,7 +92,11 @@ export async function GET(
     .order("updated_at", { ascending: false })
     .limit(20);
 
-  return ok({ ...(data as unknown as DisparoRow), problemas: falhas ?? [] }, { requestId });
+  const fluxo = await fluxoDoDisparo(supabase, authz.org.orgId, id).catch(() => null);
+  return ok(
+    { ...(data as unknown as DisparoRow), modo: fluxo ? "fluxo" : "guiado", fluxo, problemas: falhas ?? [] },
+    { requestId },
+  );
 }
 
 export async function PATCH(
@@ -133,6 +144,32 @@ export async function PATCH(
         { requestId },
       );
     }
+    // Trocar o MODO é trocar o que o disparo manda — só em rascunho, quando
+    // ninguém foi materializado ainda. Guiado → fluxo cria o fluxo próprio;
+    // fluxo → guiado apaga-o (em rascunho ele nunca executou nada).
+    if (parsed.data.modo !== undefined) {
+      if (disparo.status !== "draft") {
+        return fail("conflict", "O modo só muda enquanto o disparo é rascunho.", 409, { requestId });
+      }
+      const atualFluxo = await fluxoDoDisparo(supabase, authz.org.orgId, id);
+      if (parsed.data.modo === "fluxo" && !atualFluxo) {
+        await criarFluxoDoDisparo(supabase, {
+          organizationId: authz.org.orgId,
+          broadcastId: id,
+          nomeDoDisparo: parsed.data.name ?? disparo.name,
+          userId: authz.user.id,
+        });
+      } else if (parsed.data.modo === "guiado" && atualFluxo) {
+        const { error: delErr } = await supabase
+          .from("flows")
+          .delete()
+          .eq("id", atualFluxo.id)
+          .eq("organization_id", authz.org.orgId)
+          .eq("broadcast_id", id);
+        if (delErr) return fail("internal_error", delErr.message, 500, { requestId });
+      }
+    }
+
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (parsed.data.name !== undefined) patch.name = parsed.data.name;
     if (parsed.data.segment !== undefined) patch.segment = parsed.data.segment;
@@ -155,9 +192,13 @@ export async function PATCH(
       resourceType: "broadcast",
       resourceId: id,
       requestId,
-      metadata: { campos: Object.keys(patch) },
+      metadata: { campos: Object.keys(patch), ...(parsed.data.modo ? { modo: parsed.data.modo } : {}) },
     });
-    return ok(data as unknown as DisparoRow, { requestId });
+    const fluxoAtual = await fluxoDoDisparo(supabase, authz.org.orgId, id).catch(() => null);
+    return ok(
+      { ...(data as unknown as DisparoRow), modo: fluxoAtual ? "fluxo" : "guiado", fluxo: fluxoAtual },
+      { requestId },
+    );
   }
 
   /* ── Ações de ciclo de vida ─────────────────────────────────────────────── */
@@ -247,8 +288,34 @@ export async function PATCH(
 
   const segmento = segmentoSchema.parse(disparo.segment ?? {});
   const mensagem = mensagemDeDisparoSchema.parse(disparo.message ?? {});
-  const impedimento = porQueNaoPodeAgendar({ segment: segmento, message: mensagem });
+  const fluxo = await fluxoDoDisparo(supabase, authz.org.orgId, id);
+  const modo = fluxo ? "fluxo" : "guiado";
+  const impedimento = porQueNaoPodeAgendar({ segment: segmento, message: mensagem }, modo);
   if (impedimento) return fail("validation_failed", impedimento, 422, { requestId });
+
+  // O que mais impede, conforme o modo — a MESMA régua do resto do produto:
+  //   guiado → o modelo escolhido, pelo catálogo central (`problemasDosModelos`);
+  //   fluxo  → o fluxo inteiro, como na ativação de um fluxo, + um número só.
+  // E o NÚMERO pelo qual a permissão de cada contato será aberta sai daqui.
+  let sessao: string | null;
+  if (fluxo) {
+    const prontidao = await prontidaoDoFluxo(supabase, authz.org.orgId, fluxo);
+    if (prontidao.problemas.length) {
+      return fail("validation_failed", prontidao.problemas.join(" "), 422, {
+        requestId,
+        details: prontidao.problemas.map((p) => ({ path: "fluxo", message: p })),
+      });
+    }
+    sessao = prontidao.sessao;
+  } else {
+    const problemas = await problemasDaMensagemGuiada(
+      supabase,
+      authz.org.orgId,
+      mensagem as unknown as MessageNodeConfig,
+    );
+    if (problemas.length) return fail("validation_failed", problemas.join(" "), 422, { requestId });
+    sessao = mensagem.channel_session_id ?? null;
+  }
 
   // O público sai do client da SESSÃO: a RLS de `contacts` recorta a
   // organização, então nenhum id de fora pode entrar na lista.
@@ -277,8 +344,29 @@ export async function PATCH(
     p_broadcast: id,
     p_org: authz.org.orgId,
     p_contact_ids: contatos.map((c) => c.id),
+    // A permissão é aberta NA CONVERSA do número do modelo (0394). A função
+    // confere que o número é desta organização e está ativo.
+    p_session: sessao,
   });
-  if (matErr) return fail("internal_error", matErr.message, 500, { requestId });
+  if (matErr) {
+    if (matErr.code === "P0002") {
+      return fail("validation_failed", "O número escolhido não está mais conectado nesta organização.", 422, { requestId });
+    }
+    return fail("internal_error", matErr.message, 500, { requestId });
+  }
+
+  // Modo fluxo: o fluxo do disparo LIGA junto com o agendamento — e trava a
+  // edição do canvas (a regra de "pausar para editar" do construtor), para os
+  // contatos que já entraram não andarem num desenho que mudou por baixo.
+  if (fluxo && fluxo.status !== "active") {
+    const { error: ligarErr } = await supabase
+      .from("flows")
+      .update({ status: "active", updated_at: agora })
+      .eq("id", fluxo.id)
+      .eq("organization_id", authz.org.orgId)
+      .eq("broadcast_id", id);
+    if (ligarErr) return fail("internal_error", ligarErr.message, 500, { requestId });
+  }
 
   const quando = disparo.scheduled_at ?? agora;
   const { data, error } = await supabase
@@ -306,6 +394,9 @@ export async function PATCH(
     metadata: {
       publico: contatos.length,
       segmento: resumoDoSegmento(segmento),
+      modo,
+      ...(fluxo ? { flow_id: fluxo.id } : {}),
+      ...(sessao ? { channel_session_id: sessao } : {}),
       quando,
       ...(materializacao as Record<string, unknown> | null),
     },

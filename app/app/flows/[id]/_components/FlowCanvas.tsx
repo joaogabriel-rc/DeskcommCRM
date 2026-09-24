@@ -57,7 +57,12 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>(initial.edges);
   const { screenToFlowPosition } = useReactFlow();
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  // Rascunho recém-criado abre com o "Quando…" SELECIONADO: o painel dele
+  // aparece com o seletor de gatilho aberto, que é a primeira decisão do fluxo.
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(() => {
+    const gatilho = initial.nodes.find((n) => n.type === "TRIGGER");
+    return gatilho && !(gatilho.data.config as { trigger_type?: unknown }).trigger_type ? gatilho.id : null;
+  });
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const isReadOnly = flow?.status === "active";

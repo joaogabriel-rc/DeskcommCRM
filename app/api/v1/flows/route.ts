@@ -2,9 +2,9 @@
  * GET  /api/v1/flows — lista os flows da org ativa.
  * POST /api/v1/flows — cria um flow (nasce `draft`, com o nó TRIGGER já
  *   plantado — sem ele o canvas abriria vazio e o usuário não saberia por
- *   onde começar). O GATILHO é escolhido na tela e pode ser trocado depois;
- *   o default é "tag atribuída" por ser o caso mais comum, não por ser o
- *   único.
+ *   onde começar). O GATILHO é escolhido DENTRO do construtor, no nó
+ *   "Quando…": sem ele no corpo, o flow nasce com `trigger_type` nulo
+ *   (rascunho, migration 0393) e só pode ser ativado depois de escolhido.
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
@@ -31,6 +31,9 @@ export async function GET(): Promise<Response> {
     .from("flows")
     .select("*")
     .eq("organization_id", activeOrg.orgId)
+    // O fluxo de um disparo (0394) é do disparo: aparece no editor do disparo,
+    // nunca na lista de Automações.
+    .is("broadcast_id", null)
     .order("created_at", { ascending: false });
   if (error) return fail("internal_error", error.message, 500, { requestId });
   return ok(data ?? [], { requestId });
@@ -57,6 +60,9 @@ export async function POST(req: NextRequest): Promise<Response> {
     return fail("invalid_request", t("Dados inválidos."), 400, { requestId, details: parsed.error.flatten() });
   }
 
+  const triggerType = parsed.data.trigger_type ?? null;
+  const triggerConfig = triggerType ? parsed.data.trigger_config : {};
+
   const supabase = await createClient();
   const { data: created, error: insErr } = await supabase
     .from("flows")
@@ -65,8 +71,8 @@ export async function POST(req: NextRequest): Promise<Response> {
       created_by_user_id: user.id,
       name: parsed.data.name,
       description: parsed.data.description ?? null,
-      trigger_type: parsed.data.trigger_type,
-      trigger_config: parsed.data.trigger_config,
+      trigger_type: triggerType,
+      trigger_config: triggerConfig,
     })
     .select("*")
     .single();
@@ -74,15 +80,16 @@ export async function POST(req: NextRequest): Promise<Response> {
     return fail("internal_error", insErr?.message ?? "flow_insert_failed", 500, { requestId });
   }
 
-  // Nó de entrada plantado na criação — o canvas sempre abre com o gatilho no
-  // lugar (a UI monta o resto por cima dele). O nó guarda o gatilho ESCOLHIDO,
-  // qualquer que seja; trocar o gatilho pela tela reescreve este nó.
+  // Nó de entrada plantado na criação — o canvas sempre abre com o "Quando…"
+  // no lugar (a UI monta o resto por cima dele). Sem gatilho escolhido, o nó
+  // nasce sem `trigger_type` e a tela mostra "+ Novo gatilho"; trocar o
+  // gatilho pela tela reescreve este nó.
   const { error: nodeErr } = await supabase.from("flow_nodes").insert({
     organization_id: activeOrg.orgId,
     flow_id: created.id,
     type: "TRIGGER",
-    label: FLOW_TRIGGERS[parsed.data.trigger_type].label,
-    config: { trigger_type: parsed.data.trigger_type, config: parsed.data.trigger_config },
+    label: triggerType ? FLOW_TRIGGERS[triggerType].label : "Quando…",
+    config: triggerType ? { trigger_type: triggerType, config: triggerConfig } : { config: {} },
     position_x: 80,
     position_y: 80,
   });
@@ -97,7 +104,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     resourceType: "flow",
     resourceId: created.id,
     requestId,
-    metadata: { name: parsed.data.name, trigger_type: parsed.data.trigger_type },
+    metadata: { name: parsed.data.name, trigger_type: triggerType },
   });
 
   return ok(created, { requestId, status: 201 });

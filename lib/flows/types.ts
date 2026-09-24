@@ -56,6 +56,15 @@ export interface FlowExecutionRow {
   next_execution_at: string | null;
   attempts: number;
   last_error: string | null;
+  /**
+   * A permissão de envio que o DISPARO materializou no agendamento
+   * (`broadcast_recipients.service_boundary`), carregada pela execução até o
+   * nó de mensagem (migration 0394). Nula na execução iniciada por evento — lá a
+   * permissão sai do evento (`serviceForAutomation`).
+   */
+  service_boundary?: unknown;
+  /** O destinatário do disparo que iniciou esta execução (0394). */
+  broadcast_recipient_id?: string | null;
 }
 
 /**
@@ -75,6 +84,12 @@ export interface FlowNodeCtx {
   context: Record<string, unknown>;
   requestId: string;
   serviceBoundaries: Map<string, Promise<ServiceBoundary>>;
+  /**
+   * Execução iniciada por um DISPARO: a permissão já autorizada no clique de
+   * "Agendar". Presente, o nó de mensagem a usa (reconferida) em vez de
+   * derivar uma do evento — um disparo não nasce de evento.
+   */
+  servicoAutorizado?: ServiceBoundary | null;
 }
 
 export type NodeOutcome =
@@ -85,7 +100,8 @@ export type NodeOutcome =
   | { kind: "failed"; error: string };
 
 export interface TriggerNodeConfig {
-  trigger_type?: string;
+  /** Ausente/nulo = rascunho cujo gatilho ainda não foi escolhido (migration 0393). */
+  trigger_type?: string | null;
   config?: Record<string, unknown>;
 }
 
@@ -104,12 +120,31 @@ export interface MessageButton {
  */
 export type MessageWindowMode = "inside_24h" | "outside_24h";
 
+/**
+ * ── O modelo aprovado: referência + retrato ─────────────────────────────────
+ *
+ * `template_id` é o id da linha do catálogo (`lib/channels/catalogo-de-modelos.ts`)
+ * e é a REFERÊNCIA: sobrevive ao sync. `template_name`/`template_language` são o
+ * RETRATO — a chave que a plataforma usa no envio, e o que o motor manda. Nó
+ * anterior ao seletor guarda só o retrato; o catálogo o resolve por nome e idioma
+ * (compatibilidade), e o motor continua enviando por ele sem mudança.
+ *
+ * `template_contract_hash` é o contrato no instante da escolha. Comparado com o
+ * atual (`bindingState`), diz se o modelo MUDOU na plataforma depois de
+ * configurado — o caso que `conferirDefinicao` declara não conseguir ver.
+ *
+ * Com modelo escolhido, `buttons` é DERIVADO dele: as respostas rápidas do
+ * modelo, na ordem da plataforma, viram as saídas `button:<i>` do nó. O motor
+ * não distingue — casa a resposta pelo mesmo `casarRespostaDeBotao`.
+ */
 export interface MessageNodeConfig {
   body?: string;
   buttons?: MessageButton[];
   window_mode?: MessageWindowMode;
+  template_id?: string;
   template_name?: string;
   template_language?: string;
+  template_contract_hash?: string;
   template_values?: Record<string, string>;
   channel_session_id?: string;
 }

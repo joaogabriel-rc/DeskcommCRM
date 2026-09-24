@@ -26,7 +26,8 @@ export const NODE_VISUALS: Record<FlowNodeType, NodeVisual> = {
     chipClassName: "bg-accent-soft text-accent",
     borderClassName: "border-l-accent-500",
     defaultLabel: "Quando…",
-    defaultConfig: () => ({ trigger_type: "contact_tag_added", config: {} }),
+    // Sem gatilho: ele é escolhido no próprio nó (migration 0393).
+    defaultConfig: () => ({ config: {} }),
     paletteVisible: false,
   },
   MESSAGE: {
@@ -108,7 +109,9 @@ export function describeNodeConfig(type: FlowNodeType, config: Record<string, un
     case "MESSAGE": {
       const cfg = config as MessageNodeConfig;
       if (cfg.window_mode === "outside_24h") {
-        return cfg.template_name ? `Template: ${cfg.template_name}` : "Fora da janela — falta o template";
+        return cfg.template_name
+          ? `Modelo: ${cfg.template_name}${cfg.template_language ? ` (${cfg.template_language})` : ""}`
+          : "Fora da janela — escolha o modelo";
       }
       return cfg.body?.trim() ? cfg.body : "Sem texto ainda";
     }

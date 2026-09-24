@@ -55,6 +55,8 @@ export function DisparosList({ initialData }: { initialData: DisparoRow[] }) {
   async function criarDisparo() {
     const criado = await criar.mutateAsync({
       name: nome.trim(),
+      // Nasce guiado; o editor oferece o modo fluxo (Rodada 2).
+      modo: "guiado",
       segment: SEGMENTO_VAZIO,
       message: { window_mode: "outside_24h", body: "", template_values: {} },
       scheduled_at: null,

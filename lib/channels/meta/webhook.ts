@@ -180,6 +180,40 @@ function str(v: unknown): string | null {
  * a Meta re-entrega tudo que não recebe 2xx, então devolver falha para um evento que
  * não nos interessa vira auto-DDoS: ela re-tenta o mesmo payload em backoff por horas.
  */
+/**
+ * O texto de uma RESPOSTA a botão, ou `null` quando a mensagem não é resposta.
+ *
+ * Três formatos que a Meta usa para "o contato tocou num botão":
+ *
+ *   - `type: "button"` — resposta rápida de MODELO aprovado:
+ *     `{ button: { text, payload } }`. `text` é o rótulo do botão;
+ *   - `type: "interactive"` + `button_reply` — botão de mensagem interativa:
+ *     `{ interactive: { type: "button_reply", button_reply: { id, title } } }`;
+ *   - `type: "interactive"` + `list_reply` — item de lista:
+ *     `{ interactive: { type: "list_reply", list_reply: { id, title } } }`.
+ *
+ * O rótulo, e não o `payload`/`id`: é o que aparece na conversa para quem
+ * atende, e é o que o fluxo casa com a saída do botão (`casarRespostaDeBotao`,
+ * pelo rótulo). O `payload` de resposta rápida é, por padrão, o próprio texto.
+ * Sem rótulo, cai para o identificador — melhor uma palavra técnica na conversa
+ * do que a resposta sumir.
+ */
+export function textoDaResposta(tipo: string, raw: Record<string, unknown>): string | null {
+  if (tipo === "button") {
+    const b = (raw.button ?? {}) as Record<string, unknown>;
+    return str(b.text) ?? str(b.payload);
+  }
+  if (tipo === "interactive") {
+    const i = (raw.interactive ?? {}) as Record<string, unknown>;
+    const sub = str(i.type);
+    if (sub === "button_reply" || sub === "list_reply") {
+      const r = (i[sub] ?? {}) as Record<string, unknown>;
+      return str(r.title) ?? str(r.id);
+    }
+  }
+  return null;
+}
+
 export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEvent[] {
   const out: MetaWebhookEvent[] = [];
   if (envelope?.object !== "whatsapp_business_account") return out;
@@ -217,9 +251,14 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
 
           const perfil = contatos.find((c) => str(c.wa_id) === from);
           const tipo = str(raw.type) ?? "unknown";
-          const corpoMidia = tipo !== "contacts" ? (raw[tipo] as Record<string, unknown> | undefined) : undefined;
+          const resposta = textoDaResposta(tipo, raw);
+          const corpoMidia =
+            tipo !== "contacts" && resposta === null ? (raw[tipo] as Record<string, unknown> | undefined) : undefined;
           const sharedContact = tipo === "contacts" ? parseMetaInboundContact(raw) : null;
-          const tipoCrm = tipo === "contacts" ? "contact" : tipo;
+          // Resposta a botão chega como `button`/`interactive`, tipos que o CHECK
+          // de `messages.type` não conhece — o INSERT falhava e o clique se
+          // perdia. O que o contato disse é o RÓTULO que ele tocou: vira texto.
+          const tipoCrm = tipo === "contacts" ? "contact" : resposta !== null ? "text" : tipo;
 
           out.push({
             kind: "inbound_message",
@@ -232,9 +271,11 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
             sentAt: new Date(Number(str(raw.timestamp) ?? "0") * 1000),
             type: tipoCrm,
             text:
-              tipoCrm === "text"
-                ? str((raw.text as Record<string, unknown>)?.body)
-                : sharedContact?.name ?? null,
+              resposta !== null
+                ? resposta
+                : tipoCrm === "text"
+                  ? str((raw.text as Record<string, unknown>)?.body)
+                  : sharedContact?.name ?? null,
             ...(sharedContact ? { sharedContact } : {}),
             media:
               corpoMidia && str(corpoMidia.id)

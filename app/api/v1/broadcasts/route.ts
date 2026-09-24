@@ -16,6 +16,7 @@ import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { mfaEmDivida } from "@/lib/auth/server";
 import { requireSupportWrite } from "@/lib/impersonate/support";
+import { criarFluxoDoDisparo } from "@/lib/disparos/fluxo-do-disparo";
 import { resumoDoSegmento } from "@/lib/disparos/segmento";
 import { criarDisparoSchema, type DisparoRow } from "@/lib/schemas/disparos";
 import { createClient } from "@/lib/supabase/server";
@@ -34,7 +35,19 @@ export async function GET(): Promise<Response> {
     .eq("organization_id", authz.org.orgId)
     .order("created_at", { ascending: false });
   if (error) return fail("internal_error", error.message, 500, { requestId });
-  return ok((data ?? []) as unknown as DisparoRow[], { requestId });
+
+  // O modo de cada um sai da existência do fluxo próprio (0394) — uma consulta
+  // para a lista inteira, recortada pela organização.
+  const { data: fluxos } = await supabase
+    .from("flows")
+    .select("broadcast_id")
+    .eq("organization_id", authz.org.orgId)
+    .not("broadcast_id", "is", null);
+  const comFluxo = new Set(((fluxos ?? []) as Array<{ broadcast_id: string }>).map((f) => f.broadcast_id));
+  return ok(
+    ((data ?? []) as unknown as DisparoRow[]).map((d) => ({ ...d, modo: comFluxo.has(d.id) ? "fluxo" : "guiado" })),
+    { requestId },
+  );
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -70,6 +83,22 @@ export async function POST(req: NextRequest): Promise<Response> {
     .single();
   if (error || !data) return fail("internal_error", error?.message ?? "insert_failed", 500, { requestId });
 
+  // Modo FLUXO: o disparo nasce com o fluxo PRÓPRIO dele (0394) — o operador
+  // abre o construtor a partir do disparo e monta ali a mensagem e o resto.
+  let fluxo: { id: string; status: string } | null = null;
+  if (parsed.data.modo === "fluxo") {
+    try {
+      fluxo = await criarFluxoDoDisparo(supabase, {
+        organizationId: authz.org.orgId,
+        broadcastId: (data as unknown as DisparoRow).id,
+        nomeDoDisparo: parsed.data.name,
+        userId: authz.user.id,
+      });
+    } catch (err) {
+      return fail("internal_error", err instanceof Error ? err.message : "flow_create_failed", 500, { requestId });
+    }
+  }
+
   void audit({
     action: "broadcast.created",
     actorUserId: authz.user.id,
@@ -77,8 +106,13 @@ export async function POST(req: NextRequest): Promise<Response> {
     resourceType: "broadcast",
     resourceId: (data as unknown as DisparoRow).id,
     requestId,
-    metadata: { name: parsed.data.name, segmento: resumoDoSegmento(parsed.data.segment) },
+    metadata: {
+      name: parsed.data.name,
+      segmento: resumoDoSegmento(parsed.data.segment),
+      modo: parsed.data.modo,
+      ...(fluxo ? { flow_id: fluxo.id } : {}),
+    },
   });
 
-  return ok(data as unknown as DisparoRow, { requestId, status: 201 });
+  return ok({ ...(data as unknown as DisparoRow), modo: parsed.data.modo, fluxo }, { requestId, status: 201 });
 }

@@ -26,7 +26,14 @@ import type {
   WebhookNodeConfig,
 } from "@/lib/flows/types";
 import type { RFNode } from "@/lib/flows/ui-mappers";
+import {
+  acharModeloNoCatalogo,
+  configDoModeloEscolhido,
+  useCatalogoDeModelos,
+} from "@/hooks/channels/useCatalogoDeModelos";
 import { NODE_VISUALS } from "./nodeVisuals";
+import { PreviaDoModelo } from "./PreviaDoModelo";
+import { SeletorDeModelo } from "./SeletorDeModelo";
 import { TriggerPicker } from "./TriggerPicker";
 
 interface Props {
@@ -97,18 +104,51 @@ function CamposDoGatilho({
   patch: (p: Record<string, unknown>) => void;
 }) {
   const t = useT();
-  const [aberto, setAberto] = useState(false);
-  const triggerId = (config.trigger_type ?? "contact_tag_added") as FlowTriggerId;
-  const def = FLOW_TRIGGERS[triggerId];
+  // Rascunho recém-criado (sem gatilho): o seletor abre sozinho — o fluxo nasceu
+  // no construtor justamente para o gatilho ser a primeira escolha, aqui.
+  const [aberto, setAberto] = useState(!config.trigger_type);
+  // O gatilho do DISPARO (0394) não se escolhe: o fluxo é do disparo e começa
+  // quando o disparo alcança cada contato do público.
+  if (config.trigger_type === "broadcast") {
+    const def = FLOW_TRIGGERS.broadcast;
+    return (
+      <Campo label={t("Quando isto acontecer")}>
+        <p className="rounded-md border border-border px-3 py-2 text-sm" data-testid="gatilho-do-disparo">
+          {t(def.label)}
+        </p>
+        <p className="text-xs text-text-muted">{t(def.description)}</p>
+      </Campo>
+    );
+  }
+  const triggerId = (config.trigger_type ?? null) as FlowTriggerId | null;
+  const def = triggerId ? FLOW_TRIGGERS[triggerId] : undefined;
   const cfg = config.config ?? {};
 
   return (
     <>
       <Campo label={t("Quando isto acontecer")}>
-        <Button type="button" variant="outline" className="justify-start" onClick={() => setAberto(true)}>
-          {def?.label ? t(def.label) : t("Escolher gatilho")}
-        </Button>
-        {def && <p className="text-xs text-text-muted">{t(def.description)}</p>}
+        {def ? (
+          <Button type="button" variant="outline" className="justify-start" onClick={() => setAberto(true)}>
+            {t(def.label)}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            className="border-dashed text-accent"
+            onClick={() => setAberto(true)}
+            data-testid="novo-gatilho"
+          >
+            <Plus size={14} aria-hidden className="mr-1" /> {t("Novo gatilho")}
+          </Button>
+        )}
+        {def ? (
+          <p className="text-xs text-text-muted">{t(def.description)}</p>
+        ) : (
+          <p className="text-xs text-text-muted">
+            {t("O gatilho decide o que coloca um contato neste fluxo. Você pode salvar sem ele; para ativar, ele é obrigatório.")}
+          </p>
+        )}
       </Campo>
 
       {def?.field && (
@@ -124,7 +164,7 @@ function CamposDoGatilho({
       <TriggerPicker
         open={aberto}
         onOpenChange={setAberto}
-        atual={triggerId}
+        atual={triggerId ?? undefined}
         onEscolher={(id) => patch({ trigger_type: id, config: {} })}
       />
     </>
@@ -160,7 +200,6 @@ function CamposDeMensagem({
   const t = useT();
   const botoes = config.buttons ?? [];
   const foraDaJanela = config.window_mode === "outside_24h";
-  const valores = config.template_values ?? {};
 
   return (
     <>
@@ -187,76 +226,7 @@ function CamposDeMensagem({
       </Campo>
 
       {foraDaJanela ? (
-        <>
-          <Campo label={t("Nome do template aprovado")}>
-            <Input
-              value={config.template_name ?? ""}
-              onChange={(e) => patch({ template_name: e.target.value })}
-              placeholder="boas_vindas"
-            />
-          </Campo>
-          <Campo label={t("Idioma do template")} ajuda={t("pt_BR e pt são templates diferentes.")}>
-            <Input
-              value={config.template_language ?? ""}
-              onChange={(e) => patch({ template_language: e.target.value })}
-              placeholder="pt_BR"
-            />
-          </Campo>
-          <Campo
-            label={t("Valores dos espaços do template")}
-            ajuda={t(
-              "Cada espaço do template aprovado ({{1}}, {{2}}…) recebe um valor. Use variáveis para personalizar com o que as ações gravaram antes deste passo.",
-            )}
-          >
-            <div className="flex flex-col gap-2">
-              {Object.entries(valores).map(([slot, valor]) => (
-                <div key={slot} className="flex items-center gap-2">
-                  <Input
-                    className="w-24 shrink-0 font-mono text-xs"
-                    value={slot}
-                    aria-label={t("Espaço do template")}
-                    // A chave é editável porque nem todo espaço é `1`, `2`, `3`:
-                    // cabeçalho é `header:1` e botão é `button0:1`. Ver
-                    // lib/flows/slots.ts.
-                    onChange={(e) => patch({ template_values: renomearSlot(valores, slot, e.target.value) })}
-                  />
-                  <Input
-                    value={valor}
-                    onChange={(e) =>
-                      patch({ template_values: { ...valores, [slot]: e.target.value } })
-                    }
-                  />
-                  <InserirVariavel
-                    onInserir={(v) =>
-                      patch({ template_values: { ...valores, [slot]: `${valor}${v}` } })
-                    }
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => {
-                      const proximo = { ...valores };
-                      delete proximo[slot];
-                      patch({ template_values: proximo });
-                    }}
-                    aria-label={`${t("Remover espaço")} ${slot}`}
-                  >
-                    <X size={14} aria-hidden />
-                  </Button>
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => patch({ template_values: { ...valores, [proximoSlot(valores)]: "" } })}
-              >
-                <Plus size={14} aria-hidden className="mr-1" /> {t("Adicionar espaço")}
-              </Button>
-            </div>
-          </Campo>
-        </>
+        <ModeloDaMensagem config={config} patch={patch} />
       ) : (
         <Campo
           label={t("Texto da mensagem")}
@@ -281,6 +251,7 @@ function CamposDeMensagem({
         </Campo>
       )}
 
+      {!foraDaJanela && (
       <Campo
         label={t("Botões")}
         ajuda={t("Cada botão vira uma saída do passo: ligue cada um ao caminho que ele deve seguir.")}
@@ -317,7 +288,250 @@ function CamposDeMensagem({
           </Button>
         </div>
       </Campo>
+      )}
     </>
+  );
+}
+
+/**
+ * O modelo aprovado do passo de mensagem fora da janela.
+ *
+ * O caminho principal é ESCOLHER: o seletor lista o catálogo e o nó guarda o id
+ * do modelo + o retrato (nome, idioma, contrato). Os espaços a preencher saem do
+ * CONTRATO do modelo — o operador não digita `1`, `header:1` nem `button0:1`.
+ *
+ * Nó antigo (só nome e idioma digitados) continua funcionando: se o catálogo o
+ * localiza, a tela mostra o modelo e oferece VINCULAR; se não localiza, diz isso
+ * com todas as letras e mantém o editor antigo dos espaços, para não tirar do
+ * operador o que ele já tinha configurado.
+ */
+export function ModeloDaMensagem({
+  config,
+  patch,
+}: {
+  config: MessageNodeConfig;
+  patch: (p: Record<string, unknown>) => void;
+}) {
+  const t = useT();
+  const [seletorAberto, setSeletorAberto] = useState(false);
+  const catalogo = useCatalogoDeModelos({ todos: true });
+  const modelo = acharModeloNoCatalogo(catalogo.data, config);
+  const valores = config.template_values ?? {};
+  const temRetrato = !!config.template_name?.trim() && !!config.template_language?.trim();
+  const vinculado = !!config.template_id;
+  const mudou =
+    vinculado && !!modelo && !!config.template_contract_hash && config.template_contract_hash !== modelo.contractHash;
+
+  const seletor = (
+    <SeletorDeModelo
+      open={seletorAberto}
+      onOpenChange={setSeletorAberto}
+      conexaoAtual={config.channel_session_id}
+      modeloAtual={config.template_id}
+      onEscolher={(m, conexaoId) => patch(configDoModeloEscolhido(m, conexaoId, valores))}
+    />
+  );
+
+  if (!temRetrato && !vinculado) {
+    return (
+      <>
+        <Campo label={t("Modelo aprovado")}>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-20 border-dashed"
+            onClick={() => setSeletorAberto(true)}
+            data-testid="escolher-modelo"
+          >
+            {t("Escolher modelo de mensagem")}
+          </Button>
+        </Campo>
+        {seletor}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Campo label={t("Modelo aprovado")}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium" data-testid="modelo-escolhido">
+              {modelo?.name ?? config.template_name}
+            </p>
+            <p className="text-xs text-text-muted">
+              {[modelo?.language ?? config.template_language, modelo?.category, modelo?.status]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button type="button" variant="outline" size="sm" onClick={() => setSeletorAberto(true)}>
+              {t("Trocar")}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={t("Remover modelo")}
+              onClick={() =>
+                patch({
+                  template_id: undefined,
+                  template_name: undefined,
+                  template_language: undefined,
+                  template_contract_hash: undefined,
+                  template_values: {},
+                  buttons: [],
+                })
+              }
+            >
+              <X size={14} aria-hidden />
+            </Button>
+          </div>
+        </div>
+
+        {catalogo.isLoading && <p className="text-xs text-text-muted">{t("Carregando o modelo…")}</p>}
+
+        {catalogo.data && !modelo && (
+          <p className="rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-xs text-warning-fg" role="alert">
+            {t("Modelo não localizado no catálogo")} ({config.template_name}, {config.template_language}).{" "}
+            {vinculado
+              ? t("Ele pode ter sido apagado da plataforma. Escolha o modelo de novo antes de ativar.")
+              : t("Este passo foi configurado pelo nome. Sincronize os modelos em Conexões ou escolha o modelo na lista.")}
+          </p>
+        )}
+        {modelo && !modelo.utilizavel && (
+          <p className="rounded-md border border-error/40 bg-error-bg px-3 py-2 text-xs text-error-fg" role="alert">
+            {t("Este modelo não está aprovado")} ({modelo.status}).{" "}
+            {t("A plataforma só entrega modelo aprovado. Escolha outro.")}
+          </p>
+        )}
+        {mudou && (
+          <p className="rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-xs text-warning-fg" role="alert">
+            {t("O modelo mudou na plataforma depois de escolhido. Confira os espaços e escolha-o de novo para confirmar.")}
+          </p>
+        )}
+        {modelo && !vinculado && (
+          <div className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs">
+            <span className="text-text-muted">{t("Configurado pelo nome, antes do seletor.")}</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => patch(configDoModeloEscolhido(modelo, config.channel_session_id ?? null, valores))}
+            >
+              {t("Vincular a este modelo")}
+            </Button>
+          </div>
+        )}
+      </Campo>
+
+      {modelo && <PreviaDoModelo modelo={modelo} />}
+
+      {modelo ? (
+        modelo.espacos.length > 0 && (
+          <Campo
+            label={t("Valores dos espaços do modelo")}
+            ajuda={t("Use variáveis para personalizar com os dados do contato e o que as ações gravaram antes deste passo.")}
+          >
+            <div className="flex flex-col gap-3">
+              {modelo.espacos.map((e) => {
+                const valor = valores[e.valueKey] ?? "";
+                return (
+                  <div key={e.valueKey} className="flex flex-col gap-1">
+                    <span className="text-xs text-text-muted">
+                      <span className="font-mono">{`{{${e.key}}}`}</span> · {e.onde}
+                      {(e.contextBefore || e.contextAfter) && (
+                        <span className="ml-1 italic">
+                          — “{e.contextBefore.slice(-30)}___{e.contextAfter.slice(0, 30)}”
+                        </span>
+                      )}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={valor}
+                        aria-label={`${t("Valor de")} {{${e.key}}} (${e.onde})`}
+                        onChange={(ev) => patch({ template_values: { ...valores, [e.valueKey]: ev.target.value } })}
+                      />
+                      <InserirVariavel
+                        onInserir={(v) => patch({ template_values: { ...valores, [e.valueKey]: `${valor}${v}` } })}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Campo>
+        )
+      ) : (
+        <EspacosManuais valores={valores} patch={patch} />
+      )}
+
+      {modelo && modelo.conteudo.botoes.some((b) => b.tipo === "QUICK_REPLY") && (
+        <p className="text-xs text-text-muted">
+          {t("Cada resposta rápida do modelo vira uma saída deste passo: ligue cada uma ao caminho que ela deve seguir.")}
+        </p>
+      )}
+
+      {seletor}
+    </>
+  );
+}
+
+/**
+ * O editor ANTIGO dos espaços — chave e valor digitados. Só aparece para nó
+ * cujo modelo o catálogo não localiza: é o que ele já tinha, e tirar faria o
+ * operador perder a configuração ao abrir o passo.
+ */
+function EspacosManuais({
+  valores,
+  patch,
+}: {
+  valores: Record<string, string>;
+  patch: (p: Record<string, unknown>) => void;
+}) {
+  const t = useT();
+  return (
+    <Campo
+      label={t("Valores dos espaços do template")}
+      ajuda={t("Cada espaço do template aprovado ({{1}}, {{2}}…) recebe um valor.")}
+    >
+      <div className="flex flex-col gap-2">
+        {Object.entries(valores).map(([slot, valor]) => (
+          <div key={slot} className="flex items-center gap-2">
+            <Input
+              className="w-24 shrink-0 font-mono text-xs"
+              value={slot}
+              aria-label={t("Espaço do template")}
+              onChange={(e) => patch({ template_values: renomearSlot(valores, slot, e.target.value) })}
+            />
+            <Input value={valor} onChange={(e) => patch({ template_values: { ...valores, [slot]: e.target.value } })} />
+            <InserirVariavel onInserir={(v) => patch({ template_values: { ...valores, [slot]: `${valor}${v}` } })} />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                const proximo = { ...valores };
+                delete proximo[slot];
+                patch({ template_values: proximo });
+              }}
+              aria-label={`${t("Remover espaço")} ${slot}`}
+            >
+              <X size={14} aria-hidden />
+            </Button>
+          </div>
+        ))}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => patch({ template_values: { ...valores, [proximoSlot(valores)]: "" } })}
+        >
+          <Plus size={14} aria-hidden className="mr-1" /> {t("Adicionar espaço")}
+        </Button>
+      </div>
+    </Campo>
   );
 }
 

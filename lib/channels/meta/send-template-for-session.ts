@@ -18,6 +18,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { graphVersion } from "@/lib/graph-version";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+import { resolverModelo } from "../catalogo-de-modelos";
+
 import { resolveMetaCreds } from "./credentials";
 import { sendTemplate } from "./send-template";
 
@@ -103,19 +105,25 @@ export async function sendTemplateForSession(
     );
   }
 
-  let consulta = db
-    .from("meta_templates")
-    .select("name, language, status, contract_hash, components")
-    .eq("organization_id", input.organizationId)
-    .eq("name", input.name)
-    .eq("language", input.language);
-  // Com sessão, restringe à conexão: dois números têm definições diferentes e
-  // conferir a do número errado aprovaria um envio que a plataforma recusa.
-  if (input.channelSessionId) consulta = consulta.eq("channel_session_id", input.channelSessionId);
-
-  const { data: linha, error } = await consulta.maybeSingle();
-
-  if (error) throw new Error(`template_lookup_failed: ${error.message}`);
+  // A definição sai do CATÁLOGO central — a mesma chamada do pré-voo
+  // (`conferir-definicao.ts`), para os dois nunca discordarem. Esta função tinha
+  // a própria busca, que filtrava só `channel_session_id = conexão`; o sync
+  // oficial grava por CONTA (`channel_session_id` vazio), então o pré-voo achava
+  // o modelo oficial pela WABA e aprovava, e aqui ele "não estava no espelho".
+  // `resolverModelo` recorta organização → conexão (ativa, desta organização) →
+  // conta dela → nome e idioma. Sem conexão (base anterior à 0144), o par em
+  // duas contas não escolhe nenhuma — como o `maybeSingle` antigo, que recusava.
+  let modelo;
+  try {
+    modelo = await resolverModelo(db, input.organizationId, {
+      name: input.name,
+      language: input.language,
+      channelSessionId: input.channelSessionId ?? null,
+      ambiguoNaoResolve: true,
+    });
+  } catch (err) {
+    throw new Error(`template_lookup_failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   await input.beforeSend?.();
   const resultado = await sendTemplate({
@@ -129,16 +137,16 @@ export async function sendTemplateForSession(
       language: input.language,
       // Ver o cabeçalho: o hash sai do espelho dos dois lados, então `bindingState`
       // aqui checa existência e aprovação, não obsolescência.
-      contractHash: linha?.contract_hash ?? "",
+      contractHash: modelo?.contractHash ?? "",
       values: input.values,
     },
-    current: linha
+    current: modelo
       ? {
-          name: linha.name,
-          language: linha.language,
-          contractHash: linha.contract_hash,
-          status: linha.status,
-          components: linha.components,
+          name: modelo.name,
+          language: modelo.language,
+          contractHash: modelo.contractHash,
+          status: modelo.status,
+          components: modelo.components,
         }
       : null,
   });

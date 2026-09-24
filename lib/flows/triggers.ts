@@ -38,9 +38,10 @@ export type FlowTriggerId =
   | "lead_lost"
   | "appointment_created"
   | "appointment_confirmed"
-  | "appointment_cancelled";
+  | "appointment_cancelled"
+  | "broadcast";
 
-export type FlowTriggerCategory = "contato" | "whatsapp" | "funil" | "agenda";
+export type FlowTriggerCategory = "contato" | "whatsapp" | "funil" | "agenda" | "disparo";
 
 /** Campo que a tela pede para ESTE gatilho (vazio = gatilho sem configuração). */
 export type FlowTriggerFieldKind = "tag" | "campo" | "etapa";
@@ -69,6 +70,12 @@ export interface FlowTriggerDefinition {
    * fluxo que só falha na hora H. Ausente = suportado.
    */
   mensagemSuportada?: boolean;
+  /**
+   * Gatilho que ninguém ESCOLHE: ele nasce com o fluxo de um disparo (migration
+   * 0394, `flows.broadcast_id`). Fica fora do seletor e da API de fluxos
+   * comuns; o banco amarra `broadcast` ⇔ `broadcast_id` (`flows_disparo_coerente`).
+   */
+  interno?: boolean;
 }
 
 export const FLOW_TRIGGERS: Record<FlowTriggerId, FlowTriggerDefinition> = {
@@ -189,9 +196,26 @@ export const FLOW_TRIGGERS: Record<FlowTriggerId, FlowTriggerDefinition> = {
     events: ["appointment.cancelled"],
     entity: "calendar_appointment",
   },
+  broadcast: {
+    id: "broadcast",
+    label: "O disparo alcança o contato",
+    description: "Cada contato do público do disparo entra no fluxo quando o disparo chega a ele, no ritmo do disparo.",
+    category: "disparo",
+    // Nenhum evento: quem inicia a execução é o worker dos disparos, carregando a
+    // permissão que o agendamento materializou (lib/disparos/worker.ts).
+    events: [],
+    entity: "contact",
+    interno: true,
+  },
 };
 
 export const FLOW_TRIGGER_IDS = Object.keys(FLOW_TRIGGERS) as [FlowTriggerId, ...FlowTriggerId[]];
+
+/** Os gatilhos que uma pessoa ESCOLHE — o catálogo sem os internos (o do disparo). */
+export const FLOW_TRIGGER_IDS_ESCOLHIVEIS = FLOW_TRIGGER_IDS.filter((id) => !FLOW_TRIGGERS[id].interno) as [
+  FlowTriggerId,
+  ...FlowTriggerId[],
+];
 
 /**
  * Todo `event_type` que algum gatilho consome — é o que o handler assina no
@@ -205,6 +229,7 @@ export const CATEGORIA_LABEL: Record<FlowTriggerCategory, string> = {
   whatsapp: "WhatsApp",
   funil: "Funil de vendas",
   agenda: "Agenda",
+  disparo: "Disparo",
 };
 
 function texto(valor: unknown): string {
@@ -266,7 +291,10 @@ export function eventoAcionaGatilho(
 }
 
 /** Como o card do gatilho se descreve no canvas, já com a configuração dele. */
-export function resumoDoGatilho(triggerId: string, config: Record<string, unknown>): string {
+export function resumoDoGatilho(triggerId: string | null | undefined, config: Record<string, unknown> | null | undefined): string {
+  // Rascunho que nasceu no construtor (migration 0393): ainda sem gatilho.
+  if (!triggerId) return "Sem gatilho — escolha o que inicia este fluxo";
+  config = config ?? {};
   const def = FLOW_TRIGGERS[triggerId as FlowTriggerId];
   if (!def) return "Gatilho não reconhecido";
   if (!def.field) return def.label;

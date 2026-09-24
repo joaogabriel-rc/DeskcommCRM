@@ -4526,9 +4526,12 @@ export const DICIONARIO: Traducoes = {
   "Sincronizando…": { es: "Sincronizando…" },
   "Sincronizar com a Meta": { es: "Sincronizar con Meta" },
   "Nenhum template ainda": { es: "Aún no hay plantillas" },
-  "Crie templates no Gerenciador do WhatsApp e clique em": {
-    es: "Crea plantillas en el Administrador de WhatsApp y haz clic en",
+  "Crie um modelo em Criar modelo, acima, ou no Gerenciador do WhatsApp e clique em": {
+    es: "Crea una plantilla en Crear plantilla, arriba, o en el Administrador de WhatsApp y haz clic en",
   },
+  "Modelo enviado para a Meta:": { es: "Plantilla enviada a Meta:" },
+  "Ele só pode ser usado depois de aprovado.": { es: "Solo se puede usar después de que la aprueben." },
+  "Escolha o número oficial": { es: "Elige el número oficial" },
   "Só templates aprovados podem ser enviados fora da janela de 24 horas.": {
     es: "Solo las plantillas aprobadas se pueden enviar fuera de la ventana de 24 horas.",
   },
@@ -7914,6 +7917,88 @@ export const DICIONARIO: Traducoes = {
   // requisição, e ficam em português por ora, mesmo comportamento de
   // degradação do resto deste arquivo.
   "account_id e api_key são obrigatórios": { es: "account_id y api_key son obligatorios" },
+  // Criar modelo pelo canal oficial (G1): frases fixas da validação e da conexão.
+  "Faltam conexão, nome, idioma, categoria ou conteúdo.": {
+    es: "Faltan conexión, nombre, idioma, categoría o contenido.",
+  },
+  "O nome aceita só letras minúsculas, números e _ (ex.: confirmacao_de_pedido).": {
+    es: "El nombre acepta solo letras minúsculas, números y _ (ej.: confirmacion_de_pedido).",
+  },
+  "Idioma inválido (ex.: pt_BR).": {
+    es: "Idioma inválido (ej.: es).",
+  },
+  "Categoria inválida.": {
+    es: "Categoría inválida.",
+  },
+  "Esta integração cria modelos só com valores numerados ({{1}}, {{2}}…).": {
+    es: "Esta integración crea plantillas solo con valores numerados ({{1}}, {{2}}…).",
+  },
+  "O modelo precisa de conteúdo.": {
+    es: "La plantilla necesita contenido.",
+  },
+  "Componente desconhecido no modelo.": {
+    es: "Componente desconocido en la plantilla.",
+  },
+  "Cabeçalho com imagem, vídeo ou documento ainda não é suportado na criação pelo canal oficial: a Meta exige o arquivo enviado pelo upload dela. Use um cabeçalho de texto, ou crie esse modelo no Gerenciador do WhatsApp e sincronize.": {
+    es: "El encabezado con imagen, video o documento aún no se puede crear por el canal oficial: Meta exige el archivo enviado por su propia carga. Usa un encabezado de texto, o crea esa plantilla en el Administrador de WhatsApp y sincroniza.",
+  },
+  "O cabeçalho de texto está vazio.": {
+    es: "El encabezado de texto está vacío.",
+  },
+  "O cabeçalho aceita no máximo um valor ({{1}}).": {
+    es: "El encabezado acepta como máximo un valor ({{1}}).",
+  },
+  "O cabeçalho só pode usar {{1}}.": {
+    es: "El encabezado solo puede usar {{1}}.",
+  },
+  "Falta o exemplo do valor do cabeçalho.": {
+    es: "Falta el ejemplo del valor del encabezado.",
+  },
+  "O texto da mensagem está vazio.": {
+    es: "El texto del mensaje está vacío.",
+  },
+  "Os valores precisam ser numerados sem pular: {{1}}, {{2}}, {{3}}…": {
+    es: "Los valores deben numerarse sin saltos: {{1}}, {{2}}, {{3}}…",
+  },
+  "A revisão exige um exemplo de cada valor do texto.": {
+    es: "La revisión exige un ejemplo de cada valor del texto.",
+  },
+  "O rodapé está vazio.": {
+    es: "El pie está vacío.",
+  },
+  "O rodapé não aceita valores ({{n}}).": {
+    es: "El pie no acepta valores ({{n}}).",
+  },
+  "O componente de botões está vazio.": {
+    es: "El componente de botones está vacío.",
+  },
+  "Tipo de botão não suportado.": {
+    es: "Tipo de botón no admitido.",
+  },
+  "Todo botão precisa de texto.": {
+    es: "Todo botón necesita texto.",
+  },
+  "O botão de link precisa de um endereço https://.": {
+    es: "El botón de enlace necesita una dirección https://.",
+  },
+  "O botão de telefone precisa de um número com DDI (ex.: +5531999998888).": {
+    es: "El botón de teléfono necesita un número con código de país (ej.: +595991234567).",
+  },
+  "O modelo precisa de um texto de mensagem.": {
+    es: "La plantilla necesita un texto de mensaje.",
+  },
+  "escolha uma conexão oficial desta organização.": {
+    es: "elige una conexión oficial de esta organización.",
+  },
+  "esta conexão oficial não é desta organização ou foi excluída.": {
+    es: "esta conexión oficial no es de esta organización o fue eliminada.",
+  },
+  "a conexão escolhida não tem conta do WhatsApp Business (WABA) gravada.": {
+    es: "la conexión elegida no tiene una cuenta de WhatsApp Business (WABA) guardada.",
+  },
+  "a conexão não tem conta do WhatsApp Business (WABA) gravada.": {
+    es: "la conexión no tiene una cuenta de WhatsApp Business (WABA) guardada.",
+  },
   "Agente não encontrado.": { es: "Agente no encontrado." },
   "Agente não encontrado nesta organização.": { es: "Agente no encontrado en esta organización." },
   "Agent não encontrado.": { es: "Agent no encontrado." },
@@ -11826,6 +11911,83 @@ export const DICIONARIO: Traducoes = {
   },
   "Versão não encontrada para esta skill.": { es: "No se encontró esa versión para esta skill." },
   "Versão da skill não encontrada.": { es: "No se encontró la versión de la skill." },
+  // ---- Fluxos: construtor sem gatilho e modelo aprovado no nó (migration 0393) ----
+  "A plataforma só entrega modelo aprovado. Escolha outro.": { es: "La plataforma solo entrega plantillas aprobadas. Elija otra." },
+  "Cada espaço do template aprovado ({{1}}, {{2}}…) recebe um valor.": { es: "Cada espacio de la plantilla aprobada ({{1}}, {{2}}…) recibe un valor." },
+  "Cada resposta rápida do modelo vira uma saída deste passo: ligue cada uma ao caminho que ela deve seguir.": { es: "Cada respuesta rápida de la plantilla se convierte en una salida de este paso: conecte cada una al camino que debe seguir." },
+  "Carregando modelos…": { es: "Cargando plantillas…" },
+  "Carregando o modelo…": { es: "Cargando la plantilla…" },
+  "Configurado pelo nome, antes do seletor.": { es: "Configurado por el nombre, antes del selector." },
+  "Ele pode ter sido apagado da plataforma. Escolha o modelo de novo antes de ativar.": { es: "Puede haber sido eliminada de la plataforma. Elija la plantilla de nuevo antes de activar." },
+  "Escolha o número que envia para ver os modelos dele.": { es: "Elija el número que envía para ver sus plantillas." },
+  "Escolher modelo de mensagem": { es: "Elegir plantilla de mensaje" },
+  "Este modelo não está aprovado": { es: "Esta plantilla no está aprobada" },
+  "Este passo foi configurado pelo nome. Sincronize os modelos em Conexões ou escolha o modelo na lista.": { es: "Este paso se configuró por el nombre. Sincronice las plantillas en Conexiones o elija la plantilla en la lista." },
+  "Modelo não aprovado": { es: "Plantilla no aprobada" },
+  "Modelo não localizado no catálogo": { es: "Plantilla no encontrada en el catálogo" },
+  "Nenhum modelo aprovado com esse nome.": { es: "Ninguna plantilla aprobada con ese nombre." },
+  "Nenhum modelo aprovado neste número. Sincronize os modelos em Conexões › API Oficial › Templates.": { es: "Ninguna plantilla aprobada en este número. Sincronice las plantillas en Conexiones › API Oficial › Plantillas." },
+  "Nenhum número oficial conectado. Modelo aprovado só existe no canal oficial.": { es: "Ningún número oficial conectado. Las plantillas aprobadas solo existen en el canal oficial." },
+  "Nome do fluxo": { es: "Nombre del flujo" },
+  "Novo gatilho": { es: "Nuevo disparador" },
+  "Não foi possível carregar os modelos. Tente de novo.": { es: "No se pudieron cargar las plantillas. Inténtelo de nuevo." },
+  "Número que envia": { es: "Número que envía" },
+  "O gatilho decide o que coloca um contato neste fluxo. Você pode salvar sem ele; para ativar, ele é obrigatório.": { es: "El disparador decide qué coloca a un contacto en este flujo. Puede guardar sin él; para activar, es obligatorio." },
+  "O modelo mudou na plataforma depois de escolhido. Confira os espaços e escolha-o de novo para confirmar.": { es: "La plantilla cambió en la plataforma después de ser elegida. Revise los espacios y elíjala de nuevo para confirmar." },
+  "Pesquisar modelo": { es: "Buscar plantilla" },
+  "Pesquise por nome, idioma ou categoria": { es: "Busque por nombre, idioma o categoría" },
+  "Remover modelo": { es: "Quitar plantilla" },
+  "Sem título": { es: "Sin título" },
+  "Só aparecem os modelos aprovados pela plataforma. O texto, os espaços e os botões vêm do próprio modelo.": { es: "Solo aparecen las plantillas aprobadas por la plataforma. El texto, los espacios y los botones vienen de la propia plantilla." },
+  "Use variáveis para personalizar com os dados do contato e o que as ações gravaram antes deste passo.": { es: "Use variables para personalizar con los datos del contacto y lo que las acciones guardaron antes de este paso." },
+  "Valor de": { es: "Valor de" },
+  "Valores dos espaços do modelo": { es: "Valores de los espacios de la plantilla" },
+  "Vincular a este modelo": { es: "Vincular a esta plantilla" },
+  "abre um link": { es: "abre un enlace" },
+  "copia um código": { es: "copia un código" },
+  "documento": { es: "documento" },
+  "espaço(s)": { es: "espacio(s)" },
+  "imagem": { es: "imagen" },
+  "liga para um número": { es: "llama a un número" },
+  "localização": { es: "ubicación" },
+  "resposta rápida": { es: "respuesta rápida" },
+  "vídeo": { es: "video" },
+  "Sem gatilho — escolha o que inicia este fluxo": { es: "Sin disparador — elija qué inicia este flujo" },
+  "Escolha no passo \"Quando…\" o que inicia este flow antes de ativá-lo.": { es: "Elija en el paso \"Cuando…\" qué inicia este flujo antes de activarlo." },
+  // ---- Disparos: público por grupos e modo fluxo (migration 0394) ----
+  "Adicionar etiqueta": { es: "Agregar etiqueta" },
+  "Basta UMA das condições deste grupo.": { es: "Basta UNA de las condiciones de este grupo." },
+  "Cada contato entra num fluxo próprio do disparo — mensagens, botões, esperas e condições.": { es: "Cada contacto entra en un flujo propio del envío — mensajes, botones, esperas y condiciones." },
+  "Como o disparo fala com o público": { es: "Cómo el envío habla con el público" },
+  "Complete os critérios (campo e valor) para contar": { es: "Complete los criterios (campo y valor) para contar" },
+  "Configurar fluxo": { es: "Configurar flujo" },
+  "Escolha o valor": { es: "Elija el valor" },
+  "Etiqueta fora do registro": { es: "Etiqueta fuera del registro" },
+  "Fluxo do disparo": { es: "Flujo del envío" },
+  "Fluxo do disparo — voltar ao disparo": { es: "Flujo del envío — volver al envío" },
+  "Guiado": { es: "Guiado" },
+  "Ligado com o agendamento": { es: "Activado con la programación" },
+  "Modo do disparo": { es: "Modo del envío" },
+  "Modo fluxo": { es: "Modo flujo" },
+  "Modo guiado": { es: "Modo guiado" },
+  "Monte aqui o que cada contato recebe: o primeiro passo costuma ser a mensagem com o modelo aprovado, e dali saem os caminhos dos botões, esperas e condições. Este fluxo é só deste disparo — não aparece em Automações.": { es: "Arme aquí lo que recibe cada contacto: el primer paso suele ser el mensaje con la plantilla aprobada, y de ahí salen los caminos de los botones, esperas y condiciones. Este flujo es solo de este envío — no aparece en Automatizaciones." },
+  "Nenhuma destas (NÃO)": { es: "Ninguna de estas (NO)" },
+  "Nenhuma etiqueta a adicionar": { es: "Ninguna etiqueta para agregar" },
+  "Nova etiqueta": { es: "Nueva etiqueta" },
+  "O contato precisa atender a TODAS as condições deste grupo.": { es: "El contacto debe cumplir TODAS las condiciones de este grupo." },
+  "O modo só muda enquanto o disparo é rascunho.": { es: "El modo solo cambia mientras el envío es borrador." },
+  "Pelo menos uma destas (OU)": { es: "Al menos una de estas (O)" },
+  "Quem atender a QUALQUER condição deste grupo fica de fora.": { es: "Quien cumpla CUALQUIER condición de este grupo queda fuera." },
+  "Quem entra": { es: "Quién entra" },
+  "Remover etiqueta": { es: "Quitar etiqueta" },
+  "Todas estas (E)": { es: "Todas estas (Y)" },
+  "Uma mensagem para o público: escolha o modelo aqui mesmo.": { es: "Un mensaje para el público: elija la plantilla aquí mismo." },
+  "Ver fluxo": { es: "Ver flujo" },
+  "entraram no fluxo": { es: "entraron en el flujo" },
+  "O disparo alcança o contato": { es: "El envío alcanza al contacto" },
+  "Cada contato do público do disparo entra no fluxo quando o disparo chega a ele, no ritmo do disparo.": { es: "Cada contacto del público del envío entra en el flujo cuando el envío llega a él, al ritmo del envío." },
+  "não contém": { es: "no contiene" },
+  "Disparo": { es: "Envío" },
 };
 
 /**

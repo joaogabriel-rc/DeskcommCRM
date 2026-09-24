@@ -2939,3 +2939,74 @@ que dirige o browser resolviam `E2E_PORT` para valores **diferentes** — servid
 `page.goto` em outra, e `ERR_CONNECTION_REFUSED` com um servidor saudável no ar. O CI nunca
 pisou nisso porque o gerador não escreve `E2E_PORT`; quem monta bancada em porta própria,
 sim. Consertado pela ordem: publicar primeiro, decidir a porta depois.
+
+## J32 — Fluxo nasce no construtor e o modelo aprovado é escolhido de uma lista `[P0]` (2026-09-23)
+
+Rodada 1 do construtor de Fluxos: "Novo flow" deixou de ser um modal que exigia o
+gatilho, e o passo de mensagem fora da janela deixou de pedir o nome do modelo
+digitado. Spec: `tests/e2e/fluxo-construtor-e-modelo-aprovado.spec.ts` (login como
+`manager`, cenário semeado e removido pela própria spec). Evidência em
+`evidence/fluxos-rodada1/`.
+
+| Caso | O que prova | Estado |
+|---|---|---|
+| J32.1 | "Novo flow" abre o construtor com "Sem título" e o "Quando…" selecionado, seletor de gatilho aberto (`evidence/fluxos-rodada1/01-novo-fluxo-abre-no-construtor.png`) | **MEDIDO EM TELA** |
+| J32.2 | Fechar o seletor deixa "+ Novo gatilho" no painel e no card; Salvar grava rascunho com `trigger_type` nulo (`evidence/fluxos-rodada1/02-quando-sem-gatilho.png`) | **MEDIDO EM TELA** + banco |
+| J32.3 | Ativar sem gatilho recusa com "Escolha no passo "Quando…"…" e o fluxo continua rascunho (`evidence/fluxos-rodada1/03-ativar-sem-gatilho-recusa.png`) | **MEDIDO EM TELA** + banco |
+| J32.4 | "Escolher modelo de mensagem": com dois números oficiais pede o número; lista só APROVADOS da conta dele (pausado e de outra conta ficam fora); busca filtra (`evidence/fluxos-rodada1/04-seletor-so-aprovados-do-numero.png`) | **MEDIDO EM TELA** |
+| J32.5 | Escolhido o modelo, o painel mostra cabeçalho, corpo, rodapé e botões, e exatamente quatro espaços derivados do contrato — nenhum campo de chave digitada (`evidence/fluxos-rodada1/05-painel-com-o-modelo-e-os-espacos.png`) | **MEDIDO EM TELA** |
+| J32.6 | As respostas rápidas viram as saídas `button:0`/`button:1` do card; arrastar "Parar mensagens" até o Fim grava a aresta com `source_handle = button:1` (`evidence/fluxos-rodada1/06-saida-do-botao-ligada.png`) | **MEDIDO EM TELA** + banco |
+| J32.7 | O nó grava `template_id`, nome, idioma, `template_contract_hash` e `channel_session_id`; com gatilho e modelo válidos, Ativar liga (`evidence/fluxos-rodada1/07-fluxo-ativado.png`) | **MEDIDO EM TELA** + banco |
+| J32.8 | Fluxo ANTIGO com correspondência: mostra o modelo e oferece "Vincular a este modelo"; vincular troca o editor antigo pelos espaços do contrato (`evidence/fluxos-rodada1/08-antigo-com-correspondencia.png`) | **MEDIDO EM TELA** |
+| J32.9 | Fluxo ANTIGO sem correspondência: "Modelo não localizado no catálogo" no card e no painel, com o editor antigo mantido (`evidence/fluxos-rodada1/09-antigo-sem-correspondencia.png`) | **MEDIDO EM TELA** |
+
+**NÃO MEDIDO:** o envio real pela Meta e o clique de um contato num botão de
+modelo no celular. A cadeia webhook `button` → texto → saída do fluxo está coberta
+por `tests/unit/meta-resposta-de-botao-vira-saida.test.ts` (motor de verdade,
+banco dublê), não por tela.
+
+**Achado de UX, não consertado nesta rodada:** num desenho pequeno o canvas dá
+zoom demais (`fitView` sem teto) — o card do "Quando…" fica gigante e, com o
+painel aberto, o card da mensagem é cortado (`evidence/fluxos-rodada1/03-ativar-sem-gatilho-recusa.png`, `evidence/fluxos-rodada1/09-antigo-sem-correspondencia.png`). Comportamento anterior
+a esta rodada.
+
+## J33 — Disparo guiado ou com fluxo, público por grupos `[P0]` (2026-09-24)
+
+Rodada 2: o disparo ganhou os modos Guiado e Fluxo e o público passou a ser
+montado em grupos E / OU / NÃO. Spec: `tests/e2e/disparo-guiado-e-com-fluxo.spec.ts`
+(login como `manager`, cenário semeado e removido pela própria spec). Evidência em
+`evidence/disparos-rodada2/`.
+
+| Caso | O que prova | Estado |
+|---|---|---|
+| J33.1 | Público por listas: etiqueta com VÍRGULA vira um chip só; campo "contém 50%" conta 1 (o `%` é texto, "500 off" fica fora) pela rota real do PostgREST; a regra "Quem entra" é a mesma aplicada (`evidence/disparos-rodada2/01-guiado-publico-e-modelo.png`) | **MEDIDO EM TELA** + banco |
+| J33.2 | Guiado: modelo do catálogo central, agendar → `total_recipients` = prévia (1), e a permissão aberta NA conversa do número do modelo (`evidence/disparos-rodada2/02-guiado-agendado.png`) | **MEDIDO EM TELA** + banco |
+| J33.3 | Fluxo: "Configurar fluxo" abre o MESMO construtor, com selo do disparo, sem "Ativar" e gatilho fixo (`evidence/disparos-rodada2/03-fluxo-publico.png`, `evidence/disparos-rodada2/04-fluxo-do-disparo-no-construtor.png`) | **MEDIDO EM TELA** |
+| J33.4 | O fluxo do disparo não aparece em Automações; agendar liga o fluxo junto (`evidence/disparos-rodada2/05-fluxo-agendado.png`) | **MEDIDO EM TELA** + banco |
+| J33.5 | O worker real (cron) inicia a execução com a permissão MATERIALIZADA do destinatário, e ela entra no nó de mensagem; nenhum erro de autorização (`evidence/disparos-rodada2/06-fluxo-andamento.png`) | **MEDIDO** (cron + banco) |
+| J33.6 | Cross-tenant: disparo de outra organização → 404 na leitura e no agendamento, e a tela não oferece agendar | **MEDIDO** (API + tela) |
+
+**NÃO MEDIDO:** o envio aceito pela Meta (sem credencial real no rig) e o clique
+de um contato num botão de modelo dentro de um fluxo de disparo — a retomada por
+botão e por espera com a MESMA permissão está provada em
+`tests/unit/disparo-com-fluxo-execucao.test.ts` (motor e worker de verdade, banco dublê).
+
+## J34 — Criar modelo oficial pelo CRM, e ele volta PENDENTE `[P1]` (2026-09-24)
+
+G1: **Conexões › API Oficial (Meta) › Templates da Meta › Criar modelo** abre o
+formulário compartilhado com os parceiros (`FormularioDeDefinicao`), com o
+seletor do número oficial e sem cabeçalho de mídia. Spec:
+`tests/e2e/modelo-oficial-criado-pelo-crm.spec.ts` (login como `admin`, cenário
+semeado e removido pela própria spec). Evidência em `evidence/modelos-g1/`.
+
+| Caso | O que prova | Estado |
+|---|---|---|
+| J34.1 | "Criar modelo" abre o formulário com o número oficial escolhido e SEM o upload de imagem do cabeçalho (`evidence/modelos-g1/01-formulario-oficial.png`) | **MEDIDO EM TELA** |
+| J34.2 | Nome que a Meta recusaria é barrado ANTES dela: 422, `details.motivo = meta_template_validacao`, a frase limpa no aviso (medido: inteiro na tela, à frente do cabeçalho) e nada gravado (`evidence/modelos-g1/02-recusa-local.png`) | **MEDIDO EM TELA** + banco |
+| J34.3 | Modelo PENDING (com `provider_template_id`) aparece na lista com o estado e fica FORA do catálogo de utilizáveis que Fluxos e Disparos leem (`evidence/modelos-g1/03-pendente-na-lista.png`) | **MEDIDO EM TELA** + catálogo |
+| J34.4 | O caminho até a Meta: pedido (conta e token DA conexão), id devolvido, PENDING no espelho, recusa/credencial/conta/rede sem registro, cross-tenant | **MEDIDO** em `tests/unit/meta-criar-modelo-oficial.test.ts` (rota e banco de verdade, rede dublada) |
+
+**NÃO MEDIDO:** a criação aceita pela Meta de verdade (o `fetch` para
+`graph.facebook.com` sai do servidor, que o Playwright não intercepta, e o rig
+não tem credencial real) e a aprovação chegando depois — o status automático é a
+etapa seguinte (H).

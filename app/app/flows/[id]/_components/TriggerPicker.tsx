@@ -38,6 +38,8 @@ export function TriggerPicker({ open, onOpenChange, atual, onEscolher }: Props) 
 
   const termo = busca.trim().toLowerCase();
   const visiveis = Object.values(FLOW_TRIGGERS).filter((t) => {
+    // O gatilho do disparo nasce com o fluxo do disparo; ninguém o escolhe aqui.
+    if (t.interno) return false;
     if (termo) return t.label.toLowerCase().includes(termo) || t.description.toLowerCase().includes(termo);
     return t.category === categoria;
   });

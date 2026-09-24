@@ -35,6 +35,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { conexaoDaOrganizacao, resolverModelo } from "./catalogo-de-modelos";
 import { missingSlots } from "./meta/build-components";
 import { bindingState } from "./meta/template-binding";
 import { deriveTemplateContract } from "./meta/template-contract";
@@ -72,60 +73,81 @@ export async function conferirDefinicao(
     throw new Error("template_incompleto: nome e idioma são obrigatórios em type=template");
   }
 
-  let q = db
-    .from("meta_templates")
-    .select("name, language, status, contract_hash, components, parameter_format")
-    .eq("organization_id", pedido.organizationId)
-    .eq("name", pedido.name)
-    .eq("language", pedido.language);
+  // A definição é resolvida pelo CATÁLOGO central (`resolverModelo`), que sabe
+  // o que pertence à conta de um número: a linha gravada com a conexão, ou a
+  // linha SEM conexão da mesma WABA — que é como o sync oficial grava. A busca
+  // antiga filtrava só `channel_session_id = número`, e no canal oficial essa
+  // coluna vem vazia: a linha nunca era achada e o pré-voo deixava passar tudo.
+  let modelo;
+  try {
+    if (pedido.channelSessionId) {
+      const conexao = await conexaoDaOrganizacao(db, pedido.organizationId, pedido.channelSessionId);
+      // Número sem catálogo (WAHA manda o modelo como texto): nada a conferir,
+      // como sempre foi.
+      if (!conexao) return;
+    }
+    modelo = await resolverModelo(db, pedido.organizationId, {
+      name: pedido.name,
+      language: pedido.language,
+      channelSessionId: pedido.channelSessionId,
+      // Base sem número (anterior à 0144): o par em duas contas não escolhe
+      // nenhuma — a regra de sempre, preservada.
+      ambiguoNaoResolve: true,
+    });
 
-  if (pedido.channelSessionId) q = q.eq("channel_session_id", pedido.channelSessionId);
-
-  const { data, error } = await q.maybeSingle();
-
-  // Falha de leitura não é definição inválida. Barrar aqui trocaria um envio
-  // que ia dar certo por um erro nosso.
-  if (error) return;
-
-  const linha = data as {
-    name: string;
-    language: string;
-    status: string;
-    contract_hash: string;
-    components: unknown;
-    parameter_format?: string;
-  } | null;
-
-  // Não espelhada: deixa passar. Ver o cabeçalho.
-  if (!linha) return;
+    if (!modelo) {
+      // Não está no catálogo DESTE número. Se está no de OUTRA conta da mesma
+      // organização, a plataforma recusaria o envio por este número — e a frase
+      // útil é dizer isso agora. Se não está em conta nenhuma, é espelho que
+      // ainda não sincronizou: passa (ver o cabeçalho da função).
+      if (pedido.channelSessionId) {
+        const emOutraConta = await resolverModelo(db, pedido.organizationId, {
+          name: pedido.name,
+          language: pedido.language,
+        });
+        if (emOutraConta) {
+          throw new Error(
+            `template_other_account: "${pedido.name}" (${pedido.language}) é de outra conta desta organização, ` +
+              `não do número desta conversa — a plataforma só entrega o modelo pelo número da conta que o aprovou.`,
+          );
+        }
+      }
+      return;
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("template_other_account")) throw err;
+    // Falha de leitura não é definição inválida. Barrar aqui trocaria um envio
+    // que ia dar certo por um erro nosso.
+    return;
+  }
 
   const estado = bindingState(
     {
       name: pedido.name,
       language: pedido.language,
-      contractHash: linha.contract_hash,
+      contractHash: modelo.contractHash,
       values: pedido.values,
     },
     {
-      name: linha.name,
-      language: linha.language,
-      contractHash: linha.contract_hash,
-      status: linha.status,
+      name: modelo.name,
+      language: modelo.language,
+      contractHash: modelo.contractHash,
+      status: modelo.status,
     },
   );
 
   if (estado === "not_approved") {
     throw new Error(
-      `template_not_approved: "${pedido.name}" (${pedido.language}) está ${linha.status} — ` +
+      `template_not_approved: "${pedido.name}" (${pedido.language}) está ${modelo.status} — ` +
         `a plataforma só entrega definição APROVADA.`,
     );
   }
 
   const contrato = deriveTemplateContract({
-    name: linha.name,
-    language: linha.language,
-    parameter_format: linha.parameter_format,
-    components: linha.components as Parameters<typeof deriveTemplateContract>[0]["components"],
+    name: modelo.name,
+    language: modelo.language,
+    parameter_format: modelo.parameterFormat,
+    components: modelo.components as Parameters<typeof deriveTemplateContract>[0]["components"],
   });
   const faltando = missingSlots(contrato, pedido.values);
 

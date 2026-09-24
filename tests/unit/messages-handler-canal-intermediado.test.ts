@@ -54,6 +54,8 @@ import { sendMessageHandler } from "@/app/api/v1/messages/_handler";
 import type { HandlerCtx } from "@/lib/api/handlers/types";
 import type { SendMessageInput } from "@/lib/schemas";
 
+import { criarBanco } from "../helpers/banco-em-memoria";
+
 const ORG = "11111111-1111-4111-8111-111111111111";
 const CONV = "22222222-2222-4222-8222-222222222222";
 const CONTACT = "33333333-3333-4333-8333-333333333333";
@@ -230,6 +232,34 @@ function makeSupabase(linhaCompleta: Row, espelhoDoModelo: Row | null = null) {
     contactPatch: Row | null;
     contactFilters: Record<string, unknown>;
   } = { message: null, selects: [], contactPatch: null, contactFilters: {} };
+  const sessao = linhaCompleta.channel_sessions as Row;
+  const catalogo = criarBanco({
+    channel_sessions: [
+      {
+        id: linhaCompleta.channel_session_id,
+        organization_id: linhaCompleta.organization_id,
+        provider: sessao.provider,
+        display_name: null,
+        phone_number: null,
+        meta_waba_id: sessao.provider === "meta_cloud" ? "111" : null,
+        archived_at: sessao.archived_at ?? null,
+      },
+    ],
+    meta_templates: espelhoDoModelo
+      ? [
+          {
+            id: "tpl-1",
+            organization_id: linhaCompleta.organization_id,
+            waba_id: "111",
+            channel_session_id: null,
+            category: "UTILITY",
+            parameter_format: "POSITIONAL",
+            synced_at: "2026-09-20",
+            ...espelhoDoModelo,
+          },
+        ]
+      : [],
+  }).client as unknown as SupabaseClient;
   const client = {
     from(tabela: string) {
       if (tabela === "conversations") {
@@ -251,25 +281,20 @@ function makeSupabase(linhaCompleta: Row, espelhoDoModelo: Row | null = null) {
           update: () => ({ eq: async () => ({ error: null }) }),
         };
       }
-      if (tabela === "meta_templates") {
-        // O espelho da definição aprovada, consultado pelo pré-voo que roda
-        // ANTES de escolher transporte. `null` = não espelhada, e o pré-voo
-        // deixa passar de propósito: recusar o que não se sabe barraria todo
-        // envio de modelo numa instalação cujo sync ainda não rodou.
+      if (tabela === "meta_templates" || tabela === "channel_sessions") {
+        // O espelho da definição aprovada e a conexão, num banco que APLICA os
+        // filtros: o pré-voo e o envio resolvem pelo catálogo central
+        // (organização → conexão → conta → nome e idioma). Antes, este dublê
+        // devolvia a mesma linha a qualquer consulta e não conhecia
+        // `channel_sessions` — o pré-voo engolia o erro e o caso passava sem
+        // medir recorte nenhum.
         //
-        // O caminho do canal OFICIAL (`sendTemplateForSession`) é mais estrito:
-        // sem linha no espelho ele recusa com `template_missing` antes da rede.
-        // Quem precisa ver o modelo SAIR por esse caminho passa a linha em
-        // `espelhoDoModelo`.
-        //
-        // Encadeável sem limite: um dublê que fixa a quantidade de filtros faz
-        // o teste quebrar quando a consulta ganha um `eq` novo, com um erro que
-        // não fala do comportamento sob teste.
-        const cadeia: Record<string, unknown> = {
-          eq: () => cadeia,
-          maybeSingle: async () => ({ data: espelhoDoModelo, error: null }),
-        };
-        return { select: () => cadeia };
+        // `null` = não espelhada: o pré-voo deixa passar de propósito, e o
+        // envio oficial (`sendTemplateForSession`) recusa com
+        // `template_missing` antes da rede. Quem precisa ver o modelo SAIR
+        // passa a linha em `espelhoDoModelo` — no formato do sync oficial,
+        // por CONTA (`channel_session_id` vazio, WABA da conexão).
+        return catalogo.from(tabela);
       }
       if (tabela === "messages") {
         return {

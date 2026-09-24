@@ -42,6 +42,8 @@ import { syncTemplates } from "@/lib/channels/meta/template-sync";
 import { sendTemplateForSession } from "@/lib/channels/meta/send-template-for-session";
 import { POST } from "@/app/api/v1/channels/templates/route";
 
+import { criarBanco } from "../helpers/banco-em-memoria";
+
 const ORG_A = "00000000-0000-4000-8000-0000000008a1";
 const ORG_B = "00000000-0000-4000-8000-0000000008a2";
 
@@ -119,28 +121,34 @@ vi.mock("@/lib/impersonate/support", () => ({ requireSupportWrite: vi.fn(async (
 vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
 vi.mock("@/lib/channels/meta/template-sync", () => ({ syncTemplates: vi.fn() }));
 
-/** O espelho local: a definição aprovada, com o contrato lido no mesmo instante. */
+/**
+ * O espelho local: a definição aprovada, com o contrato lido no mesmo instante.
+ * Banco que aplica os filtros (o envio resolve pelo catálogo central); o
+ * `from` é observado para medir a ORDEM — credencial antes do espelho.
+ */
 function dbDoEspelho() {
   const consultas: string[] = [];
-  const alvo: Record<string, unknown> = {
-    maybeSingle: async () => ({
-      data: {
-        name: PEDIDO.name,
-        language: PEDIDO.language,
-        status: "APPROVED",
-        contract_hash: "hash-do-espelho",
-        components: PEDIDO.components,
-      },
-      error: null,
-    }),
-  };
-  alvo.select = () => alvo;
-  alvo.eq = () => alvo;
+  const banco = criarBanco({
+    meta_templates: [ORG_A, ORG_B].map((org) => ({
+      id: `t-${org}`,
+      organization_id: org,
+      waba_id: `waba-${org}`,
+      channel_session_id: null,
+      name: PEDIDO.name,
+      language: PEDIDO.language,
+      status: "APPROVED",
+      category: "UTILITY",
+      parameter_format: "POSITIONAL",
+      contract_hash: "hash-do-espelho",
+      components: PEDIDO.components,
+      synced_at: "2026-09-20",
+    })),
+  }).client as unknown as SupabaseClient;
   return {
     db: {
       from: (tabela: string) => {
         consultas.push(tabela);
-        return alvo;
+        return banco.from(tabela);
       },
     } as unknown as SupabaseClient,
     consultas,

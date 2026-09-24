@@ -7338,6 +7338,7 @@ export type Database = {
           name: string
           organization_id: string
           parameter_format: string
+          provider_template_id: string | null
           quality_score: string | null
           rejected_reason: string | null
           saved_values: Json
@@ -7357,6 +7358,7 @@ export type Database = {
           name: string
           organization_id: string
           parameter_format?: string
+          provider_template_id?: string | null
           quality_score?: string | null
           rejected_reason?: string | null
           saved_values?: Json
@@ -7376,6 +7378,7 @@ export type Database = {
           name?: string
           organization_id?: string
           parameter_format?: string
+          provider_template_id?: string | null
           quality_score?: string | null
           rejected_reason?: string | null
           saved_values?: Json

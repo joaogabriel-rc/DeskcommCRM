@@ -22,6 +22,8 @@ interface Props {
   showSource?: boolean;
   /** Uma linha por saída nomeada (botões da mensagem, sim/não da condição). */
   handles?: NodeCardHandle[];
+  /** Conteúdo abaixo do título — a prévia do modelo, o "+ Novo gatilho". */
+  children?: React.ReactNode;
 }
 
 /**
@@ -40,6 +42,7 @@ export function NodeCard({
   showTarget = true,
   showSource = true,
   handles,
+  children,
 }: Props) {
   const Icon = visual.icon;
   const hasError = (errors?.length ?? 0) > 0;
@@ -78,6 +81,7 @@ export function NodeCard({
           </p>
         </div>
       </div>
+      {children && <div className="px-3 pb-2">{children}</div>}
       {hasError && (
         <p className="border-t border-error/30 px-3 py-1.5 text-xs leading-snug text-error-fg">{errors![0]}</p>
       )}

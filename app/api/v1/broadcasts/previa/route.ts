@@ -25,7 +25,7 @@ import type { NextRequest } from "next/server";
 
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
-import { contarPublico, resumoDoSegmento } from "@/lib/disparos/segmento";
+import { contarPublico, expressaoDoSegmento, resumoDoSegmento } from "@/lib/disparos/segmento";
 import { segmentoSchema, OPERADORES_DE_CAMPO, type OperadorDeCampo } from "@/lib/schemas/disparos";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +36,35 @@ export async function GET(req: NextRequest): Promise<Response> {
   if (!authz.ok) return authz.response;
 
   const q = req.nextUrl.searchParams;
+
+  // A forma NOVA: o segmento inteiro, como JSON — o MESMO objeto que o editor
+  // salva e que o agendamento materializa. Nada é retraduzido no caminho, então
+  // a contagem mostrada é da expressão que vai ser usada (Rodada 2).
+  const bruto = q.get("segmento");
+  if (bruto !== null) {
+    let json: unknown;
+    try {
+      json = JSON.parse(bruto);
+    } catch {
+      return fail("validation_failed", "Confira os critérios de público.", 422, { requestId });
+    }
+    const seg = segmentoSchema.safeParse(json);
+    if (!seg.success) {
+      return fail("validation_failed", "Confira os critérios de público.", 422, {
+        requestId,
+        details: seg.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+      });
+    }
+    const { createClient } = await import("@/lib/supabase/server");
+    const supabase = await createClient();
+    const { total, erro } = await contarPublico(supabase, authz.org.orgId, seg.data);
+    if (erro) return fail("internal_error", erro, 500, { requestId });
+    return ok(
+      { total, resumo: resumoDoSegmento(seg.data), expressao: expressaoDoSegmento(seg.data) },
+      { requestId },
+    );
+  }
+
   const campos = q.getAll("campo").map((bruto) => {
     // `split(":", 3)` NÃO serve: ele descarta o resto, e um valor com dois
     // pontos ("horario:14:30") perderia metade. O limite é nos DOIS primeiros

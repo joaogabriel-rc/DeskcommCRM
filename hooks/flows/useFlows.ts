@@ -12,10 +12,13 @@ export interface FlowRow {
   name: string;
   description: string | null;
   status: "draft" | "active" | "archived";
-  trigger_type: FlowTriggerId;
+  /** Nulo = rascunho cujo gatilho ainda não foi escolhido no nó "Quando…" (migration 0393). */
+  trigger_type: FlowTriggerId | null;
   /** Livre por gatilho: tag, campo, etapa, palavra-chave. Ver lib/flows/triggers.ts. */
   trigger_config: Record<string, unknown>;
   version: number;
+  /** Disparo DONO deste fluxo (0394). Preenchido = fluxo de disparo, fora de Automações. */
+  broadcast_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -36,11 +39,13 @@ export function useFlows(opts?: { initialData?: FlowRow[] }) {
 export function useCreateFlow() {
   const qc = useQueryClient();
   return useMutation({
+    // O gatilho é opcional: "Novo fluxo" cria só com o nome e abre o construtor,
+    // onde o gatilho é escolhido no nó "Quando…".
     mutationFn: async (input: {
       name: string;
       description?: string;
-      trigger_type: FlowTriggerId;
-      trigger_config: Record<string, unknown>;
+      trigger_type?: FlowTriggerId;
+      trigger_config?: Record<string, unknown>;
     }) => {
       const res = await apiClient.post<{ data: FlowRow }>("/api/v1/flows", input);
       return res.data;

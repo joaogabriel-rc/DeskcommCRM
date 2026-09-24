@@ -1,15 +1,20 @@
 "use client";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
+  useCriarModelo,
   useSyncTemplates,
   useTemplates,
+  type ConexaoOficial,
   type TemplatePreview,
 } from "@/hooks/channels/useTemplates";
 import { useT } from "@/hooks/i18n/useT";
+
+import { FormularioDeDefinicao } from "./FormularioDeDefinicao";
 
 /** Só APPROVED pode ser disparado — o resto é informação, não opção. */
 function statusTone(status: string): "default" | "secondary" | "destructive" | "outline" {
@@ -56,10 +61,59 @@ function Preview({ preview }: { preview: TemplatePreview }) {
   );
 }
 
+/**
+ * Criar um modelo na conta de uma conexão oficial — o MESMO formulário dos
+ * parceiros, sem o cabeçalho de mídia (ver `lib/channels/meta/templates.ts`).
+ * O modelo volta PENDENTE e fica visível na lista abaixo com esse estado.
+ */
+function CriarModeloOficial({ conexoes, aoCriar }: { conexoes: ConexaoOficial[]; aoCriar: () => void }) {
+  const t = useT();
+  const criar = useCriarModelo();
+  const [conexao, setConexao] = useState(conexoes.length === 1 ? conexoes[0]!.id : "");
+  const [versao, setVersao] = useState(0);
+
+  return (
+    <FormularioDeDefinicao
+      key={versao}
+      idiomaInicial="pt_BR"
+      permiteMidia={false}
+      enviando={criar.isPending}
+      podeEnviar={!!conexao}
+      onEnviar={async (rascunho) => {
+        const r = await criar.mutateAsync({ channel_session_id: conexao, ...rascunho }).catch(() => null);
+        if (!r) return;
+        toast.success(
+          `${t("Modelo enviado para a Meta:")} ${r.data.modelo.name} — ${r.data.modelo.status}. ${t("Ele só pode ser usado depois de aprovado.")}`,
+        );
+        setVersao((v) => v + 1);
+        aoCriar();
+      }}
+    >
+      <select
+        value={conexao}
+        onChange={(e) => setConexao(e.target.value)}
+        aria-label={t("Conexão")}
+        data-testid="criar-modelo-conexao"
+        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+      >
+        {conexoes.length !== 1 && <option value="">{t("Escolha o número oficial")}</option>}
+        {conexoes.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.rotulo}
+            {c.wabaId ? ` · ${c.wabaId}` : ""}
+          </option>
+        ))}
+      </select>
+    </FormularioDeDefinicao>
+  );
+}
+
 export function TemplatesClient() {
   const t = useT();
   const { data, isPending } = useTemplates();
   const sync = useSyncTemplates();
+  const [criando, setCriando] = useState(false);
+  const conexoes = data?.data.conexoes ?? [];
 
   const waba = data?.data.waba ?? null;
   const templates = data?.data.templates ?? null;
@@ -97,16 +151,25 @@ export function TemplatesClient() {
           {t("Espelho da conta")} <span className="font-mono text-xs">{waba}</span> ·{" "}
           {templates.length} {t("template(s)")}
         </p>
-        <Button onClick={sincronizar} disabled={sync.isPending} data-testid="btn-sync">
-          {sync.isPending ? t("Sincronizando…") : t("Sincronizar com a Meta")}
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={sincronizar} disabled={sync.isPending} data-testid="btn-sync" variant="outline">
+            {sync.isPending ? t("Sincronizando…") : t("Sincronizar com a Meta")}
+          </Button>
+          {conexoes.length > 0 && (
+            <Button onClick={() => setCriando((v) => !v)} data-testid="btn-criar-modelo">
+              {criando ? t("Cancelar") : t("Criar modelo")}
+            </Button>
+          )}
+        </div>
       </div>
+
+      {criando && <CriarModeloOficial conexoes={conexoes} aoCriar={() => setCriando(false)} />}
 
       {templates.length === 0 ? (
         <Card className="p-6">
           <h2 className="font-medium">{t("Nenhum template ainda")}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {t("Crie templates no Gerenciador do WhatsApp e clique em")}{" "}
+            {t("Crie um modelo em Criar modelo, acima, ou no Gerenciador do WhatsApp e clique em")}{" "}
             <strong>{t("Sincronizar com a Meta")}</strong>.{" "}
             {t("Só templates aprovados podem ser enviados fora da janela de 24 horas.")}
           </p>

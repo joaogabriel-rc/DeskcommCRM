@@ -23,6 +23,7 @@ import { graphVersion } from "@/lib/graph-version";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { metaContactsPayload } from "@/lib/channels/meta/contact-card";
 import { resolveMetaCreds } from "../meta/credentials";
+import { metaCloudTemplateOps } from "../meta/templates";
 import type {
   ChannelAdapter,
   ChannelHealth,
@@ -90,6 +91,12 @@ export function mediaPayload(env: OutboundEnvelope): Record<string, unknown> | n
 
 export const metaCloudAdapter: ChannelAdapter = {
   provider: "meta_cloud",
+
+  /**
+   * Gestão das definições aprovadas. Hoje só CRIA (ver `meta/templates.ts`):
+   * listar é a sincronização, e editar e apagar são a próxima etapa.
+   */
+  templates: metaCloudTemplateOps,
 
   resolveRecipient(input: RecipientInput): string | null {
     // Grupos: a API de grupos da Cloud é recente e não faz parte deste seam ainda.

@@ -49,6 +49,8 @@
  */
 import { sendMessageHandler } from "@/app/api/v1/messages/_handler";
 import type { ActionCtx } from "@/lib/automation/types";
+import type { ServiceBoundary } from "@/lib/atendimento/fronteira";
+import { assertServiceBoundarySupabase } from "@/lib/atendimento/origem";
 import { serviceForAutomation } from "@/lib/atendimento/origem-automacao";
 import { checarGuardasDeContato } from "@/lib/automation/guarda-do-contato";
 import { motivoDoErro } from "@/lib/flows/erro";
@@ -137,13 +139,57 @@ export function entradaDeEnvio(
   return { ok: true, input: { conversation_id: conversationId, type: "text", body } };
 }
 
+/**
+ * A permissão da execução iniciada por um DISPARO (migration 0394).
+ *
+ * Não cria autorização: usa a que o disparo materializou no agendamento e a
+ * RECONFERE com `assertServiceBoundarySupabase` — a mesma régua do worker dos
+ * disparos no modo guiado. Se o mundo mudou (atendimento fechado, conversa de
+ * outro estado), recusa. Antes disso, três conferências de escopo que a
+ * permissão não faz sozinha:
+ *
+ *   - organização e contato da permissão são os da execução;
+ *   - o número que o passo fixou (o do modelo aprovado) é o da conversa da
+ *     permissão — a mesma pergunta de `serviceForAutomation` quando há número.
+ */
+async function servicoDoDisparo(
+  ctx: FlowNodeCtx,
+  autorizado: ServiceBoundary,
+  contactId: string,
+  sessionId?: string,
+): Promise<ServiceBoundary> {
+  if (autorizado.organization_id !== ctx.organizationId || autorizado.contact_id !== contactId) {
+    throw new Error("service_scope_mismatch");
+  }
+  if (sessionId) {
+    const { data, error } = await ctx.admin
+      .from("conversations")
+      .select("channel_session_id")
+      .eq("organization_id", ctx.organizationId)
+      .eq("contact_id", contactId)
+      .eq("id", autorizado.conversation_id)
+      .maybeSingle();
+    if (error) throw error;
+    if ((data as { channel_session_id?: string } | null)?.channel_session_id !== sessionId) {
+      throw new Error("service_channel_mismatch");
+    }
+  }
+  await assertServiceBoundarySupabase(ctx.admin, autorizado);
+  return autorizado;
+}
+
 export async function executeMessageNode(ctx: FlowNodeCtx, config: MessageNodeConfig): Promise<NodeOutcome> {
   const actionCtx = asActionCtx(ctx);
   const guarda = checarGuardasDeContato(actionCtx);
   if (!guarda.ok) return { kind: "failed", error: `contato_bloqueado:${guarda.reason}` };
 
   try {
-    const boundary = await serviceForAutomation(actionCtx, guarda.contact.id, config.channel_session_id);
+    // Execução de DISPARO carrega a permissão do agendamento; execução de
+    // EVENTO a deriva do evento. São os dois caminhos que já existiam no
+    // produto (worker dos disparos e automação) — nenhum terceiro.
+    const boundary = ctx.servicoAutorizado
+      ? await servicoDoDisparo(ctx, ctx.servicoAutorizado, guarda.contact.id, config.channel_session_id)
+      : await serviceForAutomation(actionCtx, guarda.contact.id, config.channel_session_id);
     const envio = entradaDeEnvio(config, boundary.conversation_id, ctx.context);
     if (!envio.ok) return { kind: "failed", error: envio.error };
 

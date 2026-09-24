@@ -32,9 +32,18 @@ export interface TemplateView {
   previews: TemplatePreview[];
 }
 
+/** Uma conexão oficial em que se pode criar modelo. */
+export interface ConexaoOficial {
+  id: string;
+  rotulo: string;
+  wabaId: string | null;
+}
+
 export interface TemplatesPayload {
   /** `null` = canal oficial não conectado. Distinto de "conectado e sem template". */
   waba: string | null;
+  /** As conexões oficiais ativas — onde "Criar modelo" pode criar. */
+  conexoes?: ConexaoOficial[];
   templates: TemplateView[];
 }
 
@@ -60,6 +69,37 @@ export function useSyncTemplates() {
     onError: showApiError,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["channel-templates"] });
+    },
+  });
+}
+
+/** O rascunho que o formulário monta, com a conexão em que será criado. */
+export interface PedidoDeModelo {
+  channel_session_id: string;
+  name: string;
+  language: string;
+  category: string;
+  components: unknown[];
+}
+
+/**
+ * Cria o modelo na Meta, pela conta da conexão escolhida. Ele volta PENDENTE:
+ * quem aprova é a Meta, e até lá ele não aparece como utilizável em Fluxos nem
+ * em Disparos.
+ */
+export function useCriarModelo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (pedido: PedidoDeModelo) =>
+      apiClient.post<{ data: { modelo: { name: string; status: string }; provider_template_id: string } }>(
+        "/api/v1/channels/templates",
+        { acao: "criar", ...pedido },
+      ),
+    onError: showApiError,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["channel-templates"] });
+      // O catálogo central (Fluxos, Disparos) também passa a vê-lo — pendente.
+      qc.invalidateQueries({ queryKey: ["channel-template-catalog"] });
     },
   });
 }

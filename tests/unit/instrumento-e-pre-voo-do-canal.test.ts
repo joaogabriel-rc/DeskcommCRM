@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { criarBanco } from "../helpers/banco-em-memoria";
 
 /**
  * O INSTRUMENTO E O PRÉ-VOO — os dois buracos que sobraram do canal oficial.
@@ -176,9 +177,33 @@ describe("a rota chama o arquivo nos dois lados", () => {
 });
 
 describe("o pré-voo da definição", () => {
+  /**
+   * O pré-voo resolve a definição pelo catálogo central (conexão → conta), então
+   * o dublê precisa aplicar filtros: o banco em memória, com a conexão
+   * `sessao-1` (oficial, WABA 1) e a linha do modelo como o sync oficial grava
+   * (sem `channel_session_id`). Falha de leitura é um client que devolve erro.
+   */
+  function bancoDoPreVoo() {
+    if (erroSelect) {
+      const cadeia: Record<string, unknown> = {};
+      for (const m of ["select", "eq", "is", "or", "order", "limit"]) cadeia[m] = () => cadeia;
+      cadeia.maybeSingle = async () => ({ data: null, error: erroSelect });
+      cadeia.then = (ok: (r: unknown) => unknown) => Promise.resolve({ data: null, error: erroSelect }).then(ok);
+      return { from: () => cadeia } as never;
+    }
+    return criarBanco({
+      channel_sessions: [
+        { id: "sessao-1", organization_id: "org-1", provider: "meta_cloud", meta_waba_id: "1", archived_at: null },
+      ],
+      meta_templates: linhaTemplate
+        ? [{ id: "t-1", organization_id: "org-1", waba_id: "1", channel_session_id: null, parameter_format: "POSITIONAL", synced_at: "x", ...linhaTemplate }]
+        : [],
+    }).client;
+  }
+
   async function conferir(values: Record<string, string> = {}) {
     const { conferirDefinicao } = await import("@/lib/channels/conferir-definicao");
-    return conferirDefinicao(admin, {
+    return conferirDefinicao(bancoDoPreVoo(), {
       organizationId: "org-1",
       channelSessionId: "sessao-1",
       name: "boas_vindas",

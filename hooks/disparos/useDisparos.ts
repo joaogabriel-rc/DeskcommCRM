@@ -9,6 +9,7 @@ import type {
   CriarDisparoInput,
   DisparoRow,
   MensagemDeDisparo,
+  ModoDeDisparo,
   Segmento,
 } from "@/lib/schemas/disparos";
 
@@ -75,6 +76,7 @@ export function useSalvarDisparo(id: string) {
       segment?: Segmento;
       message?: MensagemDeDisparo;
       scheduled_at?: string | null;
+      modo?: ModoDeDisparo;
     }) => {
       const res = await apiClient.patch<{ data: DisparoRow }>(`/api/v1/broadcasts/${id}`, input);
       return res.data;
@@ -137,15 +139,11 @@ export function usePreviaDePublico(segmento: Segmento, habilitado: boolean) {
   return useQuery({
     queryKey: ["disparos", "previa", segmento] as const,
     queryFn: async () => {
-      // Listas repetem o parâmetro; cada critério de campo vira
-      // `campo=<chave>:<operador>:<valor>`. Ver o cabeçalho da rota para o
-      // porquê de a prévia ser um GET e não um verbo mutante.
-      const q = new URLSearchParams();
-      for (const t of segmento.tags_all) q.append("tag_all", t);
-      for (const t of segmento.tags_any) q.append("tag_any", t);
-      for (const t of segmento.tags_none) q.append("tag_none", t);
-      for (const f of segmento.fields) q.append("campo", `${f.key}:${f.op}:${f.value}`);
-      const res = await apiClient.get<{ data: { total: number; resumo: string } }>(
+      // O segmento INTEIRO, como JSON — o mesmo objeto que o editor salva e o
+      // agendamento materializa. Ver o cabeçalho da rota para o porquê de a
+      // prévia ser um GET e não um verbo mutante.
+      const q = new URLSearchParams({ segmento: JSON.stringify(segmento) });
+      const res = await apiClient.get<{ data: { total: number; resumo: string; expressao: string[] } }>(
         `/api/v1/broadcasts/previa?${q.toString()}`,
       );
       return res.data;

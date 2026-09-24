@@ -384,6 +384,11 @@ export interface ChannelTemplate {
   components: unknown[];
   rejectedReason?: string | null;
   parameterFormat?: string | null;
+  /**
+   * O id que a plataforma deu à definição, quando ela o devolve (a criação
+   * devolve). Não é a identidade local — é a da plataforma, guardada ao lado.
+   */
+  providerTemplateId?: string | null;
 }
 
 export interface ChannelTemplateDraft {

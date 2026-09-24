@@ -21,6 +21,8 @@ import type { HandlerCtx } from '@/lib/api/handlers/types';
 import { deriveActor } from '@/lib/mcp/auth';
 import type { SendMessageInput } from '@/lib/schemas';
 
+import { criarBanco } from '../helpers/banco-em-memoria';
+
 const ORG = '11111111-1111-4111-8111-111111111111';
 const CONV = '22222222-2222-4222-8222-222222222222';
 const CONTACT = '33333333-3333-4333-8333-333333333333';
@@ -94,16 +96,45 @@ function makeSupabase(
   opts: { semColunaArquivada?: boolean; channelMetadata?: Row } = {},
 ) {
   const state: { message: Row | null } = { message: null };
+  const sessao = (conversation.channel_sessions as Row | null) ?? {};
+  const catalogo = criarBanco({
+    channel_sessions: [
+      {
+        id: conversation.channel_session_id,
+        organization_id: conversation.organization_id,
+        provider: sessao.provider ?? 'waha',
+        display_name: null,
+        phone_number: null,
+        meta_waba_id: sessao.provider === 'meta_cloud' ? '111' : null,
+        archived_at: sessao.archived_at ?? null,
+        metadata: opts.channelMetadata ?? {},
+      },
+    ],
+    meta_templates: templateRow
+      ? [
+          {
+            id: 'tpl-1',
+            organization_id: conversation.organization_id,
+            waba_id: '111',
+            channel_session_id: null,
+            category: 'UTILITY',
+            parameter_format: 'POSITIONAL',
+            synced_at: '2026-09-20',
+            ...templateRow,
+          },
+        ]
+      : [],
+  }).client as unknown as SupabaseClient;
 
   const client = {
     from(table: string) {
-      if (table === "channel_sessions") {
-        const query = {
-          select: () => query,
-          eq: () => query,
-          maybeSingle: async () => ({ data: { metadata: opts.channelMetadata ?? {} }, error: null }),
-        };
-        return query;
+      if (table === "channel_sessions" || table === "meta_templates") {
+        // A conexão e o espelho do template, num banco que APLICA os filtros:
+        // o pré-voo e o envio resolvem o modelo pelo catálogo central
+        // (organização → conexão → conta → nome e idioma). `templateRow` é
+        // injetado por caso, no formato do sync oficial (por CONTA, sem
+        // conexão gravada); null simula template que não existe.
+        return catalogo.from(table);
       }
       if (table === 'conversations') {
         return {
@@ -131,22 +162,6 @@ function makeSupabase(
           },
           update: () => ({ eq: async () => ({ error: null }) }),
         };
-      }
-      if (table === 'meta_templates') {
-        // O espelho local do template. `templateRow` é injetado por caso; null
-        // simula template que não existe (ou WABA errada).
-        //
-        // A cadeia é ENCADEÁVEL SEM LIMITE de propósito. A versão anterior tinha
-        // exatamente três `eq` aninhados, e isso fazia o dublê ditar quantos
-        // filtros o código de produção podia usar: acrescentar um quarto (a
-        // conexão dona da definição, da 0144) quebrava com `q.eq is not a
-        // function` — um vermelho que não fala do comportamento sob teste e
-        // manda quem lê procurar defeito onde não há.
-        const cadeia: Record<string, unknown> = {
-          eq: () => cadeia,
-          maybeSingle: async () => ({ data: templateRow, error: null }),
-        };
-        return { select: () => cadeia };
       }
       if (table === 'messages') {
         return {

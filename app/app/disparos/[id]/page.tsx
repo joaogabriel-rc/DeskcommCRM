@@ -8,6 +8,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
+import { fluxoDoDisparo } from "@/lib/disparos/fluxo-do-disparo";
 import type { DisparoRow } from "@/lib/schemas/disparos";
 import { createClient } from "@/lib/supabase/server";
 
@@ -30,6 +31,11 @@ export default async function DisparoPage({ params }: { params: Promise<{ id: st
     .eq("organization_id", activeOrg.orgId)
     .maybeSingle();
   if (!data) notFound();
+  const fluxo = await fluxoDoDisparo(supabase, activeOrg.orgId, id).catch(() => null);
 
-  return <DisparoEditor inicial={{ ...(data as unknown as DisparoRow), problemas: [] }} />;
+  return (
+    <DisparoEditor
+      inicial={{ ...(data as unknown as DisparoRow), modo: fluxo ? "fluxo" : "guiado", fluxo, problemas: [] }}
+    />
+  );
 }

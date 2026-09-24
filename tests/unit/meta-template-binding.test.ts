@@ -7,6 +7,7 @@ import {
   type CurrentTemplate,
   type TemplateBinding,
 } from "@/lib/channels/meta/template-binding";
+import { hashContract } from "@/lib/channels/meta/contract-hash";
 
 const SALVO: TemplateBinding = {
   name: "pedido_confirmado",
@@ -85,5 +86,76 @@ describe("explainBindingState", () => {
     }
     expect(explainBindingState("stale", SALVO)).toMatch(/mudou na Meta/);
     expect(explainBindingState("missing", SALVO)).toMatch(/não existe mais/);
+  });
+});
+
+/**
+ * O binding com o hash REAL (`hashContract`), e não uma string escolhida no
+ * teste: o que se prova é que uma mudança do template na Meta chega ao
+ * veredito. O nó de fluxo guarda o hash no instante da escolha; o espelho
+ * recalcula a cada sync.
+ */
+describe("bindingState com o hash real do template", () => {
+  const BASE = [
+    { type: "HEADER", format: "TEXT", text: "Pedido {{1}}" },
+    { type: "BODY", text: "Olá {{1}}, seu pedido saiu." },
+    { type: "FOOTER", text: "Loja" },
+    {
+      type: "BUTTONS",
+      buttons: [
+        { type: "QUICK_REPLY", text: "Confirmar" },
+        { type: "QUICK_REPLY", text: "Parar mensagens" },
+      ],
+    },
+  ];
+
+  function veredito(depois: unknown[]) {
+    const escolhido: TemplateBinding = { ...SALVO, contractHash: hashContract(BASE) };
+    return bindingState(escolhido, { ...ATUAL, contractHash: hashContract(depois) });
+  }
+  const com = (i: number, trocar: Record<string, unknown>) =>
+    BASE.map((c, j) => (j === i ? { ...c, ...trocar } : c));
+
+  it("mesmo template, sem alteração → continua válido", () => {
+    expect(veredito(structuredClone(BASE))).toBe("ok");
+  });
+
+  it("alteração de VARIÁVEL → obsoleto", () => {
+    expect(veredito(com(1, { text: "Olá {{1}}, seu pedido {{2}} saiu." }))).toBe("stale");
+  });
+
+  it("alteração do CORPO → obsoleto", () => {
+    expect(veredito(com(1, { text: "Oi {{1}}, seu pedido saiu!" }))).toBe("stale");
+  });
+
+  it("alteração do CABEÇALHO ou do RODAPÉ → obsoleto", () => {
+    expect(veredito(com(0, { text: "Encomenda {{1}}" }))).toBe("stale");
+    expect(veredito(com(2, { text: "Loja Centro" }))).toBe("stale");
+  });
+
+  it("alteração do TEXTO de um botão → obsoleto", () => {
+    expect(
+      veredito(com(3, { buttons: [{ type: "QUICK_REPLY", text: "Sim" }, { type: "QUICK_REPLY", text: "Parar mensagens" }] })),
+    ).toBe("stale");
+  });
+
+  it("alteração da ORDEM dos botões → obsoleto (a saída button:0 mudaria de sentido)", () => {
+    expect(
+      veredito(com(3, { buttons: [{ type: "QUICK_REPLY", text: "Parar mensagens" }, { type: "QUICK_REPLY", text: "Confirmar" }] })),
+    ).toBe("stale");
+  });
+
+  it("alteração do CONJUNTO de botões → obsoleto", () => {
+    expect(veredito(com(3, { buttons: [{ type: "QUICK_REPLY", text: "Confirmar" }] }))).toBe("stale");
+  });
+
+  it("alteração do TIPO/AÇÃO de um botão → obsoleto", () => {
+    expect(
+      veredito(com(3, { buttons: [{ type: "URL", text: "Confirmar", url: "https://loja.test" }, { type: "QUICK_REPLY", text: "Parar mensagens" }] })),
+    ).toBe("stale");
+  });
+
+  it("alteração da ORDEM dos componentes → obsoleto", () => {
+    expect(veredito([BASE[0], BASE[2], BASE[1], BASE[3]])).toBe("stale");
   });
 });

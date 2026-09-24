@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { countAs, sql, writeCountAs } from "./gov-helpers";
+import { countAs, sql } from "./gov-helpers";
 
 /**
  * O que a migration 0088 promete, cobrado no banco que o CLONE recebe.
@@ -14,11 +14,14 @@ import { countAs, sql, writeCountAs } from "./gov-helpers";
  *
  * O que está sob prova, e por que cada coisa importa:
  *
- *  1. **Isolamento nas duas direções.** `meta_templates` guarda o nome comercial dos
- *     templates de um tenant — vazamento aqui é vazamento de estratégia de campanha.
- *     Ler é metade: o `with check` (org B escrevendo COM o `organization_id` da org A)
- *     é o lado que uma policy escrita só com `using` deixa passar, e é o lado que
- *     nenhuma tela exercita.
+ *  1. **Isolamento, e ESCRITA SÓ DO SERVIDOR (0393).** `meta_templates` guarda o
+ *     nome comercial dos templates de um tenant — vazamento aqui é vazamento de
+ *     estratégia de campanha. A leitura é recortada por organização. A escrita
+ *     deixou de ser de qualquer membro: a policy `for all` da 0088 deixava um
+ *     `viewer` reescrever `status` (marcar APROVADO o que a Meta recusou) e
+ *     `components` — de onde sai o texto gravado na conversa quando o modelo é
+ *     enviado. Desde a 0393 os papéis do PostgREST não têm nem o PRIVILÉGIO de
+ *     escrever; só `service_role` (sync e webhooks) escreve.
  *
  *  2. **A chave é `(name, language)`.** `pedido_confirmado` em `pt_BR` e em `pt` são
  *     DOIS templates na Meta, com aprovação e corpo independentes. A prova tem os
@@ -80,29 +83,85 @@ function erroDe(fn: () => unknown): string {
   throw new Error("o INSERT passou — a trava não existe neste banco");
 }
 
+/** Roda uma escrita como `authenticated` com o usuário dado e devolve o erro. */
+function erroDeEscritaComo(userId: string, dml: string): string {
+  return erroDe(() =>
+    sql(`
+      set role authenticated;
+      select set_config('request.jwt.claims', '{"sub":"${userId}"}', false);
+      ${dml};
+    `),
+  );
+}
+
 describe("0088 · o espelho de templates da Meta chega ao clone", () => {
-  it("a tabela nasce com RLS ligada e a policy de tenant", () => {
+  it("a tabela nasce com RLS ligada e UMA policy, só de leitura (0393)", () => {
     seed();
     expect(sql(`select relrowsecurity from pg_class where relname = 'meta_templates'`)).toBe("t");
     expect(
-      sql(`select policyname from pg_policies
-            where schemaname = 'public' and tablename = 'meta_templates' and permissive = 'PERMISSIVE' order by 1`),
-    ).toBe("tenant_isolation_meta_templates_all");
+      sql(`select policyname || ':' || cmd from pg_policies
+            where schemaname = 'public' and tablename = 'meta_templates' order by 1`),
+    ).toBe("meta_templates_select:SELECT");
   });
 
-  it("membro da org A escreve na própria org e lê de volta", () => {
+  it("os papéis do PostgREST não têm o PRIVILÉGIO de escrever — só service_role", () => {
+    // O revoke, e não só a ausência de policy: o default ACL do Supabase concede
+    // tudo a anon/authenticated (lição da 0258), e a garantia tem de valer mesmo
+    // se alguém um dia acrescentar uma policy de escrita por engano.
     expect(
-      writeCountAs(
-        MT_MEMBER_A,
-        `insert into public.meta_templates ${COLS} values ${values(MT_ORG_A, "pedido_confirmado", "pt_BR")}`,
-      ),
-    ).toBe(1);
+      sql(`select count(*) from information_schema.role_table_grants
+            where table_schema = 'public' and table_name = 'meta_templates'
+              and grantee in ('anon', 'authenticated')
+              and privilege_type in ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE')`),
+    ).toBe("0");
+    expect(
+      sql(`select count(*) from information_schema.role_table_grants
+            where table_schema = 'public' and table_name = 'meta_templates'
+              and grantee = 'service_role' and privilege_type in ('INSERT', 'UPDATE', 'DELETE')`),
+    ).toBe("3");
+  });
+
+  it("o servidor (service_role) grava; o membro da org A lê de volta", () => {
+    sql(`
+      set role service_role;
+      insert into public.meta_templates ${COLS} values ${values(MT_ORG_A, "pedido_confirmado", "pt_BR")};
+    `);
     expect(
       countAs(
         MT_MEMBER_A,
         `select count(*) from public.meta_templates where organization_id = '${MT_ORG_A}';`,
       ),
     ).toBe(1);
+  });
+
+  it("membro da PRÓPRIA org não escreve: nem inserir, nem mudar status, nem trocar o conteúdo, nem apagar", () => {
+    expect(
+      erroDeEscritaComo(
+        MT_MEMBER_A,
+        `insert into public.meta_templates ${COLS} values ${values(MT_ORG_A, "forjado", "pt_BR")}`,
+      ),
+    ).toContain("permission denied");
+    expect(
+      erroDeEscritaComo(
+        MT_MEMBER_A,
+        `update public.meta_templates set status = 'APPROVED' where organization_id = '${MT_ORG_A}'`,
+      ),
+    ).toContain("permission denied");
+    expect(
+      erroDeEscritaComo(
+        MT_MEMBER_A,
+        `update public.meta_templates set components = '[{"type":"BODY","text":"adulterado"}]'::jsonb
+          where organization_id = '${MT_ORG_A}'`,
+      ),
+    ).toContain("permission denied");
+    expect(
+      erroDeEscritaComo(MT_MEMBER_A, `delete from public.meta_templates where organization_id = '${MT_ORG_A}'`),
+    ).toContain("permission denied");
+    // E o dado continua o que o servidor gravou.
+    expect(
+      sql(`select count(*) from public.meta_templates
+            where organization_id = '${MT_ORG_A}' and components = '[]'::jsonb`),
+    ).toBe("1");
   });
 
   it("membro da org B NÃO vê o template da org A", () => {
@@ -114,13 +173,13 @@ describe("0088 · o espelho de templates da Meta chega ao clone", () => {
     ).toBe(0);
   });
 
-  it("membro da org B NÃO escreve COM o organization_id da org A (o lado `with check`)", () => {
+  it("membro da org B NÃO escreve COM o organization_id da org A", () => {
     expect(
-      writeCountAs(
+      erroDeEscritaComo(
         MT_MEMBER_B,
         `insert into public.meta_templates ${COLS} values ${values(MT_ORG_A, "invadido", "pt_BR")}`,
       ),
-    ).toBe(0);
+    ).toContain("permission denied");
     // E a linha não existe nem para quem bypassa RLS — 0 aqui separa "foi barrado"
     // de "foi gravado e o SELECT é que não enxerga".
     expect(sql(`select count(*) from public.meta_templates where name = 'invadido'`)).toBe("0");

@@ -57,6 +57,26 @@ export function useUpdateFlowStatus(id: string) {
   });
 }
 
+/**
+ * Renomear o fluxo pelo cabeçalho do construtor. O fluxo nasce "Sem título"
+ * (ele abre direto no canvas), então o nome precisa ser editável ali mesmo —
+ * sem voltar à lista. Mesma rota do PATCH de status, só com `name`.
+ */
+export function useRenameFlow(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string) => {
+      const res = await apiClient.patch<{ data: FlowRow }>(`/api/v1/flows/${id}`, { name });
+      return res.data;
+    },
+    onSuccess: (updated) => {
+      qc.setQueryData<FlowDetailRow>(flowQueryKey(id), (prev) => (prev ? { ...prev, ...updated } : prev));
+      qc.invalidateQueries({ queryKey: ["flows", "list"] });
+    },
+    onError: (err) => showApiError(err),
+  });
+}
+
 export interface FlowExecutionListItem {
   id: string;
   status: string;

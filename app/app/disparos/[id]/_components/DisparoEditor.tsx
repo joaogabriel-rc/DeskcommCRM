@@ -1,27 +1,36 @@
 "use client";
 
 /**
- * O editor de um disparo: público, mensagem, agendamento e andamento.
+ * O editor de um disparo: modo, público, mensagem (ou fluxo), agendamento e
+ * andamento.
+ *
+ * ── Dois modos, um disparo ──────────────────────────────────────────────────
+ *
+ * GUIADO manda uma mensagem — o modelo aprovado vem do catálogo central, pelo
+ * MESMO componente do nó de mensagem dos Fluxos (`ModeloDaMensagem`). FLUXO leva
+ * cada contato por um fluxo próprio do disparo, editado no MESMO construtor das
+ * automações (`/app/flows/[id]`) — este editor não desenha fluxo nenhum, só
+ * abre o construtor.
  *
  * ── A prévia de público fica colada no construtor ───────────────────────────
  *
  * Porque a pergunta "quantas pessoas isso pega?" é a que decide se o filtro
- * está certo — e ela tem de ser respondida ENQUANTO se mexe no filtro, não
- * depois de agendar. O número vem da MESMA função de segmentação que o
- * agendamento usa (`lib/disparos/segmento.ts`), então não há prévia otimista:
- * o que ela diz é o que vai sair.
+ * está certo — e ela tem de ser respondida ENQUANTO se mexe no filtro. A tela
+ * manda o segmento INTEIRO à prévia (o mesmo objeto que salva), e o servidor
+ * devolve a contagem E a expressão lógica que calculou — é essa expressão que
+ * aparece aqui, nunca uma descrição montada à parte.
  *
  * ── Por que editar exige pausar ─────────────────────────────────────────────
  *
  * Mesma regra do Flow. Trocar a mensagem no meio do envio faria metade do
- * público receber uma coisa e metade outra, com o mesmo nome na lista e nenhum
- * jeito de saber depois quem recebeu qual.
+ * público receber uma coisa e metade outra.
  */
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { InserirVariavel } from "@/components/catalogo/InserirVariavel";
-import { SeletorDeCampo, SeletorDeTags } from "@/components/catalogo/SeletorDeCampo";
+import { SeletorDeCampo, SeletorDeTags, ValorDoCampo } from "@/components/catalogo/SeletorDeCampo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -37,23 +46,30 @@ import {
   type DisparoDetalhe,
 } from "@/hooks/disparos/useDisparos";
 import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
-import { proximoSlot, renomearSlot } from "@/lib/flows/slots";
+import type { MessageNodeConfig } from "@/lib/flows/types";
 import { useT } from "@/lib/i18n/IdiomaProvider";
 import { CaretLeft, Plus, X } from "@/lib/ui/icons";
+import { cn } from "@/lib/utils";
 import {
   OPERADORES_DE_CAMPO,
   OPERADOR_DE_CAMPO_LABEL,
   SEGMENTO_VAZIO,
   STATUS_DE_DISPARO_LABEL,
   porQueNaoPodeAgendar,
+  temCriterioDePublico,
   type CriterioDeCampo,
   type MensagemDeDisparo,
+  type ModoDeDisparo,
   type OperadorDeCampo,
   type Segmento,
 } from "@/lib/schemas/disparos";
+import { ModeloDaMensagem } from "../../../flows/[id]/_components/NodeConfigPanel";
+
+type GrupoDeCampos = "fields" | "fields_any" | "fields_none";
 
 export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
   const t = useT();
+  const router = useRouter();
   const emAndamento = inicial.status === "running" || inicial.status === "scheduled";
   const { data: disparo = inicial } = useDisparo(inicial.id, {
     initialData: inicial,
@@ -80,21 +96,21 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
     disparo.scheduled_at ? disparo.scheduled_at.slice(0, 16) : "",
   );
 
+  const modo: ModoDeDisparo = disparo.modo ?? (disparo.fluxo ? "fluxo" : "guiado");
   const editavel = disparo.status === "draft" || disparo.status === "paused";
 
-  const temCriterio =
-    segmento.tags_all.length + segmento.tags_any.length + segmento.fields.length > 0;
+  const temCriterio = temCriterioDePublico(segmento);
   const previa = usePreviaDePublico(segmento, temCriterio);
   const impedimento = useMemo(
-    () => porQueNaoPodeAgendar({ segment: segmento, message: mensagem }),
-    [segmento, mensagem],
+    () => porQueNaoPodeAgendar({ segment: segmento, message: mensagem }, modo),
+    [segmento, mensagem, modo],
   );
 
   function mudarSegmento(patch: Partial<Segmento>) {
     setSegmento((s) => ({ ...s, ...patch }));
   }
-  function mudarMensagem(patch: Partial<MensagemDeDisparo>) {
-    setMensagem((m) => ({ ...m, ...patch }));
+  function mudarMensagem(patch: Record<string, unknown>) {
+    setMensagem((m) => ({ ...m, ...patch }) as MensagemDeDisparo);
   }
 
   async function salvarTudo() {
@@ -104,10 +120,20 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
       message: mensagem,
       // `datetime-local` devolve hora local sem fuso; `new Date()` a interpreta
       // no fuso do navegador e `toISOString()` a normaliza para UTC, que é o que
-      // a coluna `timestamptz` espera. Mandar a string crua gravaria o horário
-      // certo com o fuso errado.
+      // a coluna `timestamptz` espera.
       scheduled_at: quando ? new Date(quando).toISOString() : null,
     });
+  }
+
+  async function trocarModo(novo: ModoDeDisparo) {
+    if (novo === modo) return;
+    await salvar.mutateAsync({ name: nome.trim(), segment: segmento, message: mensagem, modo: novo });
+  }
+
+  async function configurarFluxo() {
+    // Salva antes de sair: o público e o nome não podem se perder na ida ao construtor.
+    await salvarTudo();
+    if (disparo.fluxo) router.push(`/app/flows/${disparo.fluxo.id}`);
   }
 
   async function agendar() {
@@ -140,8 +166,11 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
             ) : (
               <h1 className="text-2xl font-semibold tracking-tight">{disparo.name}</h1>
             )}
-            <p className="mt-1 text-sm text-text-muted">
+            <p className="mt-1 flex gap-2 text-sm text-text-muted">
               <Badge variant="secondary">{t(STATUS_DE_DISPARO_LABEL[disparo.status])}</Badge>
+              <Badge variant="outline" data-testid="modo-do-disparo">
+                {modo === "fluxo" ? t("Modo fluxo") : t("Modo guiado")}
+              </Badge>
             </p>
           </div>
         </div>
@@ -153,7 +182,11 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
             </Button>
           )}
           {editavel && (
-            <Button onClick={agendar} disabled={!!impedimento || acao.isPending || salvar.isPending}>
+            <Button
+              onClick={agendar}
+              disabled={!!impedimento || acao.isPending || salvar.isPending}
+              data-testid="agendar-disparo"
+            >
               {disparo.status === "paused" ? t("Reagendar") : t("Agendar envio")}
             </Button>
           )}
@@ -186,9 +219,7 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
         <Card className="flex flex-col gap-3 p-4">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-sm font-semibold">{t("Andamento")}</h2>
-            <span className="text-xs tabular-nums text-text-muted">
-              {/* Número fora do `t()`: frase montada em runtime nunca casa
-                  chave nenhuma no dicionário. */}
+            <span className="text-xs tabular-nums text-text-muted" data-testid="andamento-do-disparo">
               {concluidos} {t("de")} {total} · {progresso}%
             </span>
           </div>
@@ -197,7 +228,7 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
           </div>
           <div className="flex flex-wrap gap-4 text-xs text-text-muted">
             <span>
-              {disparo.sent_count} {t("enviados")}
+              {disparo.sent_count} {modo === "fluxo" ? t("entraram no fluxo") : t("enviados")}
             </span>
             <span>
               {disparo.failed_count} {t("falharam")}
@@ -211,9 +242,7 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
             <ul className="flex flex-col gap-1 border-t border-border pt-2 text-xs">
               {disparo.problemas.map((p) => (
                 <li key={p.id} className="flex flex-wrap gap-2">
-                  <span className="text-text-muted">
-                    {rotuloDoContato(p.contacts, t)}
-                  </span>
+                  <span className="text-text-muted">{rotuloDoContato(p.contacts, t)}</span>
                   <span className="text-error-fg">{t(p.error ?? p.status)}</span>
                 </li>
               ))}
@@ -222,14 +251,48 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
         </Card>
       )}
 
+      {/* ── Modo ───────────────────────────────────────────────────────────── */}
+      <Card className="flex flex-col gap-3 p-4">
+        <h2 className="text-sm font-semibold">{t("Como o disparo fala com o público")}</h2>
+        <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label={t("Modo do disparo")}>
+          {(["guiado", "fluxo"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="radio"
+              aria-checked={modo === m}
+              disabled={disparo.status !== "draft" || salvar.isPending}
+              onClick={() => void trocarModo(m)}
+              data-testid={`modo-${m}`}
+              className={cn(
+                "rounded-md border border-border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-70",
+                modo === m ? "border-accent-500 bg-accent-soft" : "hover:border-accent-400",
+              )}
+            >
+              <p className="font-medium">{m === "guiado" ? t("Guiado") : t("Fluxo")}</p>
+              <p className="text-xs text-text-muted">
+                {m === "guiado"
+                  ? t("Uma mensagem para o público: escolha o modelo aqui mesmo.")
+                  : t("Cada contato entra num fluxo próprio do disparo — mensagens, botões, esperas e condições.")}
+              </p>
+            </button>
+          ))}
+        </div>
+        {disparo.status !== "draft" && (
+          <p className="text-xs text-text-muted">{t("O modo só muda enquanto o disparo é rascunho.")}</p>
+        )}
+      </Card>
+
       {/* ── Público ────────────────────────────────────────────────────────── */}
       <Card className="flex flex-col gap-4 p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold">{t("Público")}</h2>
-          <span className="text-xs text-text-muted">
+          <span className="text-xs text-text-muted" data-testid="previa-do-publico">
             {!temCriterio
               ? t("Escolha ao menos um critério")
-              : previa.isLoading
+              : previa.isError
+                ? t("Complete os critérios (campo e valor) para contar")
+                : previa.isLoading
                 ? t("Contando…")
                 : `${previa.data?.total ?? 0} ${t("contato(s) agora")}`}
           </span>
@@ -240,211 +303,117 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
           )}
         </p>
 
-        <fieldset disabled={!editavel} className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label>{t("Tem TODAS estas tags")}</Label>
-            <SeletorDeTags
-              id="tags-all"
-              valor={segmento.tags_all}
-              onChange={(tags_all) => mudarSegmento({ tags_all })}
-            />
+        {temCriterio && previa.data?.expressao && previa.data.expressao.length > 0 && (
+          <div className="rounded-md bg-surface-elevated px-3 py-2 text-xs" data-testid="expressao-do-publico">
+            <p className="mb-1 font-medium text-text-muted">{t("Quem entra")}</p>
+            <ul className="flex flex-col gap-0.5 font-mono">
+              {previa.data.expressao.map((linha, i) => (
+                <li key={i}>
+                  {i > 0 && <span className="text-text-muted">E </span>}
+                  {linha}
+                </li>
+              ))}
+            </ul>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>{t("Tem ao menos UMA destas tags")}</Label>
-            <SeletorDeTags
-              id="tags-any"
-              valor={segmento.tags_any}
-              onChange={(tags_any) => mudarSegmento({ tags_any })}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>{t("NÃO tem nenhuma destas tags")}</Label>
-            <SeletorDeTags
-              id="tags-none"
-              valor={segmento.tags_none}
-              onChange={(tags_none) => mudarSegmento({ tags_none })}
-            />
-          </div>
+        )}
 
-          <div className="flex flex-col gap-2">
-            <Label>{t("Campos do usuário")}</Label>
-            {segmento.fields.map((criterio, i) => (
-              <div key={i} className="flex flex-wrap items-end gap-2 rounded-md border border-border p-2">
-                <div className="min-w-40 flex-1">
-                  <SeletorDeCampo
-                    valor={criterio.key}
-                    onChange={(key) => trocarCriterio(i, { key })}
-                  />
+        <fieldset disabled={!editavel} className="flex flex-col gap-4">
+          <GrupoDoPublico
+            titulo={t("Todas estas (E)")}
+            ajuda={t("O contato precisa atender a TODAS as condições deste grupo.")}
+            idDasTags="tags-all"
+            tags={segmento.tags_all}
+            onTags={(tags_all) => mudarSegmento({ tags_all })}
+            campos={segmento.fields}
+            onCampos={(fields) => mudarSegmento({ fields })}
+            grupo="fields"
+          />
+          <GrupoDoPublico
+            titulo={t("Pelo menos uma destas (OU)")}
+            ajuda={t("Basta UMA das condições deste grupo.")}
+            idDasTags="tags-any"
+            tags={segmento.tags_any}
+            onTags={(tags_any) => mudarSegmento({ tags_any })}
+            campos={segmento.fields_any}
+            onCampos={(fields_any) => mudarSegmento({ fields_any })}
+            grupo="fields_any"
+          />
+          <GrupoDoPublico
+            titulo={t("Nenhuma destas (NÃO)")}
+            ajuda={t("Quem atender a QUALQUER condição deste grupo fica de fora.")}
+            idDasTags="tags-none"
+            tags={segmento.tags_none}
+            onTags={(tags_none) => mudarSegmento({ tags_none })}
+            campos={segmento.fields_none}
+            onCampos={(fields_none) => mudarSegmento({ fields_none })}
+            grupo="fields_none"
+          />
+        </fieldset>
+      </Card>
+
+      {/* ── Mensagem (guiado) ou Fluxo ─────────────────────────────────────── */}
+      {modo === "guiado" ? (
+        <Card className="flex flex-col gap-4 p-4">
+          <h2 className="text-sm font-semibold">{t("Mensagem")}</h2>
+          <fieldset disabled={!editavel} className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>{t("Como enviar")}</Label>
+              <Select
+                value={mensagem.window_mode}
+                onValueChange={(v) => mudarMensagem({ window_mode: v as MensagemDeDisparo["window_mode"] })}
+              >
+                <SelectTrigger aria-label={t("Como enviar")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="outside_24h">{t("Template aprovado (fora da janela de 24h)")}</SelectItem>
+                  <SelectItem value="inside_24h">{t("Texto livre (só dentro da janela de 24h)")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {mensagem.window_mode === "outside_24h" ? (
+              // O MESMO seletor, a mesma prévia e os mesmos espaços do nó de
+              // mensagem dos Fluxos — o catálogo central da Rodada 1.
+              <ModeloDaMensagem config={mensagem as unknown as MessageNodeConfig} patch={mudarMensagem} />
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="disparo-texto">{t("Texto")}</Label>
+                <Textarea
+                  id="disparo-texto"
+                  rows={5}
+                  value={mensagem.body}
+                  onChange={(e) => mudarMensagem({ body: e.target.value })}
+                />
+                <div className="flex justify-end">
+                  <InserirVariavel onInserir={(v) => mudarMensagem({ body: `${mensagem.body}${v}` })} />
                 </div>
-                <Select
-                  value={criterio.op}
-                  onValueChange={(op) => trocarCriterio(i, { op: op as OperadorDeCampo })}
-                >
-                  <SelectTrigger className="w-44">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {OPERADORES_DE_CAMPO.map((op) => (
-                      <SelectItem key={op} value={op}>
-                        {t(OPERADOR_DE_CAMPO_LABEL[op])}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {/* "está preenchido" e "está vazio" não têm valor para comparar —
-                    mostrar o campo seria oferecer um controle sem efeito. */}
-                {criterio.op !== "set" && criterio.op !== "unset" && (
-                  <Input
-                    className="w-44"
-                    value={criterio.value}
-                    placeholder={t("valor")}
-                    onChange={(e) => trocarCriterio(i, { value: e.target.value })}
-                  />
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t("Remover critério")}
-                  onClick={() =>
-                    mudarSegmento({ fields: segmento.fields.filter((_, j) => j !== i) })
-                  }
-                >
-                  <X size={14} aria-hidden />
-                </Button>
               </div>
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                mudarSegmento({ fields: [...segmento.fields, { key: "", op: "eq", value: "" }] })
-              }
-            >
-              <Plus size={14} aria-hidden className="mr-1" /> {t("Adicionar critério de campo")}
+            )}
+          </fieldset>
+        </Card>
+      ) : (
+        <Card className="flex flex-col gap-3 p-4" data-testid="cartao-do-fluxo">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold">{t("Fluxo do disparo")}</h2>
+            {disparo.fluxo && (
+              <Badge variant="secondary">
+                {disparo.fluxo.status === "active" ? t("Ligado com o agendamento") : t("Rascunho")}
+              </Badge>
+            )}
+          </div>
+          <p className="text-sm text-text-muted">
+            {t(
+              "Monte aqui o que cada contato recebe: o primeiro passo costuma ser a mensagem com o modelo aprovado, e dali saem os caminhos dos botões, esperas e condições. Este fluxo é só deste disparo — não aparece em Automações.",
+            )}
+          </p>
+          <div>
+            <Button onClick={() => void configurarFluxo()} disabled={!disparo.fluxo || salvar.isPending} data-testid="configurar-fluxo">
+              {disparo.status === "draft" ? t("Configurar fluxo") : t("Ver fluxo")}
             </Button>
           </div>
-        </fieldset>
-      </Card>
-
-      {/* ── Mensagem ───────────────────────────────────────────────────────── */}
-      <Card className="flex flex-col gap-4 p-4">
-        <h2 className="text-sm font-semibold">{t("Mensagem")}</h2>
-        <fieldset disabled={!editavel} className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label>{t("Como enviar")}</Label>
-            <Select
-              value={mensagem.window_mode}
-              onValueChange={(v) => mudarMensagem({ window_mode: v as MensagemDeDisparo["window_mode"] })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="outside_24h">{t("Template aprovado (fora da janela de 24h)")}</SelectItem>
-                <SelectItem value="inside_24h">{t("Texto livre (só dentro da janela de 24h)")}</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-text-muted">
-              {mensagem.window_mode === "outside_24h"
-                ? t(
-                    "É o modo certo para campanha: fora da janela de 24 horas a plataforma só aceita template aprovado, pelo canal oficial.",
-                  )
-                : t(
-                    "Texto livre só chega a quem falou com você nas últimas 24 horas. Para os demais, o envio falha — a plataforma recusa.",
-                  )}
-            </p>
-          </div>
-
-          {mensagem.window_mode === "outside_24h" ? (
-            <>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="template-nome">{t("Nome do template aprovado")}</Label>
-                <Input
-                  id="template-nome"
-                  value={mensagem.template_name ?? ""}
-                  placeholder="reativacao_agosto"
-                  onChange={(e) => mudarMensagem({ template_name: e.target.value })}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="template-idioma">{t("Idioma do template")}</Label>
-                <Input
-                  id="template-idioma"
-                  value={mensagem.template_language ?? ""}
-                  placeholder="pt_BR"
-                  onChange={(e) => mudarMensagem({ template_language: e.target.value })}
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label>{t("Valores dos espaços do template")}</Label>
-                {Object.entries(mensagem.template_values ?? {}).map(([slot, valor]) => (
-                  <div key={slot} className="flex items-center gap-2">
-                    <Input
-                      className="w-24 shrink-0 font-mono text-xs"
-                      value={slot}
-                      aria-label={t("Espaço do template")}
-                      onChange={(e) =>
-                        mudarMensagem({
-                          template_values: renomearSlot(
-                            mensagem.template_values ?? {},
-                            slot,
-                            e.target.value,
-                          ),
-                        })
-                      }
-                    />
-                    <Input
-                      value={valor}
-                      onChange={(e) =>
-                        mudarMensagem({
-                          template_values: { ...mensagem.template_values, [slot]: e.target.value },
-                        })
-                      }
-                    />
-                    <InserirVariavel
-                      onInserir={(v) =>
-                        mudarMensagem({
-                          template_values: { ...mensagem.template_values, [slot]: `${valor}${v}` },
-                        })
-                      }
-                    />
-                  </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    mudarMensagem({
-                      template_values: {
-                        ...mensagem.template_values,
-                        [proximoSlot(mensagem.template_values ?? {})]: "",
-                      },
-                    })
-                  }
-                >
-                  <Plus size={14} aria-hidden className="mr-1" /> {t("Adicionar espaço")}
-                </Button>
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="disparo-texto">{t("Texto")}</Label>
-              <Textarea
-                id="disparo-texto"
-                rows={5}
-                value={mensagem.body}
-                onChange={(e) => mudarMensagem({ body: e.target.value })}
-              />
-              <div className="flex justify-end">
-                <InserirVariavel onInserir={(v) => mudarMensagem({ body: `${mensagem.body}${v}` })} />
-              </div>
-            </div>
-          )}
-        </fieldset>
-      </Card>
+        </Card>
+      )}
 
       {/* ── Agendamento ────────────────────────────────────────────────────── */}
       <Card className="flex flex-col gap-3 p-4">
@@ -467,12 +436,95 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
       </Card>
     </div>
   );
+}
 
-  function trocarCriterio(indice: number, patch: Partial<CriterioDeCampo>) {
-    const atual = segmento.fields[indice];
+/**
+ * Um grupo do público: etiquetas (chips do registro) + critérios de campo
+ * (campo do registro, operador, valor no controle do tipo). O grupo não sabe se
+ * é E, OU ou NÃO — quem dá o sentido é o lugar do segmento em que ele grava.
+ */
+function GrupoDoPublico({
+  titulo,
+  ajuda,
+  idDasTags,
+  tags,
+  onTags,
+  campos,
+  onCampos,
+  grupo,
+}: {
+  titulo: string;
+  ajuda: string;
+  idDasTags: string;
+  tags: string[];
+  onTags: (tags: string[]) => void;
+  campos: CriterioDeCampo[];
+  onCampos: (campos: CriterioDeCampo[]) => void;
+  grupo: GrupoDeCampos;
+}) {
+  const t = useT();
+
+  function trocar(indice: number, patch: Partial<CriterioDeCampo>) {
+    const atual = campos[indice];
     if (!atual) return;
-    const fields = [...segmento.fields];
-    fields[indice] = { ...atual, ...patch };
-    mudarSegmento({ fields });
+    const proximo = [...campos];
+    proximo[indice] = { ...atual, ...patch };
+    onCampos(proximo);
   }
+
+  return (
+    <section className="flex flex-col gap-2 rounded-md border border-border p-3" data-testid={`grupo-${grupo}`}>
+      <div>
+        <h3 className="text-sm font-medium">{titulo}</h3>
+        <p className="text-xs text-text-muted">{ajuda}</p>
+      </div>
+      <Label className="text-xs text-text-muted">{t("Etiquetas")}</Label>
+      <SeletorDeTags id={idDasTags} valor={tags} onChange={onTags} permitirNova={false} />
+
+      <Label className="mt-1 text-xs text-text-muted">{t("Campos do usuário")}</Label>
+      {campos.map((criterio, i) => (
+        <div key={i} className="flex flex-wrap items-end gap-2 rounded-md border border-border p-2">
+          <div className="min-w-40 flex-1">
+            <SeletorDeCampo valor={criterio.key} onChange={(key) => trocar(i, { key })} />
+          </div>
+          <Select value={criterio.op} onValueChange={(op) => trocar(i, { op: op as OperadorDeCampo })}>
+            <SelectTrigger className="w-44" aria-label={t("Operador")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {OPERADORES_DE_CAMPO.map((op) => (
+                <SelectItem key={op} value={op}>
+                  {t(OPERADOR_DE_CAMPO_LABEL[op])}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {/* "está preenchido" e "está vazio" não têm valor para comparar. */}
+          {criterio.op !== "set" && criterio.op !== "unset" && (
+            <ValorDoCampo chave={criterio.key} valor={criterio.value} onChange={(value) => trocar(i, { value })} />
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={t("Remover critério")}
+            onClick={() => onCampos(campos.filter((_, j) => j !== i))}
+          >
+            <X size={14} aria-hidden />
+          </Button>
+        </div>
+      ))}
+      <div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => onCampos([...campos, { key: "", op: "eq", value: "" }])}
+          data-testid={`adicionar-criterio-${grupo}`}
+        >
+          <Plus size={14} aria-hidden className="mr-1" /> {t("Adicionar critério de campo")}
+        </Button>
+      </div>
+    </section>
+  );
 }
