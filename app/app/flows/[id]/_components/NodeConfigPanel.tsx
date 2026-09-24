@@ -107,7 +107,7 @@ function CamposDoGatilho({
   // Rascunho recém-criado (sem gatilho): o seletor abre sozinho — o fluxo nasceu
   // no construtor justamente para o gatilho ser a primeira escolha, aqui.
   const [aberto, setAberto] = useState(!config.trigger_type);
-  // O gatilho do DISPARO (0394) não se escolhe: o fluxo é do disparo e começa
+  // O gatilho do DISPARO (0399) não se escolhe: o fluxo é do disparo e começa
   // quando o disparo alcança cada contato do público.
   if (config.trigger_type === "broadcast") {
     const def = FLOW_TRIGGERS.broadcast;

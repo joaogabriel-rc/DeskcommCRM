@@ -344,7 +344,7 @@ export async function PATCH(
     p_broadcast: id,
     p_org: authz.org.orgId,
     p_contact_ids: contatos.map((c) => c.id),
-    // A permissão é aberta NA CONVERSA do número do modelo (0394). A função
+    // A permissão é aberta NA CONVERSA do número do modelo (0399). A função
     // confere que o número é desta organização e está ativo.
     p_session: sessao,
   });

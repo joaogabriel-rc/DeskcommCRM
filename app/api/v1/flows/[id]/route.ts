@@ -119,7 +119,7 @@ export async function PATCH(req: NextRequest, ctx: RouteCtx): Promise<Response> 
   if (fetchErr) return fail("internal_error", fetchErr.message, 500, { requestId });
   if (!existing) return fail("not_found", t("Flow não encontrado."), 404, { requestId });
 
-  // O fluxo de um DISPARO (0394) liga e desliga com o disparo — é o
+  // O fluxo de um DISPARO (0399) liga e desliga com o disparo — é o
   // agendamento que materializa a permissão de envio que ele carrega. Ligar por
   // aqui soltaria um fluxo sem público nem permissão; trocar o gatilho o
   // desligaria do disparo (o banco recusaria, `flows_disparo_coerente`).

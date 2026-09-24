@@ -9,6 +9,8 @@ export interface TemplateSlotView {
   expects: string;
   /** Rótulo humano do endereço: "corpo", "cabeçalho", "card 2 › cabeçalho". */
   onde: string;
+  /** A chave deste valor em `template_values` e em `savedValues` (`header:1`). */
+  valueKey: string;
 }
 
 /** Texto de um componente, inteiro e uma vez só — a UI marca os `{{n}}`. */
@@ -30,6 +32,8 @@ export interface TemplateView {
   /** DERIVADOS do template pela API — nunca digitados, nunca contados à mão. */
   slots: TemplateSlotView[];
   previews: TemplatePreview[];
+  /** Links de mídia salvos no modelo — o painel da janela fechada pré-preenche com eles. */
+  savedValues: Record<string, string>;
 }
 
 /** Uma conexão oficial em que se pode criar modelo. */
@@ -73,6 +77,18 @@ export function useSyncTemplates() {
   });
 }
 
+/**
+ * As listas que leem o espelho de modelos: a da tela de Conexões, o catálogo
+ * central (Fluxos e Disparos — que também leem os links salvos) e o painel da
+ * janela fechada na conversa. Quem escreve no espelho invalida as três, senão
+ * uma delas mostra o estado velho até o `staleTime`.
+ */
+function invalidarListasDeModelos(qc: ReturnType<typeof useQueryClient>): void {
+  qc.invalidateQueries({ queryKey: ["channel-templates"] });
+  qc.invalidateQueries({ queryKey: ["channel-template-catalog"] });
+  qc.invalidateQueries({ queryKey: ["templates-da-conversa"] });
+}
+
 /** O rascunho que o formulário monta, com a conexão em que será criado. */
 export interface PedidoDeModelo {
   channel_session_id: string;
@@ -96,10 +112,25 @@ export function useCriarModelo() {
         { acao: "criar", ...pedido },
       ),
     onError: showApiError,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["channel-templates"] });
-      // O catálogo central (Fluxos, Disparos) também passa a vê-lo — pendente.
-      qc.invalidateQueries({ queryKey: ["channel-template-catalog"] });
-    },
+    onSuccess: () => invalidarListasDeModelos(qc),
+  });
+}
+
+/**
+ * Grava (ou esquece, com string vazia) o link de mídia do modelo. Invalida
+ * também a lista do painel da janela fechada, que lê a mesma rota com outra
+ * chave: sem isso o link salvo aqui só apareceria na conversa depois do
+ * `staleTime`.
+ */
+export function useSaveTemplateValues() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { name: string; language: string; values: Record<string, string> }) =>
+      apiClient.patch<{ data: { savedValues: Record<string, string> } }>(
+        "/api/v1/channels/templates",
+        args,
+      ),
+    onError: showApiError,
+    onSuccess: () => invalidarListasDeModelos(qc),
   });
 }

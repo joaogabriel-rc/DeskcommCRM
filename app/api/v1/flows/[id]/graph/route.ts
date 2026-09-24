@@ -87,7 +87,7 @@ export async function PUT(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   if (flowErr) return fail("internal_error", flowErr.message, 500, { requestId });
   if (!flow) return fail("not_found", t("Flow não encontrado."), 404, { requestId });
 
-  // O gatilho INTERNO (o do disparo, 0394) não se escolhe no canvas: o fluxo de
+  // O gatilho INTERNO (o do disparo, 0399) não se escolhe no canvas: o fluxo de
   // um disparo o mantém sempre, e um fluxo comum nunca o recebe. O nó é
   // projetado de volta, para o canvas e a linha não divergirem.
   if (flow.broadcast_id) {

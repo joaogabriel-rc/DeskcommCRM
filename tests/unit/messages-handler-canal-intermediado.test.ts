@@ -296,6 +296,20 @@ function makeSupabase(linhaCompleta: Row, espelhoDoModelo: Row | null = null) {
         // por CONTA (`channel_session_id` vazio, WABA da conexão).
         return catalogo.from(tabela);
       }
+      if (tabela === "channel_sessions") {
+        // A busca da definição do modelo pergunta o provedor e a conta oficial
+        // da sessão antes de aceitar uma linha sem conexão (lib/channels/
+        // linha-do-espelho.ts). Responde com a sessão DESTA conversa.
+        const sessao = (linhaCompleta.channel_sessions ?? {}) as Row;
+        const cadeia: Record<string, unknown> = {
+          eq: () => cadeia,
+          maybeSingle: async () => ({
+            data: { provider: sessao.provider ?? null, meta_waba_id: sessao.meta_waba_id ?? null },
+            error: null,
+          }),
+        };
+        return { select: () => cadeia };
+      }
       if (tabela === "messages") {
         return {
           insert: (row: Row) => {

@@ -231,13 +231,20 @@ const ID_NUMERICO = /^\d+$/;
  *
  * Linha com `channel_session_id` é daquela conexão. Linha SEM ela é do canal
  * oficial anterior à 0154 (e do sync oficial, que grava por conta): pertence a
- * quem tem a mesma conta. O id da conta vem do BANCO (a sessão desta
- * organização) e ainda assim só entra no filtro se for número — é texto
- * interpolado numa expressão, e só dígitos não têm como alterá-la.
+ * quem tem a mesma conta — e SÓ a uma conexão OFICIAL. Um parceiro sem linha
+ * própria nunca herda a definição do canal oficial, nem a linha órfã que o
+ * `on delete set null` deixa quando um parceiro é apagado (regra trazida da
+ * `linha-do-espelho.ts` da upstream, #1563/c96416502). O id da conta vem do
+ * BANCO (a sessão desta organização) e ainda assim só entra no filtro se for
+ * número — é texto interpolado numa expressão, e só dígitos não têm como alterá-la.
  */
-export function escopoDaConexao(conexao: { id: string; meta_waba_id: string | null }): string {
+export function escopoDaConexao(conexao: { id: string; provider: string; meta_waba_id: string | null }): string {
   const daConexao = `channel_session_id.eq.${conexao.id}`;
-  if (conexao.meta_waba_id && ID_NUMERICO.test(conexao.meta_waba_id)) {
+  if (
+    fonteDeTemplates(conexao.provider) === "oficial" &&
+    conexao.meta_waba_id &&
+    ID_NUMERICO.test(conexao.meta_waba_id)
+  ) {
     return `${daConexao},and(channel_session_id.is.null,waba_id.eq.${conexao.meta_waba_id})`;
   }
   return daConexao;
@@ -390,10 +397,15 @@ export async function resolverModelo(
     if (!conexao) return null;
     q = q.or(escopoDaConexao(conexao));
   }
-  const { data, error } = await q.order("synced_at", { ascending: false }).limit(2);
+  const { data, error } = await q.order("synced_at", { ascending: false }).limit(20);
   if (error) throw new Error(`catalogo_de_modelos: leitura do modelo falhou — ${error.message}`);
   const linhas = (data ?? []) as LinhaDoCatalogo[];
   if (ref.ambiguoNaoResolve && !ref.channelSessionId && linhas.length > 1) return null;
-  const linha = linhas[0];
+  // Com conexão, a linha DELA vem primeiro; a da conta (sem conexão, do sync
+  // oficial) só responde quando a conexão não tem a própria — a mesma ordem da
+  // `linha-do-espelho.ts` da upstream. Sem conexão, a mais recente.
+  const linha =
+    (ref.channelSessionId ? linhas.find((l) => l.channel_session_id === ref.channelSessionId) : undefined) ??
+    linhas[0];
   return linha ? modeloDaLinha(linha) : null;
 }

@@ -113,7 +113,7 @@ export type MensagemDeDisparo = z.infer<typeof mensagemDeDisparoSchema>;
 /**
  * GUIADO: o disparo manda UMA mensagem (a de `message`).
  * FLUXO: cada contato entra no fluxo próprio do disparo (`flows.broadcast_id`,
- * migration 0394); a mensagem e o resto são passos desse fluxo.
+ * migration 0399); a mensagem e o resto são passos desse fluxo.
  */
 export const MODOS_DE_DISPARO = ["guiado", "fluxo"] as const;
 export type ModoDeDisparo = (typeof MODOS_DE_DISPARO)[number];

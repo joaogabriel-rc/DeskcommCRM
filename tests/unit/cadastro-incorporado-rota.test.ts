@@ -25,6 +25,9 @@ vi.mock("@/lib/env", () => ({
     NEXT_PUBLIC_APP_URL: "https://crm.exemplo.com",
     META_APP_ID: "1111122222",
     META_EMBEDDED_SIGNUP_CONFIG_ID: "3333344444",
+    // A URL de callback da Meta sai de `basePublicaDoWebhookMeta`, que lê esta
+    // variável (#1426). Vazia = cai na base da instalação, como no `.env` padrão.
+    META_WEBHOOK_BASE_URL: "",
   },
 }));
 vi.mock("@/lib/impersonate/support", () => ({ requireSupportWrite: vi.fn(async () => null) }));

@@ -39,7 +39,10 @@ export interface EntradaDaConexao {
   phoneNumberId: string;
   wabaId: string;
   token: string;
-  /** Base pública da instalação — compõe a URL do webhook. */
+  /**
+   * Base pública do CALLBACK da Meta — `basePublicaDoWebhookMeta`, que respeita o
+   * `META_WEBHOOK_BASE_URL` (#1426). Só compõe a URL do webhook registrado na Meta.
+   */
   base: string;
   /**
    * Validade do token. `undefined` = não mexe na coluna (o fluxo manual não sabe);
@@ -170,7 +173,7 @@ export async function conectarCanalOficial(entrada: EntradaDaConexao): Promise<D
 
 /**
  * Update PRÓPRIO, e não uma chave a mais em `linha`: num banco sem a migration
- * 0392 a coluna não existe, e levá-la junto faria o PostgREST recusar a escrita
+ * 0398 a coluna não existe, e levá-la junto faria o PostgREST recusar a escrita
  * inteira (42703) — o canal deixaria de conectar por causa de um dado acessório.
  */
 async function gravarValidadeDoToken(

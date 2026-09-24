@@ -32,7 +32,7 @@
  * `beginServiceAtOrigin` proíbe — e com razão: retentativa não é consentimento
  * novo.
  *
- * ── Modo FLUXO (migration 0394): o mesmo lote, o mesmo ritmo ────────────────
+ * ── Modo FLUXO (migration 0399): o mesmo lote, o mesmo ritmo ────────────────
  *
  * Quando o disparo tem um fluxo próprio (`flows.broadcast_id`), cada
  * destinatário do lote INICIA uma execução desse fluxo em vez de receber a

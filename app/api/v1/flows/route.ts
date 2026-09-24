@@ -31,7 +31,7 @@ export async function GET(): Promise<Response> {
     .from("flows")
     .select("*")
     .eq("organization_id", activeOrg.orgId)
-    // O fluxo de um disparo (0394) é do disparo: aparece no editor do disparo,
+    // O fluxo de um disparo (0399) é do disparo: aparece no editor do disparo,
     // nunca na lista de Automações.
     .is("broadcast_id", null)
     .order("created_at", { ascending: false });

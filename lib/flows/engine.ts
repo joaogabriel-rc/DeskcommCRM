@@ -241,7 +241,7 @@ export interface StartFlowResult {
 
 /**
  * De onde vem a permissão de falar com o contato numa execução iniciada por
- * DISPARO (0394): a permissão materializada no agendamento, e o destinatário
+ * DISPARO (0399): a permissão materializada no agendamento, e o destinatário
  * dono dela. O banco confere a coerência (`fn_flow_execution_do_disparo_coerente`):
  * destinatário do disparo dono do fluxo, mesmo contato, mesma organização.
  */

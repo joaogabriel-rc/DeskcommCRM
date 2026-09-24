@@ -153,10 +153,15 @@ describe("o recorte por organização e por conexão", () => {
   });
 
   it("o id da conta só entra no filtro se for número — é texto interpolado numa expressão", () => {
-    expect(escopoDaConexao({ id: "s1", meta_waba_id: "123" })).toBe(
+    expect(escopoDaConexao({ id: "s1", provider: "meta_cloud", meta_waba_id: "123" })).toBe(
       "channel_session_id.eq.s1,and(channel_session_id.is.null,waba_id.eq.123)",
     );
-    expect(escopoDaConexao({ id: "s1", meta_waba_id: "1),or(organization_id.neq.x" })).toBe("channel_session_id.eq.s1");
+    expect(escopoDaConexao({ id: "s1", provider: "meta_cloud", meta_waba_id: "1),or(organization_id.neq.x" })).toBe("channel_session_id.eq.s1");
+  });
+
+  it("só a conexão OFICIAL alcança a linha da conta — parceiro fica com a própria, mesmo com conta numérica", () => {
+    expect(escopoDaConexao({ id: "s1", provider: "datafy", meta_waba_id: "123" })).toBe("channel_session_id.eq.s1");
+    expect(escopoDaConexao({ id: "s1", provider: "zernio", meta_waba_id: "123" })).toBe("channel_session_id.eq.s1");
   });
 });
 

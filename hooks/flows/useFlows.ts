@@ -17,7 +17,7 @@ export interface FlowRow {
   /** Livre por gatilho: tag, campo, etapa, palavra-chave. Ver lib/flows/triggers.ts. */
   trigger_config: Record<string, unknown>;
   version: number;
-  /** Disparo DONO deste fluxo (0394). Preenchido = fluxo de disparo, fora de Automações. */
+  /** Disparo DONO deste fluxo (0399). Preenchido = fluxo de disparo, fora de Automações. */
   broadcast_id?: string | null;
   created_at: string;
   updated_at: string;

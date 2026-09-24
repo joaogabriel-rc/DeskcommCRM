@@ -15,7 +15,7 @@ import { FLOW_TRIGGER_IDS_ESCOLHIVEIS } from "@/lib/flows/triggers";
 export const createFlowSchema = z.object({
   name: z.string().trim().min(1).max(120).default("Sem título"),
   description: z.string().max(2000).optional(),
-  // Só os gatilhos ESCOLHÍVEIS: o `broadcast` nasce com o disparo (0394), nunca por aqui.
+  // Só os gatilhos ESCOLHÍVEIS: o `broadcast` nasce com o disparo (0399), nunca por aqui.
   trigger_type: z.enum(FLOW_TRIGGER_IDS_ESCOLHIVEIS).nullish(),
   trigger_config: z.record(z.string(), z.unknown()).default({}),
 });

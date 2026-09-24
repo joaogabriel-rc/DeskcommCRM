@@ -36,7 +36,7 @@ export async function GET(): Promise<Response> {
     .order("created_at", { ascending: false });
   if (error) return fail("internal_error", error.message, 500, { requestId });
 
-  // O modo de cada um sai da existência do fluxo próprio (0394) — uma consulta
+  // O modo de cada um sai da existência do fluxo próprio (0399) — uma consulta
   // para a lista inteira, recortada pela organização.
   const { data: fluxos } = await supabase
     .from("flows")
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     .single();
   if (error || !data) return fail("internal_error", error?.message ?? "insert_failed", 500, { requestId });
 
-  // Modo FLUXO: o disparo nasce com o fluxo PRÓPRIO dele (0394) — o operador
+  // Modo FLUXO: o disparo nasce com o fluxo PRÓPRIO dele (0399) — o operador
   // abre o construtor a partir do disparo e monta ali a mensagem e o resto.
   let fluxo: { id: string; status: string } | null = null;
   if (parsed.data.modo === "fluxo") {

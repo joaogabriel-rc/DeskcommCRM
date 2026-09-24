@@ -1,4 +1,4 @@
--- 0394 · O disparo pode levar o público por um FLUXO — o mesmo motor das automações.
+-- 0399 · O disparo pode levar o público por um FLUXO — o mesmo motor das automações.
 --
 -- ─── O desenho em uma frase ─────────────────────────────────────────────────
 -- Um disparo "modo fluxo" tem UM fluxo próprio (gatilho `broadcast`), o worker
@@ -79,7 +79,7 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 comment on column public.flows.broadcast_id is
-  'Disparo DONO deste fluxo (migration 0394). Preenchido ⇔ trigger_type = broadcast. Fluxo de disparo não aparece em Automações e só liga pelo agendamento do disparo.';
+  'Disparo DONO deste fluxo (migration 0399). Preenchido ⇔ trigger_type = broadcast. Fluxo de disparo não aparece em Automações e só liga pelo agendamento do disparo.';
 
 -- ═══ 2. A execução iniciada pelo disparo ═════════════════════════════════════
 
@@ -108,7 +108,7 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 comment on column public.flow_executions.service_boundary is
-  'Permissão de envio materializada pelo DISPARO no agendamento (broadcast_recipients.service_boundary), carregada até o nó de mensagem, que a reconfere (assertServiceBoundarySupabase). Nula nas execuções iniciadas por evento (migration 0394).';
+  'Permissão de envio materializada pelo DISPARO no agendamento (broadcast_recipients.service_boundary), carregada até o nó de mensagem, que a reconfere (assertServiceBoundarySupabase). Nula nas execuções iniciadas por evento (migration 0399).';
 
 create or replace function public.fn_flow_execution_do_disparo_coerente() returns trigger
   language plpgsql

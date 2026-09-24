@@ -35,7 +35,7 @@ import { conectarCanalOficial } from "@/lib/channels/meta/conectar";
 import { metaGraphBase } from "@/lib/channels/meta/credentials";
 import { COLUNAS_DO_DESFECHO_DO_WEBHOOK } from "@/lib/channels/meta/webhook-da-sessao";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { basePublicaDaInstalacao } from "@/lib/webhooks/url-publica";
+import { basePublicaDoWebhookMeta } from "@/lib/webhooks/url-publica";
 import { traduzir } from "@/lib/i18n/dicionario";
 
 export const dynamic = "force-dynamic";
@@ -76,7 +76,7 @@ async function lerDesfechoDoWebhook(
 
 /**
  * A validade do token, em consulta própria pelo mesmo motivo de
- * `lerDesfechoDoWebhook`: a coluna chega na migration 0392, e sem ela o select
+ * `lerDesfechoDoWebhook`: a coluna chega na migration 0398, e sem ela o select
  * principal perderia o canal inteiro por causa de um dado acessório.
  */
 async function lerValidadeDoToken(
@@ -152,7 +152,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     () => consultar().maybeSingle(),
   );
 
-  const base = basePublicaDaInstalacao(req);
+  const base = basePublicaDoWebhookMeta(req);
   const desfecho = data?.id ? await lerDesfechoDoWebhook(admin, data.id) : null;
   const tokenExpiraEm = data?.id ? await lerValidadeDoToken(admin, data.id) : null;
   const cadastro = await disponibilidadeDoCadastroIncorporado();
@@ -244,7 +244,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     phoneNumberId: phone_number_id,
     wabaId: waba_id,
     token,
-    base: basePublicaDaInstalacao(req),
+    // A URL de CALLBACK da Meta: `META_WEBHOOK_BASE_URL` quando definida (#1426).
+    base: basePublicaDoWebhookMeta(req),
   });
 
   if (!desfecho.ok) {

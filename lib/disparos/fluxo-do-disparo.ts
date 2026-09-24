@@ -1,5 +1,5 @@
 /**
- * O FLUXO PRÓPRIO de um disparo "modo fluxo" (migration 0394).
+ * O FLUXO PRÓPRIO de um disparo "modo fluxo" (migration 0399).
  *
  * Um disparo tem no máximo um fluxo, e esse fluxo é dele: `flows.broadcast_id`
  * aponta o dono (FK composta com a organização), o gatilho é `broadcast` e o

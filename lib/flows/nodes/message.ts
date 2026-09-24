@@ -140,7 +140,7 @@ export function entradaDeEnvio(
 }
 
 /**
- * A permissão da execução iniciada por um DISPARO (migration 0394).
+ * A permissão da execução iniciada por um DISPARO (migration 0399).
  *
  * Não cria autorização: usa a que o disparo materializou no agendamento e a
  * RECONFERE com `assertServiceBoundarySupabase` — a mesma régua do worker dos

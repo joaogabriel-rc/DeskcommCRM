@@ -59,11 +59,11 @@ export interface FlowExecutionRow {
   /**
    * A permissão de envio que o DISPARO materializou no agendamento
    * (`broadcast_recipients.service_boundary`), carregada pela execução até o
-   * nó de mensagem (migration 0394). Nula na execução iniciada por evento — lá a
+   * nó de mensagem (migration 0399). Nula na execução iniciada por evento — lá a
    * permissão sai do evento (`serviceForAutomation`).
    */
   service_boundary?: unknown;
-  /** O destinatário do disparo que iniciou esta execução (0394). */
+  /** O destinatário do disparo que iniciou esta execução (0399). */
   broadcast_recipient_id?: string | null;
 }
 

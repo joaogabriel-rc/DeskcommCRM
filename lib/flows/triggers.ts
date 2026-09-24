@@ -72,7 +72,7 @@ export interface FlowTriggerDefinition {
   mensagemSuportada?: boolean;
   /**
    * Gatilho que ninguém ESCOLHE: ele nasce com o fluxo de um disparo (migration
-   * 0394, `flows.broadcast_id`). Fica fora do seletor e da API de fluxos
+   * 0399, `flows.broadcast_id`). Fica fora do seletor e da API de fluxos
    * comuns; o banco amarra `broadcast` ⇔ `broadcast_id` (`flows_disparo_coerente`).
    */
   interno?: boolean;

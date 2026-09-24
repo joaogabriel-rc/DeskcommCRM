@@ -1,4 +1,4 @@
--- 0392 · A validade do token do canal oficial.
+-- 0398 · A validade do token do canal oficial.
 --
 -- ─── O que muda ─────────────────────────────────────────────────────────────
 -- O Cadastro Incorporado da Meta (Embedded Signup v4) entrega um token de

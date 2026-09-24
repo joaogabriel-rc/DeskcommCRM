@@ -49,7 +49,7 @@ import { traduzir } from "@/lib/i18n/dicionario";
 import { requireSupportWrite } from "@/lib/impersonate/support";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { basePublicaDaInstalacao } from "@/lib/webhooks/url-publica";
+import { basePublicaDaInstalacao, basePublicaDoWebhookMeta } from "@/lib/webhooks/url-publica";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -211,7 +211,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     phoneNumberId: canal.phoneNumberId,
     wabaId: canal.wabaId,
     token: troca.token,
-    base: basePublicaDaInstalacao(req),
+    // A URL de CALLBACK da Meta (`META_WEBHOOK_BASE_URL`, #1426). A checagem de
+    // origem acima segue com a base da INSTALAÇÃO: ela compara com o painel.
+    base: basePublicaDoWebhookMeta(req),
     tokenExpiraEm: inspecao.expiraEm,
   });
   if (!conexao.ok) return recusar(conexao.motivo);

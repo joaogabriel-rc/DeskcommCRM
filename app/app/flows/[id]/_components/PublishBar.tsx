@@ -45,7 +45,7 @@ export function PublishBar({ flowId, flow, onSave, saving }: Props) {
   const renomear = useRenameFlow(flowId);
   const [nome, setNome] = useState(flow.name);
   const isActive = flow.status === "active";
-  // Fluxo de DISPARO (0394): liga e desliga com o disparo, não por aqui.
+  // Fluxo de DISPARO (0399): liga e desliga com o disparo, não por aqui.
   const doDisparo = !!flow.broadcast_id;
 
   // O fluxo nasce "Sem título" (abre direto no construtor): o nome se edita aqui,
