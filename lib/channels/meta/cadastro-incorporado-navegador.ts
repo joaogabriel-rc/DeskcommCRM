@@ -158,8 +158,9 @@ export function carregarSdkDaMeta(appId: string, versao: string, prazoMs = 15_00
  * `await` antes — senão o navegador trata o popup como não solicitado e o bloqueia.
  * O callback também é uma função comum: o SDK recusa função `async`.
  *
- * `extras.setup` vazio, sem `sessionInfoVersion` nem `featureType`: na v4 quem
- * escolhe produtos e versão é a configuração do Facebook Login for Business.
+ * `extras.setup` vazio, sem `sessionInfoVersion`: na v4 quem escolhe produtos e
+ * versão é a configuração do Facebook Login for Business. `featureType` pede o
+ * fluxo de Coexistence (número já ativo no app WhatsApp Business).
  */
 export function abrirCadastroDaMeta(
   sdk: SdkDaMeta,
@@ -174,7 +175,7 @@ export function abrirCadastroDaMeta(
       config_id: configId,
       response_type: "code",
       override_default_response_type: true,
-      extras: { setup: {} },
+      extras: { setup: {}, featureType: "whatsapp_business_app_onboarding" },
     },
   );
 }

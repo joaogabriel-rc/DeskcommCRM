@@ -115,7 +115,7 @@ describe("abertura do fluxo v4", () => {
       config_id: "3333344444",
       response_type: "code",
       override_default_response_type: true,
-      extras: { setup: {} },
+      extras: { setup: {}, featureType: "whatsapp_business_app_onboarding" },
     });
     expect(JSON.stringify(opcoes)).not.toContain("sessionInfoVersion");
     // O SDK recusa callback `async`: tem de ser função comum.

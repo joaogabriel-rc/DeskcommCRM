@@ -92,7 +92,7 @@ describe("botão Conectar WhatsApp com Meta", () => {
       config_id: "3333344444",
       response_type: "code",
       override_default_response_type: true,
-      extras: { setup: {} },
+      extras: { setup: {}, featureType: "whatsapp_business_app_onboarding" },
     });
     expect(b).toHaveTextContent("Aguardando a Meta…");
 
