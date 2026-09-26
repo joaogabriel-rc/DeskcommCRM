@@ -148,6 +148,7 @@ beforeEach(() => {
       displayName: "Loja Teste",
       phoneNumber: "+5531900000000",
       webhookRegistro: { registrado: true, url: `${BASE}/api/v1/webhooks/meta/tok`, erro: null, em: "agora" },
+      modo: "cloud_api",
     };
   });
 });
@@ -180,11 +181,13 @@ describe("concluir o Cadastro Incorporado", () => {
       phoneNumberId: NUMERO_DA_META,
       token: TOKEN,
       tokenExpiraEm: "2026-11-21T00:00:00.000Z",
+      onboarding: true,
     });
     expect(body.data).toEqual({
       connected: true,
       displayName: "Loja Teste",
       phoneNumber: "+5531900000000",
+      modo: "cloud_api",
       tokenExpiraEm: "2026-11-21T00:00:00.000Z",
       webhookRegistro: { registrado: true, url: `${BASE}/api/v1/webhooks/meta/tok`, erro: null, em: "agora" },
     });
@@ -248,7 +251,7 @@ describe("concluir o Cadastro Incorporado", () => {
     expect(nonces).toHaveLength(0);
   });
 
-  it.each(["FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING", "FINISH_OBO_MIGRATION"])(
+  it.each(["FINISH_OBO_MIGRATION"])(
     "%s não é suportado: recusa ANTES de gastar o code",
     async (evento) => {
       const res = await concluir(pedido(corpoValido({ evento })));
@@ -332,5 +335,108 @@ describe("concluir o Cadastro Incorporado", () => {
     expect(res.status).toBe(409);
     expect(await motivo(res)).toBe("cadastro_indisponivel");
     expect(nonces).toHaveLength(0);
+  });
+
+  describe("coexistência com o app WhatsApp Business", () => {
+    it("FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING passa pelo MESMO caminho: nonce, troca, debug_token, descoberta e conexão", async () => {
+      vi.mocked(conectarCanalOficial).mockImplementation(async () => {
+        ordem.push("conectar");
+        return {
+          ok: true,
+          channelSessionId: "sessao-1",
+          displayName: "Loja Teste",
+          phoneNumber: "+5531900000000",
+          webhookRegistro: { registrado: true, url: `${BASE}/api/v1/webhooks/meta/tok`, erro: null, em: "agora" },
+          modo: "coexistencia",
+        };
+      });
+      const res = await concluir(pedido(corpoValido({ evento: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" })));
+      const body = (await res.json()) as { data: Record<string, unknown> };
+
+      expect(res.status).toBe(200);
+      expect(ordem).toEqual(["insert:calendar_oauth_nonces", "troca", "inspecao", "descoberta", "conectar"]);
+      expect(vi.mocked(inspecionarToken).mock.calls[0]![0]).toBe(TOKEN);
+      // Quem vai para a persistência é o que a Meta confirmou, e a organização é a da sessão.
+      expect(vi.mocked(conectarCanalOficial).mock.calls[0]![0]).toMatchObject({
+        organizationId: ORG,
+        wabaId: WABA_DA_META,
+        phoneNumberId: NUMERO_DA_META,
+        onboarding: true,
+      });
+      expect(body.data.modo).toBe("coexistencia");
+      expect(audit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "channel.connected",
+          organizationId: ORG,
+          metadata: expect.objectContaining({ evento: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING", modo: "coexistencia" }),
+        }),
+      );
+      nadaVazou(body);
+    });
+
+    it("o evento do navegador NÃO decide o modo: coexistência alegada e a Meta dizendo cloud_api vale cloud_api", async () => {
+      const res = await concluir(pedido(corpoValido({ evento: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" })));
+      const body = (await res.json()) as { data: Record<string, unknown> };
+      expect(res.status).toBe(200);
+      expect(body.data.modo).toBe("cloud_api");
+      // A rota não passa o evento adiante como dado de persistência.
+      expect(vi.mocked(conectarCanalOficial).mock.calls[0]![0]).not.toHaveProperty("evento");
+    });
+
+    it("state de outra organização continua recusado também para coexistência", async () => {
+      const res = await concluir(
+        pedido(
+          corpoValido({
+            evento: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING",
+            state: state({ organizationId: "org-2", userId: USER }),
+          }),
+        ),
+      );
+      expect(res.status).toBe(403);
+      expect(await motivo(res)).toBe("estado_invalido");
+      expect(trocarCodigoPorToken).not.toHaveBeenCalled();
+    });
+
+    it("replay do nonce continua recusado também para coexistência", async () => {
+      erroDoNonce = { code: "23505" };
+      const res = await concluir(pedido(corpoValido({ evento: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" })));
+      expect(res.status).toBe(409);
+      expect(await motivo(res)).toBe("estado_reutilizado");
+      expect(trocarCodigoPorToken).not.toHaveBeenCalled();
+    });
+
+    it("WABA não autorizada pelo token continua recusada também para coexistência", async () => {
+      vi.mocked(descobrirCanal).mockResolvedValueOnce({ ok: false, motivo: "waba_nao_autorizada" });
+      const res = await concluir(pedido(corpoValido({ evento: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" })));
+      expect(res.status).toBe(403);
+      expect(conectarCanalOficial).not.toHaveBeenCalled();
+    });
+
+    it("número de outra organização continua 409 também para coexistência", async () => {
+      vi.mocked(conectarCanalOficial).mockResolvedValue({ ok: false, motivo: "numero_em_outra_organizacao" });
+      const res = await concluir(pedido(corpoValido({ evento: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" })));
+      expect(res.status).toBe(409);
+      expect(await motivo(res)).toBe("numero_em_outra_organizacao");
+    });
+  });
+
+  describe("regressão: a conexão Cloud API normal não mudou", () => {
+    it.each([["FINISH"], ["FINISH_ONLY_WABA"], ["FINISH_GRANT_ONLY_API_ACCESS"], [undefined]])(
+      "evento %s conecta pelo mesmo caminho e devolve o modo da Meta",
+      async (evento) => {
+        const res = await concluir(pedido(corpoValido({ evento })));
+        const body = (await res.json()) as { data: Record<string, unknown> };
+        expect(res.status).toBe(200);
+        expect(ordem).toEqual(["insert:calendar_oauth_nonces", "troca", "inspecao", "descoberta", "conectar"]);
+        expect(body.data.modo).toBe("cloud_api");
+        expect(vi.mocked(conectarCanalOficial).mock.calls[0]![0]).toMatchObject({ organizationId: ORG, onboarding: true });
+      },
+    );
+
+    it("a recusa de evento não suportado não fala mais em número dedicado", async () => {
+      const res = await concluir(pedido(corpoValido({ evento: "FINISH_OBO_MIGRATION" })));
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).not.toContain("número dedicado");
+    });
   });
 });

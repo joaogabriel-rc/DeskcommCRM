@@ -131,3 +131,48 @@ async function numeroPertenceAWaba(input: {
     return { ok: false, motivo: `rede indisponível: ${err instanceof Error ? err.message : "erro"}` };
   }
 }
+
+export type ConsultaDoModo =
+  | { ok: true; isOnBizApp: boolean; platformType: string | null }
+  | { ok: false; motivo: string };
+
+/**
+ * O número continua no aplicativo WhatsApp Business (coexistência)?
+ *
+ * Chamada PRÓPRIA, e não dois campos a mais em `validateMetaCredentials`: a
+ * validação decide se a conexão acontece, e um campo que a Graph recusasse lá
+ * derrubaria a conexão de todo número — inclusive o dedicado, que não tem nada a
+ * ver com coexistência. Aqui a falha só deixa o modo sem resposta.
+ *
+ * `is_on_biz_app` e `platform_type` são os campos que a Meta documenta para
+ * conferir a coexistência ("Onboarding WhatsApp Business app users"). Ausente
+ * não é `true`: só o booleano explícito conta.
+ */
+export async function consultarModoDoNumero(input: {
+  phoneNumberId: string;
+  token: string;
+  graphVersion?: string;
+}): Promise<ConsultaDoModo> {
+  const version = input.graphVersion ?? graphVersion();
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/${version}/${input.phoneNumberId}?fields=is_on_biz_app,platform_type`,
+      { headers: { Authorization: `Bearer ${input.token}` } },
+    );
+    const body = (await res.json().catch(() => ({}))) as {
+      is_on_biz_app?: unknown;
+      platform_type?: unknown;
+      error?: { message?: string; error_data?: { details?: string } };
+    };
+    if (!res.ok || body.error) {
+      return { ok: false, motivo: body.error?.error_data?.details ?? body.error?.message ?? `http_${res.status}` };
+    }
+    return {
+      ok: true,
+      isOnBizApp: body.is_on_biz_app === true,
+      platformType: typeof body.platform_type === "string" ? body.platform_type : null,
+    };
+  } catch (err) {
+    return { ok: false, motivo: `rede indisponível: ${err instanceof Error ? err.message : "erro"}` };
+  }
+}

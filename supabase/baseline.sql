@@ -39527,6 +39527,36 @@ begin
   end if;
 end $$;
 
+-- ---- O modo do canal oficial (migration 0417) ----
+--
+-- `meta_modo` diz se o número é só da Cloud API ('cloud_api') ou continua no app
+-- WhatsApp Business ('coexistencia') — decidido pela resposta da Meta
+-- (`is_on_biz_app`), nunca pelo navegador. `meta_onboarding_em` marca quando o
+-- número passou pelo Cadastro Incorporado. As duas nascem nulas; o CHECK só
+-- entra se ainda não existir. Herda o acesso das colunas vizinhas. Idempotente.
+alter table public.channel_sessions
+  add column if not exists meta_modo text,
+  add column if not exists meta_onboarding_em timestamptz;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.channel_sessions'::regclass
+       and conname = 'channel_sessions_meta_modo_check'
+  ) then
+    alter table public.channel_sessions
+      add constraint channel_sessions_meta_modo_check
+      check (meta_modo = any (array['cloud_api'::text, 'coexistencia'::text]));
+  end if;
+end $$;
+
+comment on column public.channel_sessions.meta_modo is
+  'Modo do canal oficial, como a Meta respondeu (is_on_biz_app) ao conectar: cloud_api = número só na Cloud API; coexistencia = número que continua no app WhatsApp Business. Nulo = desconhecido.';
+
+comment on column public.channel_sessions.meta_onboarding_em is
+  'Quando o número passou pelo Cadastro Incorporado da Meta. Nulo = conexão pelo formulário manual ou anterior à migration 0417.';
+
 -- ---- módulo suspenso vira ERRO que o kit reporta (migration 0340) ----
 --
 -- Um comando SEPARADO da reaplicação, de propósito: se ela relançasse, a marca

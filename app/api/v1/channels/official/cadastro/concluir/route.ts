@@ -79,7 +79,7 @@ const RECUSAS = {
   estado_invalido: [403, "forbidden", "Esta conexão expirou ou foi aberta por outra pessoa ou organização. Comece de novo."],
   estado_reutilizado: [409, "state_conflict", "Esta autorização já foi usada. Comece a conexão de novo."],
   nonce_indisponivel: [503, "unavailable", "Não foi possível conferir a conexão agora. Tente de novo em instantes."],
-  evento_nao_suportado: [422, "invalid_request", "Este tipo de conexão ainda não é suportado. Use um número dedicado à API oficial, sem o aplicativo WhatsApp Business."],
+  evento_nao_suportado: [422, "invalid_request", "Migrar um número que está em outro provedor da API oficial ainda não é suportado. Conecte um número novo ou um número que esteja no aplicativo WhatsApp Business."],
   cadastro_indisponivel: [409, "state_conflict", "A conexão pela Meta não está configurada nesta instalação."],
   code_expirado: [422, "invalid_request", "A autorização da Meta expirou antes de chegar ao CRM. Tente conectar de novo."],
   code_usado: [409, "state_conflict", "Esta autorização da Meta já foi usada. Tente conectar de novo."],
@@ -215,6 +215,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // origem acima segue com a base da INSTALAÇÃO: ela compara com o painel.
     base: basePublicaDoWebhookMeta(req),
     tokenExpiraEm: inspecao.expiraEm,
+    onboarding: true,
   });
   if (!conexao.ok) return recusar(conexao.motivo);
 
@@ -229,6 +230,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       provider: CHANNEL_PROVIDER_META,
       via: "cadastro_incorporado",
       evento: evento ?? null,
+      // O modo é o que a META respondeu sobre o número; o `evento` acima é só o
+      // que o navegador repassou, e fica como rótulo.
+      modo: conexao.modo,
       waba_id: canal.wabaId,
       phone_number_id: canal.phoneNumberId,
       token_expira_em: inspecao.expiraEm,
@@ -239,6 +243,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     organizationId,
     userId,
     evento,
+    modo: conexao.modo,
     webhookRegistrado: conexao.webhookRegistro?.registrado ?? null,
     tokenExpira: inspecao.expiraEm !== null,
   });
@@ -248,6 +253,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     connected: true,
     displayName: conexao.displayName,
     phoneNumber: conexao.phoneNumber,
+    modo: conexao.modo,
     tokenExpiraEm: inspecao.expiraEm,
     webhookRegistro: webhook
       ? { registrado: webhook.registrado, url: webhook.url, erro: webhook.erro, em: webhook.em }

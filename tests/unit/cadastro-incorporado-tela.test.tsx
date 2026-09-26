@@ -117,6 +117,50 @@ describe("botão Conectar WhatsApp com Meta", () => {
     await waitFor(() => expect(pedirEstado).toHaveBeenCalledTimes(2));
   });
 
+  it("coexistência: o sucesso diz que o número continua no app WhatsApp Business, sem a frase de número dedicado", async () => {
+    concluir.mockResolvedValue({
+      data: {
+        connected: true,
+        displayName: "Loja Teste",
+        phoneNumber: "+5531900000000",
+        tokenExpiraEm: null,
+        webhookRegistro: null,
+        modo: "coexistencia",
+      },
+    });
+    botao();
+    fireEvent.click(await botaoPronto());
+    act(() => {
+      mensagemDaMeta("https://www.facebook.com", "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING", {
+        waba_id: "200000000000001",
+        phone_number_id: "100000000000001",
+      });
+      callbackDoLogin!({ authResponse: { code: "CODE-DA-META" } });
+    });
+
+    await waitFor(() => expect(concluir).toHaveBeenCalledTimes(1));
+    expect(concluir.mock.calls[0]![0]).toMatchObject({ evento: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" });
+    const aviso = await screen.findByTestId("cadastro-meta-coexistencia");
+    expect(aviso).toHaveTextContent("continua no aplicativo WhatsApp Business");
+    expect(aviso).toHaveTextContent("histórico de conversas e os contatos do aplicativo ainda não");
+    const estado = screen.getByTestId("cadastro-meta-estado");
+    expect(estado).toHaveAttribute("data-fase", "sucesso");
+    expect(estado).not.toHaveTextContent("número dedicado");
+    // Número em coexistência já está registrado: não se pede para registrar.
+    expect(estado).not.toHaveTextContent("conclua o registro dele");
+  });
+
+  it("conexão Cloud API normal não mostra o aviso de coexistência", async () => {
+    concluir.mockResolvedValue({
+      data: { connected: true, displayName: "Loja Teste", phoneNumber: "+5531900000000", tokenExpiraEm: null, webhookRegistro: null, modo: "cloud_api" },
+    });
+    botao();
+    fireEvent.click(await botaoPronto());
+    act(() => callbackDoLogin!({ authResponse: { code: "CODE" } }));
+    expect(await screen.findByText(/conclua o registro dele/, {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(screen.queryByTestId("cadastro-meta-coexistencia")).toBeNull();
+  });
+
   it("ignora mensagem de origem falsa — o code segue sem sugestão, e o servidor descobre", async () => {
     botao();
     fireEvent.click(await botaoPronto());

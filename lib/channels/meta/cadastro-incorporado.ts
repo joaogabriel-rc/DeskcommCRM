@@ -20,11 +20,18 @@ import { metaGraphBase } from "@/lib/channels/meta/credentials";
 import { env } from "@/lib/env";
 import { graphVersion } from "@/lib/graph-version";
 
-/** Eventos que esta versão NÃO conecta: exigem sincronização/migração que o ingest não faz. */
-export const EVENTOS_NAO_SUPORTADOS = new Set([
-  "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING",
-  "FINISH_OBO_MIGRATION",
-]);
+/**
+ * Eventos que esta versão NÃO conecta. A migração de número de outro provedor
+ * (OBO) exige um passo que o CRM não faz.
+ *
+ * `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING` (coexistência com o app WhatsApp
+ * Business) SAIU daqui: ele passa pelo mesmo caminho dos demais — state, troca
+ * do code, `debug_token`, WABA e número confirmados pela Meta. O evento não
+ * decide nada: o modo gravado é o que a Meta responde sobre o número
+ * (`lib/channels/meta/modo-do-canal.ts`). O que ainda NÃO existe é a
+ * sincronização de histórico e contatos (`history`, `smb_app_state_sync`).
+ */
+export const EVENTOS_NAO_SUPORTADOS = new Set(["FINISH_OBO_MIGRATION"]);
 
 const ID_DA_META = /^\d{5,25}$/;
 

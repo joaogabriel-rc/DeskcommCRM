@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { apiClient } from "@/lib/api/client";
+import type { ModoDoCanalOficial } from "@/lib/channels/meta/modo-do-canal";
 
 export interface OfficialChannelState {
   /**
@@ -77,6 +78,8 @@ export interface CanalConectadoPeloCadastro {
   phoneNumber: string | null;
   tokenExpiraEm: string | null;
   webhookRegistro: { registrado: boolean; url: string | null; erro: string | null; em: string } | null;
+  /** O que a Meta respondeu sobre o número; `null` = sem resposta. */
+  modo?: ModoDoCanalOficial | null;
 }
 
 export interface RegistroDoWebhook {

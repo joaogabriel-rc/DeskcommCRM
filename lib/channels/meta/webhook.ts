@@ -148,7 +148,33 @@ export interface MessageStatusEvent {
   errorTitle: string | null;
 }
 
-export type MetaWebhookEvent = TemplateStatusEvent | MessageStatusEvent | InboundMessageEvent;
+/**
+ * Mensagem que a EMPRESA mandou pelo aplicativo WhatsApp Business, num número em
+ * coexistência (campo `smb_message_echoes`). O número fica nos dois lugares ao
+ * mesmo tempo: o cliente conversa pela Cloud API e o dono segue respondendo pelo
+ * celular — e sem este eco a resposta do celular não aparece no CRM, nem cala a
+ * IA, que continuaria respondendo por cima de quem está atendendo.
+ *
+ * A Meta só manda eco do que saiu PELO APP: o que o CRM envia pela Cloud API não
+ * volta por aqui.
+ */
+export interface EchoMessageEvent {
+  kind: "echo_message";
+  wabaId: string;
+  /** Qual número NOSSO enviou — `value.metadata.phone_number_id`. */
+  phoneNumberId: string;
+  /** `wamid` — a chave de idempotência, a mesma das recebidas. */
+  externalId: string;
+  /** `wa_id` do CLIENTE (destinatário). `from` é o próprio número da empresa. */
+  to: string;
+  sentAt: Date;
+  type: string;
+  text: string | null;
+  sharedContact?: SharedContact | null;
+  media: InboundMessageEvent["media"];
+}
+
+export type MetaWebhookEvent = TemplateStatusEvent | MessageStatusEvent | InboundMessageEvent | EchoMessageEvent;
 
 /**
  * O formato do fio mora em `./envelope.ts`, onde é um schema Zod — e o tipo
@@ -214,6 +240,52 @@ export function textoDaResposta(tipo: string, raw: Record<string, unknown>): str
   return null;
 }
 
+/** A Meta manda epoch em SEGUNDOS, string. Passar direto ao Date daria 1970. */
+function instanteDaMeta(v: unknown): Date {
+  return new Date(Number(str(v) ?? "0") * 1000);
+}
+
+/**
+ * O CONTEÚDO de uma mensagem do WhatsApp — tipo, texto, cartão e mídia. É o
+ * mesmo na mensagem recebida e no eco do app Business, e mora num lugar só para
+ * as duas leituras não divergirem.
+ */
+function corpoDaMensagem(raw: Record<string, unknown>): {
+  type: string;
+  text: string | null;
+  sharedContact: SharedContact | null;
+  media: InboundMessageEvent["media"];
+} {
+  const tipo = str(raw.type) ?? "unknown";
+  const resposta = textoDaResposta(tipo, raw);
+  const corpoMidia =
+    tipo !== "contacts" && resposta === null ? (raw[tipo] as Record<string, unknown> | undefined) : undefined;
+  const sharedContact = tipo === "contacts" ? parseMetaInboundContact(raw) : null;
+  // Resposta a botão chega como `button`/`interactive`, tipos que o CHECK
+  // de `messages.type` não conhece — o INSERT falhava e o clique se
+  // perdia. O que o contato disse é o RÓTULO que ele tocou: vira texto.
+  const tipoCrm = tipo === "contacts" ? "contact" : resposta !== null ? "text" : tipo;
+  return {
+    type: tipoCrm,
+    text:
+      resposta !== null
+        ? resposta
+        : tipoCrm === "text"
+          ? str((raw.text as Record<string, unknown>)?.body)
+          : sharedContact?.name ?? null,
+    sharedContact,
+    media:
+      corpoMidia && str(corpoMidia.id)
+        ? {
+            id: str(corpoMidia.id)!,
+            url: str(corpoMidia.url),
+            mime: str(corpoMidia.mime_type),
+            voice: corpoMidia.voice === true,
+          }
+        : null,
+  };
+}
+
 export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEvent[] {
   const out: MetaWebhookEvent[] = [];
   if (envelope?.object !== "whatsapp_business_account") return out;
@@ -250,15 +322,7 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
           if (!id || !from) continue; // payload capenga não vira linha meia-boca
 
           const perfil = contatos.find((c) => str(c.wa_id) === from);
-          const tipo = str(raw.type) ?? "unknown";
-          const resposta = textoDaResposta(tipo, raw);
-          const corpoMidia =
-            tipo !== "contacts" && resposta === null ? (raw[tipo] as Record<string, unknown> | undefined) : undefined;
-          const sharedContact = tipo === "contacts" ? parseMetaInboundContact(raw) : null;
-          // Resposta a botão chega como `button`/`interactive`, tipos que o CHECK
-          // de `messages.type` não conhece — o INSERT falhava e o clique se
-          // perdia. O que o contato disse é o RÓTULO que ele tocou: vira texto.
-          const tipoCrm = tipo === "contacts" ? "contact" : resposta !== null ? "text" : tipo;
+          const corpo = corpoDaMensagem(raw);
 
           out.push({
             kind: "inbound_message",
@@ -267,26 +331,40 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
             externalId: id,
             from,
             profileName: str((perfil?.profile as Record<string, unknown> | undefined)?.name),
-            // A Meta manda epoch em SEGUNDOS, string. Passar direto ao Date daria 1970.
-            sentAt: new Date(Number(str(raw.timestamp) ?? "0") * 1000),
-            type: tipoCrm,
-            text:
-              resposta !== null
-                ? resposta
-                : tipoCrm === "text"
-                  ? str((raw.text as Record<string, unknown>)?.body)
-                  : sharedContact?.name ?? null,
-            ...(sharedContact ? { sharedContact } : {}),
-            media:
-              corpoMidia && str(corpoMidia.id)
-                ? {
-                    id: str(corpoMidia.id)!,
-                    url: str(corpoMidia.url),
-                    mime: str(corpoMidia.mime_type),
-                    voice: corpoMidia.voice === true,
-                  }
-                : null,
+            sentAt: instanteDaMeta(raw.timestamp),
+            type: corpo.type,
+            text: corpo.text,
+            ...(corpo.sharedContact ? { sharedContact: corpo.sharedContact } : {}),
+            media: corpo.media,
             referral: raw.referral ?? null,
+          });
+        }
+        continue;
+      }
+
+      // Eco do que a EMPRESA mandou pelo app WhatsApp Business (coexistência).
+      // Campo próprio, então não esbarra em `messages`/`statuses` acima. Sem o
+      // número que enviou, o eco não tem dono: fica de fora aqui mesmo, e a rota
+      // nunca chega a procurar sessão para ele.
+      if (change.field === "smb_message_echoes" && Array.isArray(v.message_echoes)) {
+        const numero = str(((v.metadata ?? {}) as Record<string, unknown>).phone_number_id);
+        if (!numero) continue;
+        for (const raw of v.message_echoes as Record<string, unknown>[]) {
+          const id = str(raw.id);
+          const to = str(raw.to);
+          if (!id || !to) continue; // payload capenga não vira linha meia-boca
+          const corpo = corpoDaMensagem(raw);
+          out.push({
+            kind: "echo_message",
+            wabaId,
+            phoneNumberId: numero,
+            externalId: id,
+            to,
+            sentAt: instanteDaMeta(raw.timestamp),
+            type: corpo.type,
+            text: corpo.text,
+            ...(corpo.sharedContact ? { sharedContact: corpo.sharedContact } : {}),
+            media: corpo.media,
           });
         }
         continue;

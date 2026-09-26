@@ -184,6 +184,15 @@ const PARES: Array<{
     simbolo: "ChannelProvider",
   },
   {
+    tabela: "channel_sessions",
+    coluna: "meta_modo",
+    // O modo do canal oficial (0417): Cloud API dedicada ou coexistência com o
+    // app WhatsApp Business. Quem grava é `conectarCanalOficial`, a partir da
+    // resposta da Meta (`is_on_biz_app`).
+    arquivo: "lib/channels/meta/modo-do-canal.ts",
+    simbolo: "MODOS_DO_CANAL_OFICIAL",
+  },
+  {
     tabela: "messages",
     coluna: "sent_via",
     // lib/types/messaging.ts → SentVia. A union deixa de viver inline em Message

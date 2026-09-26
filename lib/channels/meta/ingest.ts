@@ -86,7 +86,7 @@ export type IngestOutcome =
  * motivo em vez de `no_session`. "Não achei" e "não consegui perguntar" pedem
  * ações diferentes do operador, e colapsá-los foi metade do defeito.
  */
-async function sessionByPhoneNumberId(
+export async function sessionByPhoneNumberId(
   admin: Admin,
   organizationId: string,
   phoneNumberId: string,
@@ -128,8 +128,11 @@ async function findContactByVariants(
   return encontrarContatoPorTelefone(admin as never, orgId, waId);
 }
 
-/** Prévia curta para a lista de conversas. Mídia vira rótulo, nunca URL. */
-function previewOf(e: InboundMessageEvent): string {
+/**
+ * Prévia curta para a lista de conversas. Mídia vira rótulo, nunca URL. Serve à
+ * recebida e ao eco do app Business, que têm o mesmo conteúdo.
+ */
+export function previewOf(e: Pick<InboundMessageEvent, "type" | "text" | "sharedContact" | "media">): string {
   if (e.type === "text") return (e.text ?? "").slice(0, 120);
   if (e.type === "contact") return e.sharedContact?.name ? `👤 ${e.sharedContact.name}` : "[contato]";
   if (e.type === "audio") return e.media?.voice ? "🎤 Mensagem de voz" : "🎵 Áudio";

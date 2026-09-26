@@ -278,9 +278,23 @@ export function BotaoCadastroIncorporado({
             {conectado.webhookRegistro && !conectado.webhookRegistro.registrado ? (
               <p className="mt-1">{t("O canal envia, mas o recebimento ainda não foi ativado — veja o aviso de webhook abaixo.")}</p>
             ) : null}
-            <p className="mt-1 text-muted-foreground">
-              {t("Próximos passos na Meta: cadastre uma forma de pagamento no WhatsApp Manager. Se o número é novo, conclua o registro dele antes do primeiro envio.")}
-            </p>
+            {conectado.modo === "coexistencia" ? (
+              <div data-testid="cadastro-meta-coexistencia">
+                <p className="mt-1">
+                  {t("Este número continua no aplicativo WhatsApp Business. O que você responder pelo celular também aparece aqui, e o atendimento automático pausa na conversa enquanto você atende por lá.")}
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  {t("O histórico de conversas e os contatos do aplicativo ainda não são trazidos para o CRM: aparecem aqui as mensagens a partir de agora.")}
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  {t("Próximo passo na Meta: cadastre uma forma de pagamento no WhatsApp Manager.")}
+                </p>
+              </div>
+            ) : (
+              <p className="mt-1 text-muted-foreground">
+                {t("Próximos passos na Meta: cadastre uma forma de pagamento no WhatsApp Manager. Se o número é novo, conclua o registro dele antes do primeiro envio.")}
+              </p>
+            )}
           </div>
         ) : null}
         {fase === "cancelado" ? (

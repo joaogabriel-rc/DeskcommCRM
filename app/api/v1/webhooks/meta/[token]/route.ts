@@ -35,6 +35,7 @@ import { lerEnvelopeMeta } from "@/lib/channels/meta/envelope";
 import { parseMetaWebhook, verificationChallenge, verifyMetaSignature } from "@/lib/channels/meta/webhook";
 import { statusUpdate } from "@/lib/channels/meta/status-update";
 import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
+import { ingestMetaEcho } from "@/lib/channels/meta/ingest-eco";
 import { metaSessionByWebhookToken } from "@/lib/channels/meta/session";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -141,6 +142,22 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
         // 2xx continua (a Meta re-entregaria em loop), mas a falha NÃO fica muda:
         // vai ao log estruturado e ao corpo da resposta.
         console.error("[meta.ingest] inbound não ingerido", {
+          status: r.status,
+          reason: r.status === "failed" ? r.reason : undefined,
+          external_id: e.externalId,
+          phone_number_id: e.phoneNumberId,
+        });
+      }
+      continue;
+    }
+
+    if (e.kind === "echo_message") {
+      // Eco do app WhatsApp Business (coexistência). Mesma regra de organização
+      // da recebida: ela vem do TOKEN DO PATH, e a WABA já foi conferida acima.
+      const r = await ingestMetaEcho(admin, e, { organizationId: session.organizationId });
+      desfechos.push(r.status);
+      if (r.status === "failed" || r.status === "no_session") {
+        logger.error("[meta.eco] eco do app Business não ingerido", {
           status: r.status,
           reason: r.status === "failed" ? r.reason : undefined,
           external_id: e.externalId,

@@ -7,14 +7,17 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/channels/meta/validate-credentials", () => ({ validateMetaCredentials: vi.fn() }));
+vi.mock("@/lib/channels/meta/validate-credentials", () => ({
+  validateMetaCredentials: vi.fn(),
+  consultarModoDoNumero: vi.fn(),
+}));
 vi.mock("@/lib/channels/meta/webhook-da-sessao", () => ({ registrarWebhookDaSessao: vi.fn() }));
 vi.mock("@/lib/webhooks/secrets", () => ({ encryptWebhookSecret: vi.fn() }));
 vi.mock("@/lib/channels/reactivate", () => ({ reactivateChannelSession: vi.fn() }));
 vi.mock("@/lib/logger", () => ({ logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 import { conectarCanalOficial } from "@/lib/channels/meta/conectar";
-import { validateMetaCredentials } from "@/lib/channels/meta/validate-credentials";
+import { consultarModoDoNumero, validateMetaCredentials } from "@/lib/channels/meta/validate-credentials";
 import { registrarWebhookDaSessao } from "@/lib/channels/meta/webhook-da-sessao";
 import { logger } from "@/lib/logger";
 import { encryptWebhookSecret } from "@/lib/webhooks/secrets";
@@ -87,6 +90,7 @@ beforeEach(() => {
     verifiedName: "Loja Teste",
     qualityRating: "GREEN",
   });
+  vi.mocked(consultarModoDoNumero).mockResolvedValue({ ok: true, isOnBizApp: false, platformType: "CLOUD_API" });
   vi.mocked(encryptWebhookSecret).mockResolvedValue("cifrado" as never);
   vi.mocked(registrarWebhookDaSessao).mockResolvedValue({ registrado: true, url: "u", erro: null, em: "e" });
 });
@@ -155,5 +159,73 @@ describe("conectarCanalOficial", () => {
     const { admin, escritas } = adminFalso();
     expect(await conectarCanalOficial({ ...ENTRADA, admin })).toEqual({ ok: false, motivo: "cifra_indisponivel" });
     expect(escritas).toHaveLength(0);
+  });
+
+  describe("o modo do número (migration 0417) — quem decide é a Meta", () => {
+    const escritaDoModo = (escritas: Escrita[]) =>
+      escritas.find((e) => e.tipo === "update" && ("meta_modo" in e.patch || "meta_onboarding_em" in e.patch));
+
+    it("is_on_biz_app=true grava coexistencia, com o onboarding, num update filtrado por organização", async () => {
+      vi.mocked(consultarModoDoNumero).mockResolvedValue({ ok: true, isOnBizApp: true, platformType: "CLOUD_API" });
+      const { admin, escritas } = adminFalso();
+      const r = await conectarCanalOficial({ ...ENTRADA, admin, onboarding: true });
+
+      expect(r).toMatchObject({ ok: true, modo: "coexistencia" });
+      expect(consultarModoDoNumero).toHaveBeenCalledWith({ phoneNumberId: ENTRADA.phoneNumberId, token: ENTRADA.token });
+      const escrita = escritaDoModo(escritas)!;
+      expect(escrita.patch.meta_modo).toBe("coexistencia");
+      expect(typeof escrita.patch.meta_onboarding_em).toBe("string");
+      expect(escrita.filtros).toEqual([
+        ["organization_id", "org-1"],
+        ["id", "sessao-1"],
+      ]);
+      // O modo não vai no insert: banco sem a 0417 continua conectando.
+      expect(escritas[0]!.patch).not.toHaveProperty("meta_modo");
+    });
+
+    it("is_on_biz_app=false grava cloud_api — a conexão normal", async () => {
+      const { admin, escritas } = adminFalso();
+      const r = await conectarCanalOficial({ ...ENTRADA, admin, onboarding: true });
+      expect(r).toMatchObject({ ok: true, modo: "cloud_api" });
+      expect(escritaDoModo(escritas)!.patch.meta_modo).toBe("cloud_api");
+    });
+
+    it("formulário manual (sem onboarding) grava o modo e não toca meta_onboarding_em", async () => {
+      const { admin, escritas } = adminFalso();
+      await conectarCanalOficial({ ...ENTRADA, admin });
+      expect(escritaDoModo(escritas)!.patch).toEqual({ meta_modo: "cloud_api" });
+    });
+
+    it("Meta sem resposta: conecta, não grava modo (não apaga o de antes) e avisa no log", async () => {
+      vi.mocked(consultarModoDoNumero).mockResolvedValue({ ok: false, motivo: "http_500" });
+      const { admin, escritas } = adminFalso();
+      const r = await conectarCanalOficial({ ...ENTRADA, admin });
+      expect(r).toMatchObject({ ok: true, modo: null });
+      expect(escritaDoModo(escritas)).toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("modo"), expect.any(Object));
+    });
+
+    it("consulta que LANÇA não derruba a conexão", async () => {
+      vi.mocked(consultarModoDoNumero).mockRejectedValue(new Error("boom"));
+      const { admin } = adminFalso();
+      expect(await conectarCanalOficial({ ...ENTRADA, admin, onboarding: true })).toMatchObject({ ok: true, modo: null });
+    });
+
+    it("banco sem a migration 0417: o modo não grava, a conexão continua", async () => {
+      const { admin } = adminFalso({ erroDaValidade: 'column "meta_modo" does not exist' });
+      const r = await conectarCanalOficial({ ...ENTRADA, admin, onboarding: true });
+      expect(r.ok).toBe(true);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("modo"),
+        expect.objectContaining({ schemaDesatualizado: true }),
+      );
+    });
+
+    it("credencial recusada nem pergunta o modo", async () => {
+      vi.mocked(validateMetaCredentials).mockResolvedValue({ ok: false, motivo: "x" });
+      const { admin } = adminFalso();
+      await conectarCanalOficial({ ...ENTRADA, admin });
+      expect(consultarModoDoNumero).not.toHaveBeenCalled();
+    });
   });
 });

@@ -10,6 +10,7 @@
 import { appDaMeta } from "@/lib/channels/meta/app";
 import { lerEnvelopeMeta } from "@/lib/channels/meta/envelope";
 import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
+import { ingestMetaEcho } from "@/lib/channels/meta/ingest-eco";
 import type { MetaWebhookSession } from "@/lib/channels/meta/session";
 import { parseMetaWebhook, verifyMetaSignature, type MetaWebhookEvent } from "@/lib/channels/meta/webhook";
 import { logger } from "@/lib/logger";
@@ -67,8 +68,8 @@ export async function lerEntregaDaMeta(
  * Processa UM evento para a sessão dona dele. Toda escrita leva o
  * `organization_id` da sessão — nunca do corpo.
  *
- * Devolve o desfecho da ingestão de mensagem recebida (vai para `outcomes` na
- * resposta), `"waba_divergente"` quando o evento não é desta sessão, e `null` para
+ * Devolve o desfecho da ingestão de mensagem recebida ou de eco do app Business
+ * (vai para `outcomes` na resposta), `"waba_divergente"` quando o evento não é desta sessão, e `null` para
  * os demais eventos, que não têm desfecho próprio.
  */
 export async function processarEventoDaMeta(
@@ -87,6 +88,22 @@ export async function processarEventoDaMeta(
     if (r.status === "failed" || r.status === "no_session") {
       // 2xx continua (a Meta re-entregaria em loop), mas a falha NÃO fica muda.
       logger.error("[meta.ingest] inbound não ingerido", {
+        status: r.status,
+        reason: r.status === "failed" ? r.reason : undefined,
+        external_id: e.externalId,
+        phone_number_id: e.phoneNumberId,
+        organization_id: sessao.organizationId,
+      });
+    }
+    return r.status;
+  }
+
+  if (e.kind === "echo_message") {
+    // O dono respondeu pelo app WhatsApp Business (coexistência): a linha entra
+    // como saída feita fora do CRM e a IA pausa nessa conversa.
+    const r = await ingestMetaEcho(admin, e, { organizationId: sessao.organizationId });
+    if (r.status === "failed" || r.status === "no_session") {
+      logger.error("[meta.eco] eco do app Business não ingerido", {
         status: r.status,
         reason: r.status === "failed" ? r.reason : undefined,
         external_id: e.externalId,
