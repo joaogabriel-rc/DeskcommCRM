@@ -192,6 +192,25 @@ const PARES: Array<{
     arquivo: "lib/channels/meta/modo-do-canal.ts",
     simbolo: "MODOS_DO_CANAL_OFICIAL",
   },
+  // Sincronização do app WhatsApp Business (0420) — preservação.
+  {
+    tabela: "meta_sincronizacoes",
+    coluna: "tipo",
+    arquivo: "lib/channels/meta/sincronizacao.ts",
+    simbolo: "TIPOS_DE_SINCRONIZACAO",
+  },
+  {
+    tabela: "meta_sincronizacoes",
+    coluna: "status",
+    arquivo: "lib/channels/meta/sincronizacao.ts",
+    simbolo: "ESTADOS_DA_SINCRONIZACAO",
+  },
+  {
+    tabela: "meta_sincronizacao_payloads",
+    coluna: "campo",
+    arquivo: "lib/channels/meta/sincronizacao.ts",
+    simbolo: "CAMPOS_DE_SINCRONIZACAO",
+  },
   {
     tabela: "messages",
     coluna: "sent_via",

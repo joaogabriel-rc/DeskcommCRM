@@ -40,6 +40,7 @@ import {
   type ErroDaMeta,
 } from "@/lib/channels/meta/cadastro-incorporado";
 import { conectarCanalOficial } from "@/lib/channels/meta/conectar";
+import { solicitarSincronizacaoDoApp } from "@/lib/channels/meta/sincronizacao";
 import {
   PREFIXO_DO_NONCE_DO_CADASTRO,
   verificarEstadoDoCadastro,
@@ -247,6 +248,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     webhookRegistrado: conexao.webhookRegistro?.registrado ?? null,
     tokenExpira: inspecao.expiraEm !== null,
   });
+
+  // Coexistência: a Meta só entrega histórico e contatos do aplicativo se forem
+  // PEDIDOS em até 24h do onboarding — pedir agora é o que evita perder o prazo.
+  // Falha aqui não desfaz a conexão: o botão da página do canal tenta de novo.
+  if (conexao.modo === "coexistencia") {
+    try {
+      const sincronizacao = await solicitarSincronizacaoDoApp(admin, { organizationId, requestId });
+      void audit({
+        action: "channel.app_sync_requested",
+        actorUserId: userId,
+        organizationId,
+        resourceType: "channel_session",
+        resourceId: conexao.channelSessionId,
+        requestId,
+        metadata: sincronizacao.ok
+          ? { via: "cadastro_incorporado", contatos: sincronizacao.contatos, historico: sincronizacao.historico }
+          : { via: "cadastro_incorporado", motivo: sincronizacao.motivo },
+      });
+    } catch (err) {
+      logger.warn("[meta.cadastro] pedido de sincronização do app falhou — a conexão segue", {
+        requestId,
+        organizationId,
+        erro: err instanceof Error ? err.message.slice(0, 200) : "erro",
+      });
+    }
+  }
 
   const webhook = conexao.webhookRegistro;
   return ok({

@@ -7342,6 +7342,96 @@ export type Database = {
           },
         ]
       }
+      meta_sincronizacao_payloads: {
+        Row: {
+          campo: string
+          channel_session_id: string
+          chunk_order: number | null
+          fase: number | null
+          id: string
+          organization_id: string
+          payload: Json
+          payload_hash: string
+          processado_em: string | null
+          progresso: number | null
+          recebido_em: string
+        }
+        Insert: {
+          campo: string
+          channel_session_id: string
+          chunk_order?: number | null
+          fase?: number | null
+          id?: string
+          organization_id: string
+          payload: Json
+          payload_hash: string
+          processado_em?: string | null
+          progresso?: number | null
+          recebido_em?: string
+        }
+        Update: {
+          campo?: string
+          channel_session_id?: string
+          chunk_order?: number | null
+          fase?: number | null
+          id?: string
+          organization_id?: string
+          payload?: Json
+          payload_hash?: string
+          processado_em?: string | null
+          progresso?: number | null
+          recebido_em?: string
+        }
+        Relationships: []
+      }
+      meta_sincronizacoes: {
+        Row: {
+          channel_session_id: string
+          created_at: string
+          erro: string | null
+          id: string
+          onboarding_em: string
+          organization_id: string
+          recebido_em: string | null
+          request_id: string | null
+          solicitada_em: string | null
+          status: string
+          tentativa_em: string | null
+          tipo: string
+          updated_at: string
+        }
+        Insert: {
+          channel_session_id: string
+          created_at?: string
+          erro?: string | null
+          id?: string
+          onboarding_em: string
+          organization_id: string
+          recebido_em?: string | null
+          request_id?: string | null
+          solicitada_em?: string | null
+          status?: string
+          tentativa_em?: string | null
+          tipo: string
+          updated_at?: string
+        }
+        Update: {
+          channel_session_id?: string
+          created_at?: string
+          erro?: string | null
+          id?: string
+          onboarding_em?: string
+          organization_id?: string
+          recebido_em?: string | null
+          request_id?: string | null
+          solicitada_em?: string | null
+          status?: string
+          tentativa_em?: string | null
+          tipo?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       meta_templates: {
         Row: {
           category: string | null

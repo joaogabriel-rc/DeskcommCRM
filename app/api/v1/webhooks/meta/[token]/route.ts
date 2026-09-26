@@ -36,6 +36,7 @@ import { parseMetaWebhook, verificationChallenge, verifyMetaSignature } from "@/
 import { statusUpdate } from "@/lib/channels/meta/status-update";
 import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { ingestMetaEcho } from "@/lib/channels/meta/ingest-eco";
+import { guardarPayloadDeSincronizacao } from "@/lib/channels/meta/sincronizacao";
 import { metaSessionByWebhookToken } from "@/lib/channels/meta/session";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -164,6 +165,13 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
           phone_number_id: e.phoneNumberId,
         });
       }
+      continue;
+    }
+
+    if (e.kind === "sync_payload") {
+      // Sincronização do app (coexistência): só guarda o payload bruto, na
+      // organização do TOKEN. Falha do banco LANÇA — a Meta reentrega.
+      desfechos.push(await guardarPayloadDeSincronizacao(admin, e, { organizationId: session.organizationId }));
       continue;
     }
 

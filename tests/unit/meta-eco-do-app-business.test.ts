@@ -110,12 +110,12 @@ describe("parseMetaWebhook — smb_message_echoes", () => {
     expect(parseMetaWebhook(corpo(eco(WABA_A, NUM_A, "", {})))).toEqual([]);
   });
 
-  it("history e smb_app_state_sync seguem ignorados nesta fase", () => {
+  it("history e smb_app_state_sync nunca viram mensagem nem eco — só payload de sincronização (0420)", () => {
     const outros = ["history", "smb_app_state_sync"].map((field) => ({
       id: WABA_A,
       changes: [{ field, value: { metadata: { phone_number_id: NUM_A }, history: [], state_sync: [] } }],
     }));
-    expect(parseMetaWebhook(corpo(...outros))).toEqual([]);
+    expect(parseMetaWebhook(corpo(...outros)).map((e) => e.kind)).toEqual(["sync_payload", "sync_payload"]);
   });
 });
 

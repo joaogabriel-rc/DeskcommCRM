@@ -11,6 +11,7 @@ import { appDaMeta } from "@/lib/channels/meta/app";
 import { lerEnvelopeMeta } from "@/lib/channels/meta/envelope";
 import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { ingestMetaEcho } from "@/lib/channels/meta/ingest-eco";
+import { guardarPayloadDeSincronizacao } from "@/lib/channels/meta/sincronizacao";
 import type { MetaWebhookSession } from "@/lib/channels/meta/session";
 import { parseMetaWebhook, verifyMetaSignature, type MetaWebhookEvent } from "@/lib/channels/meta/webhook";
 import { logger } from "@/lib/logger";
@@ -112,6 +113,12 @@ export async function processarEventoDaMeta(
       });
     }
     return r.status;
+  }
+
+  if (e.kind === "sync_payload") {
+    // Sincronização do app (coexistência): só GUARDA o payload bruto. Nada vira
+    // mensagem, conversa ou contato — ver `lib/channels/meta/sincronizacao.ts`.
+    return guardarPayloadDeSincronizacao(admin, e, { organizationId: sessao.organizationId });
   }
 
   if (e.kind === "template_status") {

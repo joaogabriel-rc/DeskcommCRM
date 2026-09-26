@@ -18,6 +18,7 @@ import { useT } from "@/hooks/i18n/useT";
 import { BotaoCadastroIncorporado } from "./BotaoCadastroIncorporado";
 import { ChannelAiAccess } from "./ChannelAiAccess";
 import { ParaIntegrar } from "./ParaIntegrar";
+import { SincronizacaoDoApp } from "./SincronizacaoDoApp";
 
 /** Campo somente-leitura com botão de copiar — o que o operador cola na Meta. */
 function ParaColar({
@@ -114,6 +115,7 @@ export function CanalOficialClient() {
           </p>
         </Card>
       ) : null}
+      {estado?.connected ? <SincronizacaoDoApp conectado /> : null}
       {estado?.channel_session_id && <ChannelAiAccess channelId={estado.channel_session_id} />}
 
       {estado?.webhook ? (

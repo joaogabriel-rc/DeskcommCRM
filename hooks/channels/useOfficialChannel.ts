@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { apiClient } from "@/lib/api/client";
 import type { ModoDoCanalOficial } from "@/lib/channels/meta/modo-do-canal";
+import type { DesfechoDoTipo, SituacaoDaSincronizacao } from "@/lib/channels/meta/sincronizacao";
 
 export interface OfficialChannelState {
   /**
@@ -160,6 +161,35 @@ export function useConcluirCadastroIncorporado() {
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["official-channel"] });
+    },
+  });
+}
+
+/**
+ * Estado da sincronização do app WhatsApp Business (coexistência, 0420): prazo de
+ * 24h e, por tipo, se foi pedido, quando chegou e o erro.
+ */
+export function useSincronizacaoDoApp(habilitado: boolean) {
+  return useQuery({
+    queryKey: ["official-channel", "sincronizacao"],
+    queryFn: async () =>
+      apiClient.get<{ data: SituacaoDaSincronizacao }>("/api/v1/channels/official/sincronizacao"),
+    enabled: habilitado,
+    staleTime: 15_000,
+  });
+}
+
+/** Pede (ou tenta de novo) a sincronização. O desfecho de cada tipo vem no corpo, e a tela o mostra. */
+export function useSolicitarSincronizacaoDoApp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      apiClient.post<{
+        data: { contatos: DesfechoDoTipo; historico: DesfechoDoTipo; situacao: SituacaoDaSincronizacao };
+      }>("/api/v1/channels/official/sincronizacao", {}),
+    onError: showApiError,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["official-channel", "sincronizacao"] });
     },
   });
 }

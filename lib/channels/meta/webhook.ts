@@ -174,7 +174,31 @@ export interface EchoMessageEvent {
   media: InboundMessageEvent["media"];
 }
 
-export type MetaWebhookEvent = TemplateStatusEvent | MessageStatusEvent | InboundMessageEvent | EchoMessageEvent;
+/**
+ * Webhook de SINCRONIZAÇÃO do app WhatsApp Business (coexistência): `history`
+ * (histórico de conversas, em pedaços, ou a recusa) e `smb_app_state_sync`
+ * (agenda de contatos). Nesta fase o `value` segue BRUTO para ser guardado —
+ * nenhum campo de dentro dele vira mensagem, conversa ou contato.
+ *
+ * ⚠️ O `history` também chega com `messages[]` (o id da mídia de um pedaço já
+ * entregue). É por isso que ele NUNCA passa pelo ramo de mensagem recebida: lá
+ * a condição é `field === "messages"`, e aqui é o campo que decide.
+ */
+export interface SyncPayloadEvent {
+  kind: "sync_payload";
+  campo: "history" | "smb_app_state_sync";
+  wabaId: string;
+  /** O número dono do payload — `value.metadata.phone_number_id`. */
+  phoneNumberId: string;
+  value: Record<string, unknown>;
+}
+
+export type MetaWebhookEvent =
+  | TemplateStatusEvent
+  | MessageStatusEvent
+  | InboundMessageEvent
+  | EchoMessageEvent
+  | SyncPayloadEvent;
 
 /**
  * O formato do fio mora em `./envelope.ts`, onde é um schema Zod — e o tipo
@@ -367,6 +391,21 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
             media: corpo.media,
           });
         }
+        continue;
+      }
+
+      // Sincronização do app (coexistência): o `value` segue bruto. Sem o número
+      // dono, o payload não tem a quem pertencer e fica de fora aqui mesmo.
+      if (change.field === "history" || change.field === "smb_app_state_sync") {
+        const numero = str(((v.metadata ?? {}) as Record<string, unknown>).phone_number_id);
+        if (!numero) continue;
+        out.push({
+          kind: "sync_payload",
+          campo: change.field,
+          wabaId,
+          phoneNumberId: numero,
+          value: v as Record<string, unknown>,
+        });
         continue;
       }
 

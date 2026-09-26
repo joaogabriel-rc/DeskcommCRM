@@ -54,7 +54,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 }
 
 function numeroDo(e: MetaWebhookEvent): string | null {
-  if (e.kind === "inbound_message" || e.kind === "echo_message") return e.phoneNumberId || null;
+  if (e.kind === "inbound_message" || e.kind === "echo_message" || e.kind === "sync_payload") {
+    return e.phoneNumberId || null;
+  }
   if (e.kind === "message_status") return e.phoneNumberId ?? null;
   return null;
 }
@@ -117,7 +119,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
 
       const desfecho = await processarEventoDaMeta(admin, e, dono.sessao, agora);
-      if (desfecho && (e.kind === "inbound_message" || e.kind === "echo_message" || desfecho === "waba_divergente")) {
+      if (
+        desfecho &&
+        (e.kind === "inbound_message" ||
+          e.kind === "echo_message" ||
+          e.kind === "sync_payload" ||
+          desfecho === "waba_divergente")
+      ) {
         desfechos.push(desfecho);
       }
     }

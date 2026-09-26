@@ -39,6 +39,7 @@ vi.mock("@/lib/logger", () => ({
   logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 vi.mock("@/lib/channels/meta/conectar", () => ({ conectarCanalOficial: vi.fn() }));
+vi.mock("@/lib/channels/meta/sincronizacao", () => ({ solicitarSincronizacaoDoApp: vi.fn() }));
 vi.mock("@/lib/channels/meta/cadastro-incorporado", async (importOriginal) => {
   const real = await importOriginal<typeof ModuloDoCadastro>();
   return {
@@ -61,6 +62,7 @@ import {
   trocarCodigoPorToken,
 } from "@/lib/channels/meta/cadastro-incorporado";
 import { conectarCanalOficial } from "@/lib/channels/meta/conectar";
+import { solicitarSincronizacaoDoApp } from "@/lib/channels/meta/sincronizacao";
 import { emitirEstadoDoCadastro } from "@/lib/channels/meta/estado-do-cadastro";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -139,6 +141,15 @@ beforeEach(() => {
   vi.mocked(descobrirCanal).mockImplementation(async () => {
     ordem.push("descoberta");
     return { ok: true, wabaId: WABA_DA_META, phoneNumberId: NUMERO_DA_META };
+  });
+  vi.mocked(solicitarSincronizacaoDoApp).mockImplementation(async () => {
+    ordem.push("sincronizacao");
+    return {
+      ok: true,
+      contatos: "solicitada",
+      historico: "solicitada",
+      situacao: { disponivel: false, motivo: "sem_canal_oficial" },
+    };
   });
   vi.mocked(conectarCanalOficial).mockImplementation(async () => {
     ordem.push("conectar");
@@ -354,7 +365,8 @@ describe("concluir o Cadastro Incorporado", () => {
       const body = (await res.json()) as { data: Record<string, unknown> };
 
       expect(res.status).toBe(200);
-      expect(ordem).toEqual(["insert:calendar_oauth_nonces", "troca", "inspecao", "descoberta", "conectar"]);
+      // Em coexistência, o pedido de histórico e contatos (0420) sai DEPOIS da conexão.
+      expect(ordem).toEqual(["insert:calendar_oauth_nonces", "troca", "inspecao", "descoberta", "conectar", "sincronizacao"]);
       expect(vi.mocked(inspecionarToken).mock.calls[0]![0]).toBe(TOKEN);
       // Quem vai para a persistência é o que a Meta confirmou, e a organização é a da sessão.
       expect(vi.mocked(conectarCanalOficial).mock.calls[0]![0]).toMatchObject({
@@ -437,6 +449,52 @@ describe("concluir o Cadastro Incorporado", () => {
       const res = await concluir(pedido(corpoValido({ evento: "FINISH_OBO_MIGRATION" })));
       const body = (await res.json()) as { error: { message: string } };
       expect(body.error.message).not.toContain("número dedicado");
+    });
+  });
+
+  describe("coexistência: o pedido de histórico e contatos sai ao concluir (0420)", () => {
+    function conectaEmCoexistencia() {
+      vi.mocked(conectarCanalOficial).mockImplementation(async () => {
+        ordem.push("conectar");
+        return {
+          ok: true,
+          channelSessionId: "sessao-1",
+          displayName: "Loja Teste",
+          phoneNumber: "+5531900000000",
+          webhookRegistro: null,
+          modo: "coexistencia",
+        };
+      });
+    }
+
+    it("modo coexistencia pede a sincronização DEPOIS de conectar, na organização da sessão, e audita", async () => {
+      conectaEmCoexistencia();
+      const res = await concluir(pedido(corpoValido({ evento: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" })));
+      expect(res.status).toBe(200);
+      expect(ordem.slice(-2)).toEqual(["conectar", "sincronizacao"]);
+      expect(vi.mocked(solicitarSincronizacaoDoApp).mock.calls[0]![1]).toMatchObject({ organizationId: ORG });
+      expect(audit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "channel.app_sync_requested",
+          organizationId: ORG,
+          metadata: expect.objectContaining({ contatos: "solicitada", historico: "solicitada" }),
+        }),
+      );
+    });
+
+    it("modo cloud_api NÃO pede sincronização", async () => {
+      const res = await concluir(pedido(corpoValido()));
+      expect(res.status).toBe(200);
+      expect(solicitarSincronizacaoDoApp).not.toHaveBeenCalled();
+    });
+
+    it("pedido que LANÇA não desfaz a conexão: 200 e aviso no log", async () => {
+      conectaEmCoexistencia();
+      vi.mocked(solicitarSincronizacaoDoApp).mockRejectedValue(new Error("banco fora"));
+      const res = await concluir(pedido(corpoValido({ evento: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" })));
+      expect(res.status).toBe(200);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("sincronização"), expect.any(Object));
+      nadaVazou(await res.json());
     });
   });
 });

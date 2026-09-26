@@ -888,6 +888,9 @@ export const AUDIT_ACTIONS = [
   "registration.requested",
   "registration.approved",
   "registration.rejected",
+  // Pedido de sincronização do app WhatsApp Business (coexistência, migration
+  // 0420): contatos e histórico, com o desfecho de cada tipo no metadata.
+  "channel.app_sync_requested",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
