@@ -26,7 +26,7 @@
  * e a falha é um 401 calado que ninguém liga a configuração. A precedência, o TTL
  * e esse motivo estão escritos em `lib/channels/meta/app.ts`.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { fail } from "@/lib/api/wrappers";
@@ -73,14 +73,37 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
   const { token } = await ctx.params;
 
   const session = await metaSessionByWebhookToken(token);
-  if (!session) return fail("not_found", "unknown webhook token", 404, { requestId });
+  if (!session) {
+    // O token nunca vai ao log: o prefixo do hash basta para comparar com o
+    // token atual do canal (entrega num token antigo) sem expô-lo.
+    logger.warn("[meta.webhook] entrega recusada: token desconhecido", {
+      request_id: requestId,
+      rota: "token",
+      status: 404,
+      token_sha256_8: createHash("sha256").update(token, "utf8").digest("hex").slice(0, 8),
+      content_length: req.headers.get("content-length"),
+    });
+    return fail("not_found", "unknown webhook token", 404, { requestId });
+  }
 
   const rawBody = await req.text();
   // Do mesmo lugar que o handshake: BANCO primeiro, `.env` como piso (0257). Sem
   // segredo nenhum configurado a verificação devolve `false` e a entrega morre em
   // 401 — que é o desfecho de hoje, e não um 500.
   const { appSecret } = await appDaMeta();
-  if (!verifyMetaSignature(rawBody, req.headers.get("x-hub-signature-256"), appSecret ?? "")) {
+  const assinatura = req.headers.get("x-hub-signature-256");
+  if (!verifyMetaSignature(rawBody, assinatura, appSecret ?? "")) {
+    // Só identificadores: nem a assinatura, nem o corpo (não autenticado).
+    logger.warn("[meta.webhook] entrega recusada: assinatura inválida", {
+      request_id: requestId,
+      rota: "token",
+      status: 401,
+      organization_id: session.organizationId,
+      channel_session_id: session.id,
+      assinatura_presente: Boolean(assinatura),
+      app_secret_configurado: Boolean(appSecret),
+      content_length: Buffer.byteLength(rawBody, "utf8"),
+    });
     return fail("unauthorized", "invalid_signature", 401, { requestId });
   }
 
@@ -100,6 +123,14 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
   const leitura = lerEnvelopeMeta(rawBody);
   if (!leitura.ok) {
     if (leitura.motivo === "json_invalido") {
+      logger.warn("[meta.webhook] entrega recusada: JSON inválido", {
+        request_id: requestId,
+        rota: "token",
+        status: 400,
+        organization_id: session.organizationId,
+        channel_session_id: session.id,
+        content_length: Buffer.byteLength(rawBody, "utf8"),
+      });
       return fail("invalid_request", "invalid_json", 400, { requestId });
     }
     logger.error("[meta.webhook] payload fora do contrato do canal", {
@@ -126,7 +157,20 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
   for (const e of eventos) {
     // O evento chega carimbado com a WABA; se não for a desta sessão, ignoramos.
     // Confiar no `entry.id` para escolher a org seria aceitar o corpo como fonte.
-    if (session.wabaId && e.wabaId && e.wabaId !== session.wabaId) continue;
+    if (session.wabaId && e.wabaId && e.wabaId !== session.wabaId) {
+      logger.warn("[meta.webhook] evento descartado: WABA do evento difere da do canal", {
+        request_id: requestId,
+        rota: "token",
+        motivo: "waba_divergente",
+        kind: e.kind,
+        ...(e.kind === "sync_payload" ? { campo: e.campo } : {}),
+        waba_do_evento: e.wabaId,
+        waba_do_canal: session.wabaId,
+        organization_id: session.organizationId,
+        channel_session_id: session.id,
+      });
+      continue;
+    }
 
     if (e.kind === "inbound_message") {
       // A metade que faltava: mensagem do contato vira linha no inbox, move lead,

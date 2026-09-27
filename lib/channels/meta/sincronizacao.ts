@@ -395,7 +395,15 @@ export async function guardarPayloadDeSincronizacao(
   dono: { organizationId: string },
 ): Promise<DesfechoDaGuarda> {
   const sessao = await sessionByPhoneNumberId(admin, dono.organizationId, e.phoneNumberId);
-  if (!sessao) return "no_session";
+  if (!sessao) {
+    logger.warn("[meta.sincronizacao] payload descartado: número sem sessão na organização", {
+      motivo: "no_session",
+      campo: e.campo,
+      phone_number_id: e.phoneNumberId,
+      organization_id: dono.organizationId,
+    });
+    return "no_session";
+  }
 
   const bruto = JSON.stringify(e.value);
   const hash = createHash("sha256").update(bruto, "utf8").digest("hex");
@@ -412,9 +420,29 @@ export async function guardarPayloadDeSincronizacao(
     progresso: meta?.progresso ?? null,
   });
   if (error) {
-    if (error.code === "23505") return "duplicate";
+    if (error.code === "23505") {
+      logger.info("[meta.sincronizacao] payload repetido (reentrega) — já estava guardado", {
+        motivo: "duplicate",
+        campo: e.campo,
+        organization_id: sessao.organization_id,
+        channel_session_id: sessao.id,
+        payload_hash_12: hash.slice(0, 12),
+      });
+      return "duplicate";
+    }
     throw new Error(`meta_sincronizacao_payloads: ${error.message}`);
   }
+
+  // A evidência positiva: o payload chegou e está persistido.
+  logger.info("[meta.sincronizacao] payload guardado", {
+    campo: e.campo,
+    organization_id: sessao.organization_id,
+    channel_session_id: sessao.id,
+    payload_hash_12: hash.slice(0, 12),
+    fase: meta?.fase ?? null,
+    chunk_order: meta?.chunkOrder ?? null,
+    progresso: meta?.progresso ?? null,
+  });
 
   // O estado a atualizar é o do onboarding ATUAL do canal — o que chega agora
   // responde ao pedido desta janela, nunca ao de uma conexão anterior. Sem

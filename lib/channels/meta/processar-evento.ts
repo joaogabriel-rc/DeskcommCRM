@@ -41,12 +41,27 @@ export async function lerEntregaDaMeta(
 ): Promise<LeituraDaEntrega> {
   const { appSecret } = await appDaMeta();
   if (!verifyMetaSignature(rawBody, assinatura, appSecret ?? "")) {
+    // Só identificadores: nem a assinatura, nem o corpo (não autenticado).
+    logger.warn("[meta.webhook] entrega recusada: assinatura inválida", {
+      request_id: requestId,
+      rota: "universal",
+      status: 401,
+      assinatura_presente: Boolean(assinatura),
+      app_secret_configurado: Boolean(appSecret),
+      content_length: Buffer.byteLength(rawBody, "utf8"),
+    });
     return { ok: false, status: 401, codigo: "unauthorized", mensagem: "invalid_signature" };
   }
 
   const leitura = lerEnvelopeMeta(rawBody);
   if (!leitura.ok) {
     if (leitura.motivo === "json_invalido") {
+      logger.warn("[meta.webhook] entrega recusada: JSON inválido", {
+        request_id: requestId,
+        rota: "universal",
+        status: 400,
+        content_length: Buffer.byteLength(rawBody, "utf8"),
+      });
       return { ok: false, status: 400, codigo: "invalid_request", mensagem: "invalid_json" };
     }
     logger.error("[meta.webhook] payload fora do contrato do canal", {
@@ -80,7 +95,19 @@ export async function processarEventoDaMeta(
   agora: string,
 ): Promise<string | null> {
   // O evento chega carimbado com a WABA; se não for a desta sessão, não é dela.
-  if (sessao.wabaId && e.wabaId && e.wabaId !== sessao.wabaId) return "waba_divergente";
+  if (sessao.wabaId && e.wabaId && e.wabaId !== sessao.wabaId) {
+    logger.warn("[meta.webhook] evento descartado: WABA do evento difere da do canal", {
+      rota: "universal",
+      motivo: "waba_divergente",
+      kind: e.kind,
+      ...(e.kind === "sync_payload" ? { campo: e.campo } : {}),
+      waba_do_evento: e.wabaId,
+      waba_do_canal: sessao.wabaId,
+      organization_id: sessao.organizationId,
+      channel_session_id: sessao.id,
+    });
+    return "waba_divergente";
+  }
 
   if (e.kind === "inbound_message") {
     // Mensagem do contato vira linha no inbox, move lead, acorda o agente e

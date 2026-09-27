@@ -8,6 +8,31 @@
 {$DOMAIN} {
 	encode gzip
 
+	# Log de acesso SÓ dos webhooks da Meta — para distinguir "a Meta não chegou"
+	# de "chegou e levou 4xx/5xx", que o app sozinho não enxerga (um 401 de
+	# assinatura acontece antes de qualquer processamento). Nada de header (a
+	# assinatura mora lá), nem o token do caminho, nem a query (o GET de
+	# verificação traz o `hub.verify_token` nela).
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				request>tls delete
+				request>remote_port delete
+				resp_headers delete
+				user_id delete
+				request>uri multi_regexp {
+					regexp "^(/api/v1/webhooks/meta)/[^/?]+" "${1}/<token>"
+					regexp "\?.*$" "?<query>"
+				}
+			}
+		}
+	}
+	@fora_dos_webhooks_da_meta not path /api/v1/webhooks/meta /api/v1/webhooks/meta/*
+	log_skip @fora_dos_webhooks_da_meta
+
 	# `route` é obrigatório aqui: fora dele o Caddy reordena as diretivas pela
 	# ordem padrão dele, na qual `respond` vem DEPOIS de `reverse_proxy` — o
 	# catch-all atendia primeiro e o 403 abaixo nunca era alcançado (medido: o

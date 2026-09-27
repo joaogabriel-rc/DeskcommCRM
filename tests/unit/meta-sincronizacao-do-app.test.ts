@@ -673,3 +673,153 @@ describe("rotas de webhook — o payload de sincronização chega só à organiz
     expect(bancoDaRota.tabelas.meta_sincronizacao_payloads).toHaveLength(0);
   });
 });
+
+// ─── Observabilidade ────────────────────────────────────────────────────────
+//
+// Cada recusa (400/401/404) e cada descarte com 200 no caminho da sincronização
+// deixa UMA linha de log com o motivo — e nada muda no status nem no banco. O
+// que não pode ir ao log: token do caminho, App Secret, assinatura, payload.
+
+describe("observabilidade — recusas e descartes deixam rastro, sem segredo e sem payload", () => {
+  const URL_UNIVERSAL = "https://crm.exemplo.com/api/v1/webhooks/meta";
+  const TOKEN_DO_PATH = "token-de-teste";
+  const URL_TOKEN = `https://crm.exemplo.com/api/v1/webhooks/meta/${TOKEN_DO_PATH}`;
+  const ctx = { params: Promise.resolve({ token: TOKEN_DO_PATH }) } as never;
+
+  const logsDe = (nivel: "warn" | "info") => vi.mocked(logger[nivel]).mock.calls;
+  const mensagens = (nivel: "warn" | "info") => logsDe(nivel).map((c) => c[0]);
+  const contexto = (nivel: "warn" | "info", trecho: string) =>
+    logsDe(nivel).find((c) => String(c[0]).includes(trecho))?.[1] as Record<string, unknown> | undefined;
+
+  /** Nada sensível em NENHUM log emitido pelo teste. */
+  function semVazamento(...proibidos: string[]) {
+    const tudo = JSON.stringify([...logsDe("warn"), ...logsDe("info"), ...vi.mocked(logger.error).mock.calls]);
+    for (const p of [SEGREDO, TOKEN_DO_PATH, "Pablo Morales", "16505551234", ...proibidos]) {
+      expect(tudo).not.toContain(p);
+    }
+  }
+
+  function bruto(url: string, texto: string, assinatura?: string): NextRequest {
+    return new NextRequest(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-hub-signature-256": assinatura ?? assinar(texto) },
+      body: texto,
+    });
+  }
+
+  beforeEach(() => {
+    bancoDaRota = bancoComSessoes();
+    sessaoDoToken = { id: "s-a", organizationId: ORG_A, wabaId: WABA_A };
+  });
+
+  it("universal: 401 continua 401 e registra o motivo", async () => {
+    const { POST } = await import("@/app/api/v1/webhooks/meta/route");
+    const res = await POST(entrega(URL_UNIVERSAL, envelope(change(WABA_A, "history", VALOR_HISTORICO)), "sha256=00ff"));
+    expect(res.status).toBe(401);
+    expect(contexto("warn", "assinatura inválida")).toMatchObject({ rota: "universal", status: 401, assinatura_presente: true, app_secret_configurado: true });
+    expect(bancoDaRota.tabelas.meta_sincronizacao_payloads).toHaveLength(0);
+    semVazamento("sha256=00ff");
+  });
+
+  it("universal: JSON inválido continua 400 e registra o motivo", async () => {
+    const { POST } = await import("@/app/api/v1/webhooks/meta/route");
+    const res = await POST(bruto(URL_UNIVERSAL, "{nao-e-json"));
+    expect(res.status).toBe(400);
+    expect(contexto("warn", "JSON inválido")).toMatchObject({ rota: "universal", status: 400 });
+    semVazamento("nao-e-json");
+  });
+
+  it("universal: WABA divergente continua 200 sem gravar, e registra o descarte", async () => {
+    const { POST } = await import("@/app/api/v1/webhooks/meta/route");
+    const res = await POST(entrega(URL_UNIVERSAL, envelope(change(WABA_B, "history", VALOR_HISTORICO))));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { outcomes: string[] }).outcomes).toEqual(["waba_divergente"]);
+    expect(contexto("warn", "WABA do evento difere")).toMatchObject({
+      rota: "universal",
+      motivo: "waba_divergente",
+      campo: "history",
+      waba_do_evento: WABA_B,
+      waba_do_canal: WABA_A,
+    });
+    expect(bancoDaRota.tabelas.meta_sincronizacao_payloads).toHaveLength(0);
+    semVazamento();
+  });
+
+  it("token: 404 continua 404 e registra só o prefixo do hash do token", async () => {
+    sessaoDoToken = null;
+    const { POST } = await import("@/app/api/v1/webhooks/meta/[token]/route");
+    const res = await POST(entrega(URL_TOKEN, envelope(change(WABA_A, "history", VALOR_HISTORICO))), ctx);
+    expect(res.status).toBe(404);
+    const c = contexto("warn", "token desconhecido");
+    expect(c).toMatchObject({ rota: "token", status: 404 });
+    expect(String(c?.token_sha256_8)).toMatch(/^[0-9a-f]{8}$/);
+    semVazamento();
+  });
+
+  it("token: 401 continua 401 e registra o motivo", async () => {
+    const { POST } = await import("@/app/api/v1/webhooks/meta/[token]/route");
+    const res = await POST(entrega(URL_TOKEN, envelope(change(WABA_A, "history", VALOR_HISTORICO)), "sha256=00ff"), ctx);
+    expect(res.status).toBe(401);
+    expect(contexto("warn", "assinatura inválida")).toMatchObject({ rota: "token", status: 401, organization_id: ORG_A, channel_session_id: "s-a" });
+    semVazamento("sha256=00ff");
+  });
+
+  it("token: JSON inválido continua 400 e registra o motivo", async () => {
+    const { POST } = await import("@/app/api/v1/webhooks/meta/[token]/route");
+    const res = await POST(bruto(URL_TOKEN, "{nao-e-json"), ctx);
+    expect(res.status).toBe(400);
+    expect(contexto("warn", "JSON inválido")).toMatchObject({ rota: "token", status: 400 });
+    semVazamento("nao-e-json");
+  });
+
+  it("token: WABA divergente continua 200 sem gravar, e registra o descarte", async () => {
+    const { POST } = await import("@/app/api/v1/webhooks/meta/[token]/route");
+    const res = await POST(entrega(URL_TOKEN, envelope(change(WABA_B, "smb_app_state_sync", VALOR_CONTATOS))), ctx);
+    expect(res.status).toBe(200);
+    expect(contexto("warn", "WABA do evento difere")).toMatchObject({ rota: "token", motivo: "waba_divergente", campo: "smb_app_state_sync" });
+    expect(bancoDaRota.tabelas.meta_sincronizacao_payloads).toHaveLength(0);
+    semVazamento();
+  });
+
+  it("token: entrega aceita registra o payload guardado com fase/pedaço/progresso", async () => {
+    const { POST } = await import("@/app/api/v1/webhooks/meta/[token]/route");
+    const res = await POST(entrega(URL_TOKEN, envelope(change(WABA_A, "history", VALOR_HISTORICO))), ctx);
+    expect(res.status).toBe(200);
+    expect(contexto("info", "payload guardado")).toMatchObject({
+      campo: "history",
+      organization_id: ORG_A,
+      channel_session_id: "s-a",
+      fase: 0,
+      chunk_order: 1,
+      progresso: 55,
+    });
+    semVazamento();
+  });
+
+  it("parser: sincronização sem phone_number_id é descartada como antes, agora com log", () => {
+    const { metadata: _sem, ...semNumero } = VALOR_HISTORICO;
+    expect(parseMetaWebhook(envelope(change(WABA_A, "history", semNumero)))).toEqual([]);
+    expect(contexto("warn", "sem phone_number_id")).toMatchObject({ motivo: "sem_phone_number_id", campo: "history", waba_id: WABA_A });
+    semVazamento();
+  });
+
+  it("parser: objeto que não é whatsapp_business_account devolve vazio como antes, agora com log", () => {
+    expect(parseMetaWebhook({ object: "page", entry: [] } as MetaWebhookEnvelope)).toEqual([]);
+    expect(contexto("warn", "objeto não é whatsapp_business_account")).toMatchObject({ motivo: "objeto_inesperado", objeto: "page" });
+  });
+
+  it("guarda: no_session e duplicate mantêm o desfecho e registram o motivo", async () => {
+    const banco = bancoComSessoes();
+    expect(await guardarPayloadDeSincronizacao(banco.admin, { campo: "history", phoneNumberId: NUM_B, value: VALOR_HISTORICO }, { organizationId: ORG_A })).toBe("no_session");
+    expect(contexto("warn", "número sem sessão")).toMatchObject({ motivo: "no_session", campo: "history", phone_number_id: NUM_B, organization_id: ORG_A });
+
+    const e = { campo: "smb_app_state_sync" as const, phoneNumberId: NUM_A, value: VALOR_CONTATOS };
+    expect(await guardarPayloadDeSincronizacao(banco.admin, e, { organizationId: ORG_A })).toBe("guardado");
+    expect(await guardarPayloadDeSincronizacao(banco.admin, structuredClone(e), { organizationId: ORG_A })).toBe("duplicate");
+    expect(mensagens("info").filter((m) => String(m).includes("payload guardado"))).toHaveLength(1);
+    const dup = contexto("info", "payload repetido");
+    expect(dup).toMatchObject({ motivo: "duplicate", campo: "smb_app_state_sync" });
+    expect(String(dup?.payload_hash_12)).toMatch(/^[0-9a-f]{12}$/);
+    semVazamento();
+  });
+});

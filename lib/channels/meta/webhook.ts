@@ -18,6 +18,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { parseMetaInboundContact } from "@/lib/channels/meta/contact-card";
+import { logger } from "@/lib/logger";
 import type { SharedContact } from "@/lib/messaging/contact-card";
 import type { MetaWebhookEnvelope } from "./envelope";
 
@@ -312,7 +313,14 @@ function corpoDaMensagem(raw: Record<string, unknown>): {
 
 export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEvent[] {
   const out: MetaWebhookEvent[] = [];
-  if (envelope?.object !== "whatsapp_business_account") return out;
+  if (envelope?.object !== "whatsapp_business_account") {
+    // A rota responde 200 com `received: 0`: sem esta linha, o descarte é mudo.
+    logger.warn("[meta.webhook] entrega descartada: objeto não é whatsapp_business_account", {
+      motivo: "objeto_inesperado",
+      objeto: typeof envelope?.object === "string" ? envelope.object.slice(0, 64) : null,
+    });
+    return out;
+  }
 
   for (const entry of envelope.entry ?? []) {
     const wabaId = str(entry.id) ?? "";
@@ -398,7 +406,14 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
       // dono, o payload não tem a quem pertencer e fica de fora aqui mesmo.
       if (change.field === "history" || change.field === "smb_app_state_sync") {
         const numero = str(((v.metadata ?? {}) as Record<string, unknown>).phone_number_id);
-        if (!numero) continue;
+        if (!numero) {
+          logger.warn("[meta.webhook] sincronização descartada: sem phone_number_id", {
+            motivo: "sem_phone_number_id",
+            campo: change.field,
+            waba_id: wabaId || null,
+          });
+          continue;
+        }
         out.push({
           kind: "sync_payload",
           campo: change.field,
