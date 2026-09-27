@@ -3011,3 +3011,21 @@ semeado e removido pela própria spec). Evidência em `evidence/modelos-g1/`.
 `graph.facebook.com` sai do servidor, que o Playwright não intercepta, e o rig
 não tem credencial real) e a aprovação chegando depois — o status automático é a
 etapa seguinte (H).
+
+## J35 — Reconectar número em coexistência não transforma mídia antiga em mensagem nova `[P0]` (2026-09-27)
+
+Achado em produção, ao reconectar um número em coexistência: durante a sincronização do histórico, a Meta entregou 38 mídias antigas (14 a 26/09) pelo campo `smb_message_echoes`. Elas viraram mensagens novas, criaram 10 contatos e 10 conversas e pausaram a IA em 13 conversas. Os 38 wamids estavam no history guardado como `media_placeholder` com `history_context.from_me = true`.
+
+Conserto (migration 0436): o eco com timestamp anterior ao onboarding fica em `meta_ecos_em_espera` e só é decidido pela correlação por wamid com o history da MESMA janela — histórico não vira mensagem; eco tardio (history terminado sem o wamid) entra pelo caminho ao vivo sem pausar a IA por resposta antiga.
+
+| Caso | O que mede | Estado |
+|---|---|---|
+| J35.1 | Eco ao vivo depois do onboarding aparece na conversa e pausa a IA, como antes | Unitário (`tests/unit/meta-ecos-em-espera.test.ts`, bloco a) — **NÃO PROVADO EM TELA** |
+| J35.2 | Mídia antiga chega como eco e NÃO vira mensagem, contato nem conversa | Unitário (blocos b, c, d) + banco (`tests/invariants/ecos-em-espera.test.ts`) — **NÃO PROVADO EM TELA** |
+| J35.3 | O cartão "Histórico e contatos do aplicativo" mostra reconhecidas / aguardando / entraram | **NÃO PROVADO EM TELA** |
+| J35.4 | Pedido de history que **falhou** dentro das 24h não libera o eco: ele espera o novo pedido, e o history deste o classifica como histórico sem criar mensagem; só depois do prazo de pedir o `falhou` é final | Unitário (`tests/unit/meta-ecos-em-espera.test.ts`, bloco k e `historicoTerminou`) — **NÃO PROVADO EM TELA** |
+| J35.5 | Erro ao **ler** o onboarding do canal não é "canal sem onboarding": o eco não é escrito em lugar nenhum, a rota responde 5xx e a Meta reentrega; o mesmo vale para o pedaço de history cuja janela não foi lida | Unitário (blocos A1 e B1 + rotas em `meta-eco-do-app-business` e `meta-sincronizacao-do-app`) — **NÃO PROVADO EM TELA** |
+| J35.6 | Reconexão: o mesmo pedaço de history e o mesmo wamid em O1 e O2 são linhas distintas, e cada janela só correlaciona com a sua | Unitário (blocos B2, B3) + banco (`tests/invariants/ecos-em-espera.test.ts`, identidade por janela) — **NÃO PROVADO EM TELA** |
+| J35.7 | Janela com mais de 1000 pedaços (o `max_rows` do PostgREST): o fim e o "parado há 6h" não são decididos por um recorte; o cron acha toda janela com espera | Unitário (bloco B4 + `tests/unit/meta-ecos-em-espera-cron.test.ts`) — **NÃO PROVADO EM TELA** |
+
+Os 38 registros criados antes do conserto não são alterados por ele; a reclassificação deles é uma entrega separada.

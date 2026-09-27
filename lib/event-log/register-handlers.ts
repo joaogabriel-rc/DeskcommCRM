@@ -26,6 +26,7 @@ import { conversaoDeVendaHandler } from "@/lib/conversoes/envio.handler";
 import { flowTagTriggerHandler } from "@/lib/flows/trigger.handler";
 import { flowReplyHandler } from "@/lib/flows/reply.handler";
 import { avisoDeCasoAoSuporteHandler } from "@/lib/escalacao/aviso-ao-suporte.handler";
+import { ecosEmEsperaHandler } from "@/lib/channels/meta/ecos-em-espera.handler";
 import { registerHandler } from "@/lib/event-log/dispatcher";
 
 let _registered = false;
@@ -63,6 +64,10 @@ export function ensureHandlersRegistered(): void {
   registerHandler(followupGatilhoPresencaHandler);
   registerHandler(mediaPersistHandler);
   registerHandler(mediaDeriveHandler);
+  // Ecos do app em espera (0436): só escreve no banco (estado da quarentena e,
+  // na promoção, o caminho do eco ao vivo). Consome um evento próprio, que
+  // nenhum outro handler escuta.
+  registerHandler(ecosEmEsperaHandler);
   registerHandler(webPushInboundHandler);
   // Penúltimo, pelo MESMO critério do último: o aviso ao suporte sai por rede de
   // terceiro (o transporte de WhatsApp) e nunca pode atrasar quem escreve no

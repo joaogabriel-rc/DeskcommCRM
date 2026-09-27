@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Ecos do app em espera",
+    "subtitle": "Mídia histórica que chega como smb_message_echoes fica em quarentena até a correlação por wamid com o history da mesma janela (0436)",
+    "output": "ecos-do-app-em-espera.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "externo", "label": "Meta" },
+    { "id": "servidor", "label": "Servidor" },
+    { "id": "banco", "label": "Persistência" },
+    { "id": "operador", "label": "Operação" }
+  ],
+  "mainPath": ["meta", "webhook", "porta", "quarentena", "resolvedor", "correlacao"],
+  "nodes": [
+    { "id": "meta", "lane": "externo", "col": 1, "type": "external", "label": "Webhooks smb_message_echoes e history da Meta" },
+    { "id": "webhook", "lane": "servidor", "col": 2, "type": "route", "label": "POST /api/v1/webhooks/meta (e /[token])" },
+    { "id": "porta", "lane": "servidor", "col": 3, "type": "lib", "label": "ingestMetaEcho — classificarEco: timestamp anterior ao onboarding é suspeito" },
+    { "id": "aoVivo", "lane": "servidor", "col": 4, "type": "lib", "label": "ingerirEcoAoVivo — contato, conversa, mensagem, pausa (caminho de sempre)" },
+    { "id": "quarentena", "lane": "banco", "col": 3, "type": "database", "label": "meta_ecos_em_espera (bruto, um por wamid, por onboarding)" },
+    { "id": "guarda", "lane": "servidor", "col": 2, "type": "lib", "label": "guardarPayloadDeSincronizacao — history com onboarding_em" },
+    { "id": "payloads", "lane": "banco", "col": 2, "type": "database", "label": "meta_sincronizacao_payloads (onboarding_em)" },
+    { "id": "evento", "lane": "banco", "col": 4, "type": "database", "label": "event_log meta.historico.chunk_guardado" },
+    { "id": "cron", "lane": "servidor", "col": 5, "type": "service", "label": "cron meta-ecos-em-espera (5 min, rede do evento)" },
+    { "id": "resolvedor", "lane": "servidor", "col": 5, "type": "service", "label": "resolverEcosEmEspera — histórico, promovido, duplicado ou espera" },
+    { "id": "correlacao", "lane": "banco", "col": 5, "type": "database", "label": "fn_meta_ecos_correlacionar — placeholder from_me da mesma janela" },
+    { "id": "tela", "lane": "operador", "col": 4, "type": "frontend", "label": "Canal oficial › Histórico e contatos do aplicativo — contagem dos ecos" },
+    { "id": "audit", "lane": "banco", "col": 6, "type": "database", "label": "api_audit_log meta.eco_historico_classificado / meta.eco_tardio_promovido" }
+  ],
+  "edges": [
+    { "id": "e1", "from": "meta", "to": "webhook", "label": "eco e pedaços de history" },
+    { "id": "e2", "from": "webhook", "to": "porta", "label": "echo_message" },
+    { "id": "e3", "from": "porta", "to": "aoVivo", "label": "ao vivo" },
+    { "id": "e4", "from": "porta", "to": "quarentena", "label": "suspeito, bruto" },
+    { "id": "e5", "from": "cron", "to": "quarentena", "label": "janelas com eco aguardando" },
+    { "id": "e6", "from": "webhook", "to": "guarda", "label": "sync_payload" },
+    { "id": "e7", "from": "guarda", "to": "payloads", "label": "value bruto + janela" },
+    { "id": "e8", "from": "guarda", "to": "evento", "label": "pedaço de history" },
+    { "id": "e9", "from": "evento", "to": "resolvedor", "label": "handler ecos-em-espera" },
+    { "id": "e10", "from": "cron", "to": "resolvedor", "label": "toda janela com espera" },
+    { "id": "e11", "from": "resolvedor", "to": "correlacao", "label": "uma passada por janela" },
+    { "id": "e12", "from": "correlacao", "to": "payloads", "label": "lê history da janela" },
+    { "id": "e13", "from": "correlacao", "to": "quarentena", "label": "aguardando → historico" },
+    { "id": "e14", "from": "resolvedor", "to": "aoVivo", "label": "history terminou sem o wamid (tardio)" },
+    { "id": "e15", "from": "resolvedor", "to": "audit", "label": "só quando decidiu algo" },
+    { "id": "e16", "from": "quarentena", "to": "tela", "label": "contagem por estado" }
+  ]
+}

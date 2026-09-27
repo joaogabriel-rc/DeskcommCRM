@@ -66,7 +66,8 @@ const PADROES: Record<string, Linha> = {
 };
 const UNICOS: Record<string, string[]> = {
   meta_sincronizacoes: ["channel_session_id", "onboarding_em", "tipo"],
-  meta_sincronizacao_payloads: ["channel_session_id", "campo", "payload_hash"],
+  // A chave da 0436: a janela faz parte da identidade (`null === null`, como o `nulls not distinct`).
+  meta_sincronizacao_payloads: ["channel_session_id", "onboarding_em", "campo", "payload_hash"],
 };
 
 function bancoFalso(tabelas: Record<string, Linha[]>) {
@@ -143,6 +144,22 @@ function bancoComSessoes(extraA: Linha = {}) {
     meta_sincronizacoes: [],
     meta_sincronizacao_payloads: [],
   });
+}
+
+/** A leitura da janela do payload (`channel_sessions.meta_onboarding_em`) passa a errar. */
+function janelaIlegivel(admin: SupabaseClient) {
+  const original = admin.from.bind(admin);
+  (admin as unknown as { from: (t: string) => unknown }).from = (t: string) => {
+    const q = original(t) as unknown as Record<string, unknown>;
+    if (t === "channel_sessions") {
+      const select = q.select as (c?: string) => unknown;
+      q.select = (c?: string) => {
+        if (c === "meta_onboarding_em") q.maybeSingle = async () => ({ data: null, error: { code: "57P01", message: "conexão caiu" } });
+        return select(c);
+      };
+    }
+    return q;
+  };
 }
 
 // ─── Meta falsa ─────────────────────────────────────────────────────────────
@@ -303,7 +320,9 @@ describe("solicitarSincronizacaoDoApp", () => {
     const banco = bancoComSessoes();
     await solicitarSincronizacaoDoApp(banco.admin, { organizationId: ORG_A, agora: DENTRO });
     const tabelas = new Set(banco.tocadas.map((t) => t.split(":")[1]));
-    expect([...tabelas].sort()).toEqual(["channel_sessions", "meta_sincronizacoes"]);
+    // A quarentena dos ecos (0436) só é LIDA — é a contagem que a tela mostra.
+    expect([...tabelas].sort()).toEqual(["channel_sessions", "meta_ecos_em_espera", "meta_sincronizacoes"]);
+    expect(banco.tocadas.filter((t) => t.endsWith(":meta_ecos_em_espera")).every((t) => t.startsWith("select:"))).toBe(true);
     expect(banco.tocadas.filter((t) => t.startsWith("select:") === false).every((t) => t.endsWith(":meta_sincronizacoes"))).toBe(true);
     expect(banco.rpcs).toHaveLength(0);
   });
@@ -443,6 +462,14 @@ const VALOR_RECUSADO = {
   history: [{ errors: [{ code: 2593109, title: "History sync is turned off by the business from the WhatsApp Business App" }] }],
 };
 
+/** Toda RPC é o `emit_event` de `meta.historico.chunk_guardado` (0436) — e nada mais. */
+function apenasOAvisoAoResolvedor(rpcs: unknown[]): boolean {
+  return rpcs.every((r) => {
+    const [nome, args] = r as [string, Record<string, unknown>];
+    return nome === "emit_event" && args.p_event_type === "meta.historico.chunk_guardado";
+  });
+}
+
 describe("guardarPayloadDeSincronizacao", () => {
   it("guarda o value BRUTO na organização e no canal donos do número, com fase/pedaço/progresso", async () => {
     const banco = bancoComSessoes();
@@ -499,14 +526,36 @@ describe("guardarPayloadDeSincronizacao", () => {
     expect(banco.tabelas.meta_sincronizacao_payloads).toHaveLength(1);
   });
 
-  it("nenhuma escrita em messages, conversations ou contacts; nenhuma RPC (emit_event, fn_upsert_*)", async () => {
+  it("nenhuma escrita em messages, conversations ou contacts; nenhuma RPC além do aviso ao resolvedor dos ecos (0436)", async () => {
     const banco = bancoComSessoes();
     for (const [campo, value] of [["history", VALOR_HISTORICO], ["smb_app_state_sync", VALOR_CONTATOS], ["history", VALOR_RECUSADO]] as const) {
       await guardarPayloadDeSincronizacao(banco.admin, { campo, phoneNumberId: NUM_A, value }, { organizationId: ORG_A });
     }
     const tabelas = new Set(banco.tocadas.map((t) => t.split(":")[1]));
     expect([...tabelas].sort()).toEqual(["channel_sessions", "meta_sincronizacao_payloads", "meta_sincronizacoes"]);
+    // O único efeito fora das tabelas da sincronização: cada pedaço de HISTORY
+    // acorda o resolvedor dos ecos em espera. Nenhum fn_upsert_*, nenhum outro evento.
+    expect(apenasOAvisoAoResolvedor(banco.rpcs)).toBe(true);
+    expect(banco.rpcs).toHaveLength(2);
+  });
+
+  it("B1: janela do payload ilegível LANÇA antes de gravar — nenhum payload sem janela, nenhum aviso; a reentrega grava com a janela", async () => {
+    const banco = bancoComSessoes();
+    const original = banco.admin.from;
+    janelaIlegivel(banco.admin);
+    await expect(
+      guardarPayloadDeSincronizacao(banco.admin, { campo: "history", phoneNumberId: NUM_A, value: VALOR_HISTORICO }, { organizationId: ORG_A }),
+    ).rejects.toThrow("channel_sessions (janela do payload)");
+    expect(banco.tabelas.meta_sincronizacao_payloads).toHaveLength(0);
     expect(banco.rpcs).toHaveLength(0);
+
+    (banco.admin as unknown as { from: unknown }).from = original;
+    expect(
+      await guardarPayloadDeSincronizacao(banco.admin, { campo: "history", phoneNumberId: NUM_A, value: VALOR_HISTORICO }, { organizationId: ORG_A }),
+    ).toBe("guardado");
+    expect(banco.tabelas.meta_sincronizacao_payloads).toHaveLength(1);
+    expect(banco.tabelas.meta_sincronizacao_payloads![0]).toMatchObject({ onboarding_em: ONBOARDING });
+    expect(apenasOAvisoAoResolvedor(banco.rpcs)).toBe(true);
   });
 
   it("falha do banco LANÇA — a rota responde 5xx e a Meta reentrega, em vez de perder o pedaço com 200", async () => {
@@ -633,7 +682,7 @@ describe("rotas de webhook — o payload de sincronização chega só à organiz
     expect(ingestMetaInbound).not.toHaveBeenCalled();
     expect(ingestMetaEcho).not.toHaveBeenCalled();
     expect(bancoDaRota.tabelas.meta_sincronizacao_payloads).toHaveLength(1);
-    expect(bancoDaRota.rpcs).toHaveLength(0);
+    expect(apenasOAvisoAoResolvedor(bancoDaRota.rpcs)).toBe(true);
   });
 
   it("universal: mensagem recebida e eco na mesma entrega seguem pelas ingestões de sempre", async () => {
@@ -644,6 +693,14 @@ describe("rotas de webhook — o payload de sincronização chega só à organiz
     expect(ingestMetaInbound).toHaveBeenCalledTimes(1);
     expect(ingestMetaEcho).toHaveBeenCalledTimes(1);
     expect(bancoDaRota.tabelas.meta_sincronizacao_payloads).toHaveLength(1);
+  });
+
+  it("B1: janela do payload ilegível vira 5xx na rota universal, sem gravar nada (a Meta reentrega)", async () => {
+    const { POST } = await import("@/app/api/v1/webhooks/meta/route");
+    janelaIlegivel(bancoDaRota.admin);
+    const res = await POST(entrega(URL_UNIVERSAL, envelope(change(WABA_A, "history", VALOR_HISTORICO))));
+    expect(res.status).toBe(500);
+    expect(bancoDaRota.tabelas.meta_sincronizacao_payloads).toHaveLength(0);
   });
 
   it("falha do banco na guarda vira 5xx (a Meta reentrega)", async () => {

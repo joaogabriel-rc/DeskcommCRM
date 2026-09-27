@@ -23,11 +23,20 @@
  * A organização vem de quem chama (a sessão dona do número, resolvida pela rota),
  * nunca do corpo; o número continua no filtro porque uma organização pode ter mais
  * de um número oficial.
+ *
+ * ─── Eco anterior ao onboarding (0436) ──────────────────────────────────────
+ * Parte da mídia HISTÓRICA da sincronização do app chega por este mesmo campo.
+ * Antes de qualquer efeito, `classificarEco` separa o eco com `timestamp`
+ * anterior ao onboarding do canal: ele vai BRUTO para `meta_ecos_em_espera` e não
+ * vira contato, conversa, mensagem, pausa nem evento. Quem decide depois é a
+ * correlação por wamid (`resolver-ecos-em-espera.ts`); o eco que não for
+ * histórico volta por `ingerirEcoAoVivo` com `tardio: true`. O eco ao vivo segue
+ * por `ingerirEcoAoVivo` exatamente como antes.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { audit } from "@/lib/audit";
-import { pausarIaPorAtendimentoManual } from "@/lib/escalacao/atendimento-manual";
+import { PRAZO_DO_SILENCIO_MS, pausarIaPorAtendimentoManual } from "@/lib/escalacao/atendimento-manual";
 import {
   ehNumeroInternoDeAviso,
   registrarMensagemIgnorada,
@@ -38,6 +47,12 @@ import { encontrarContatoPorTelefone } from "../contato-por-telefone";
 import { marcarConversaComMensagem } from "../marcar-conversa";
 import { canonicalPhoneBR } from "../phone-variants";
 import type { ChannelTenantScope } from "../types";
+import {
+  classificarEco,
+  guardarEcoEmEspera,
+  lerOnboardingDoCanal,
+  type DesfechoDoEco,
+} from "./ecos-em-espera";
 import { previewOf, sessionByPhoneNumberId, type IngestOutcome } from "./ingest";
 import type { EchoMessageEvent } from "./webhook";
 
@@ -94,11 +109,34 @@ async function ehEcoDeEnvioNosso(
   return false;
 }
 
+/**
+ * Só o eco TARDIO pergunta isto: ele carimba a conversa apenas se não for mais
+ * velho que a última mensagem dela. Sem conseguir ler, não carimba — o carimbo
+ * zera as não lidas, e na dúvida o lado seguro é não mexer.
+ */
+async function ecoNaoEhMaisVelhoQueAConversa(
+  admin: Admin,
+  organizationId: string,
+  conversationId: string,
+  e: EchoMessageEvent,
+): Promise<boolean> {
+  const { data, error } = await admin
+    .from("conversations")
+    .select("last_message_at")
+    .eq("organization_id", organizationId)
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (error) return false;
+  const ultima = (data as { last_message_at?: string | null } | null)?.last_message_at ?? null;
+  return ultima === null || e.sentAt.getTime() >= Date.parse(ultima);
+}
+
 export async function ingestMetaEcho(
   admin: Admin,
   e: EchoMessageEvent,
   dono: ChannelTenantScope,
-): Promise<IngestOutcome> {
+  opcoes: { agora?: Date } = {},
+): Promise<DesfechoDoEco> {
   let sessao: { id: string; organization_id: string } | null;
   try {
     sessao = await sessionByPhoneNumberId(admin, dono.organizationId, e.phoneNumberId);
@@ -107,6 +145,43 @@ export async function ingestMetaEcho(
   }
   if (!sessao) return { status: "no_session" };
 
+  // A porta de suspeita vem ANTES de qualquer efeito: o eco suspeito não cria
+  // contato, conversa, mensagem, pausa nem evento de mensagem. Erro ao ler o
+  // onboarding LANÇA (nunca vira "canal sem onboarding"): a rota responde 5xx,
+  // nada é escrito, e a Meta reentrega.
+  const onboardingEm = await lerOnboardingDoCanal(admin, sessao.organization_id, sessao.id);
+  if (onboardingEm && classificarEco(e.sentAt, onboardingEm) === "suspeito") {
+    return guardarEcoEmEspera(admin, {
+      organizationId: sessao.organization_id,
+      channelSessionId: sessao.id,
+      onboardingEm,
+      e,
+      recebidoEm: opcoes.agora ?? new Date(),
+    });
+  }
+
+  return ingerirEcoAoVivo(admin, e, sessao);
+}
+
+/**
+ * `tardio`: o eco saiu da quarentena porque o history terminou sem o wamid dele
+ * (um retry da Meta de um eco ao vivo anterior ao onboarding, p.ex.). Duas coisas
+ * mudam, e só nesse caso: a IA não pausa por uma resposta mais velha que o prazo
+ * do silêncio, e a conversa não é carimbada por uma mensagem mais velha que a
+ * última dela (o carimbo zera as não lidas e recalcula a espera).
+ */
+export interface OpcoesDoEcoAoVivo {
+  tardio?: boolean;
+  agora?: Date;
+}
+
+/** O eco ao vivo: contato, conversa, mensagem, carimbo, pausa, auditoria e mídia. */
+export async function ingerirEcoAoVivo(
+  admin: Admin,
+  e: EchoMessageEvent,
+  sessao: { id: string; organization_id: string },
+  opcoes: OpcoesDoEcoAoVivo = {},
+): Promise<IngestOutcome> {
   const orgId = sessao.organization_id;
   const telefone = `+${e.to.replace(/\D/g, "")}`;
 
@@ -175,18 +250,25 @@ export async function ingestMetaEcho(
     return { status: "failed", reason: `mensagem: ${erroInsert.message}` };
   }
 
-  await marcarConversaComMensagem(admin, {
-    organizationId: orgId,
-    conversationId: conversationId as string,
-    direction: "outbound",
-    preview: previewOf(e),
-    at: e.sentAt.toISOString(),
-    canal: "meta",
-  });
+  if (!opcoes.tardio || (await ecoNaoEhMaisVelhoQueAConversa(admin, orgId, conversationId as string, e))) {
+    await marcarConversaComMensagem(admin, {
+      organizationId: orgId,
+      conversationId: conversationId as string,
+      direction: "outbound",
+      preview: previewOf(e),
+      at: e.sentAt.toISOString(),
+      canal: "meta",
+    });
+  }
+
+  // Um eco tardio mais velho que o prazo do silêncio não pausa: a resposta manual
+  // foi dias atrás, e calar a IA agora seria responder a nada.
+  const agora = opcoes.agora ?? new Date();
+  const pausaCabe = !opcoes.tardio || e.sentAt.getTime() > agora.getTime() - PRAZO_DO_SILENCIO_MS;
 
   // Gravar a linha é tolerante; calar a IA é estrito — as duas decisões em
   // direções opostas, como no canal por QR (issue #519).
-  if (!(await ehEcoDeEnvioNosso(admin, orgId, conversationId as string, e))) {
+  if (pausaCabe && !(await ehEcoDeEnvioNosso(admin, orgId, conversationId as string, e))) {
     await pausarIaPorAtendimentoManual(admin, {
       organizationId: orgId,
       conversationId: conversationId as string,

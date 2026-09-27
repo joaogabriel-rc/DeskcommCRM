@@ -39,6 +39,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
 import { resolveMetaCreds } from "@/lib/channels/meta/credentials";
+import { contarEcosEmEspera, emitirChunkGuardado, type ContagemDosEcos } from "@/lib/channels/meta/ecos-em-espera";
 import { sessionByPhoneNumberId } from "@/lib/channels/meta/ingest";
 import { graphVersion } from "@/lib/graph-version";
 import { logger } from "@/lib/logger";
@@ -145,6 +146,12 @@ export type SituacaoDaSincronizacao =
       dentroDoPrazo: boolean;
       contatos: LinhaDaSincronizacao | null;
       historico: LinhaDaSincronizacao | null;
+      /**
+       * Os ecos do app anteriores a ESTE onboarding (0436), por estado: em espera,
+       * classificados como mídia do histórico, promovidos como eco tardio.
+       * Opcional para quem monta a situação à mão (telas e testes antigos).
+       */
+      ecos?: ContagemDosEcos;
     };
 
 interface SessaoDoCanal {
@@ -202,6 +209,11 @@ export async function lerSincronizacao(
     prazo: prazo.toISOString(),
     dentroDoPrazo: agora.getTime() <= prazo.getTime(),
     ...(await linhas(admin, organizationId, sessao.id, sessao.meta_onboarding_em)),
+    ecos: await contarEcosEmEspera(admin, {
+      organizationId,
+      channelSessionId: sessao.id,
+      onboardingEm: sessao.meta_onboarding_em,
+    }),
   };
 }
 
@@ -409,6 +421,32 @@ export async function guardarPayloadDeSincronizacao(
   const hash = createHash("sha256").update(bruto, "utf8").digest("hex");
   const meta = e.campo === "history" ? metadadosDoHistorico(e.value) : null;
 
+  // O onboarding ATUAL do canal: o que chega agora responde ao pedido desta
+  // janela, nunca ao de uma conexão anterior. Lido ANTES de guardar, porque o
+  // payload leva a janela junto (0436) — é por ela que a correlação dos ecos não
+  // mistura reconexões.
+  //
+  // Sem conseguir ler, LANÇA antes de gravar: um pedaço guardado sem janela nunca
+  // seria lido pela correlação (que filtra pela janela), e a reentrega cairia no
+  // `unique` e o deixaria sem janela para sempre. Não gravando, a rota responde
+  // 5xx e a Meta reentrega o MESMO pedaço — nada se perde.
+  const { data: canal, error: erroDoCanal } = await admin
+    .from("channel_sessions")
+    .select("meta_onboarding_em")
+    .eq("organization_id", sessao.organization_id)
+    .eq("id", sessao.id)
+    .maybeSingle();
+  if (erroDoCanal) {
+    logger.error("[meta.sincronizacao] janela do payload não lida — payload recusado para a Meta reentregar", {
+      campo: e.campo,
+      organization_id: sessao.organization_id,
+      channel_session_id: sessao.id,
+      detalhe: erroDoCanal.message.slice(0, 160),
+    });
+    throw new Error(`channel_sessions (janela do payload): ${erroDoCanal.message}`);
+  }
+  const onboardingEm = (canal as { meta_onboarding_em?: string | null } | null)?.meta_onboarding_em ?? null;
+
   const { error } = await admin.from("meta_sincronizacao_payloads").insert({
     organization_id: sessao.organization_id,
     channel_session_id: sessao.id,
@@ -418,6 +456,7 @@ export async function guardarPayloadDeSincronizacao(
     fase: meta?.fase ?? null,
     chunk_order: meta?.chunkOrder ?? null,
     progresso: meta?.progresso ?? null,
+    onboarding_em: onboardingEm,
   });
   if (error) {
     if (error.code === "23505") {
@@ -444,18 +483,17 @@ export async function guardarPayloadDeSincronizacao(
     progresso: meta?.progresso ?? null,
   });
 
-  // O estado a atualizar é o do onboarding ATUAL do canal — o que chega agora
-  // responde ao pedido desta janela, nunca ao de uma conexão anterior. Sem
-  // onboarding (ou sem conseguir lê-lo), o payload já está salvo e o estado fica.
-  const { data: canal, error: erroDoCanal } = await admin
-    .from("channel_sessions")
-    .select("meta_onboarding_em")
-    .eq("organization_id", sessao.organization_id)
-    .eq("id", sessao.id)
-    .maybeSingle();
-  const onboardingEm = (canal as { meta_onboarding_em?: string | null } | null)?.meta_onboarding_em ?? null;
-  if (erroDoCanal) avisarEstado(sessao.organization_id, e.campo, erroDoCanal.message);
-  if (!onboardingEm) return "guardado";
+  // Canal SEM onboarding (leitura bem-sucedida, coluna vazia): não há janela a
+  // que o pedaço pertença, e nenhum eco é suspeito nesse canal — guardado, e fica
+  // visível no log.
+  if (!onboardingEm) {
+    logger.warn("[meta.sincronizacao] payload guardado sem janela: o canal não tem onboarding", {
+      campo: e.campo,
+      organization_id: sessao.organization_id,
+      channel_session_id: sessao.id,
+    });
+    return "guardado";
+  }
 
   // O primeiro payload marca que a Meta começou a entregar. Falha aqui não
   // desfaz a guarda: o dado já está salvo, e é ele que importa.
@@ -483,6 +521,16 @@ export async function guardarPayloadDeSincronizacao(
       .eq("onboarding_em", onboardingEm)
       .eq("tipo", "historico");
     if (erroDaRecusa) avisarEstado(sessao.organization_id, e.campo, erroDaRecusa.message);
+  }
+
+  // Um pedaço novo de history pode ser o que faltava para decidir um eco em
+  // espera desta janela (0436). Só ACORDA o resolvedor: nada é processado aqui.
+  if (e.campo === "history") {
+    await emitirChunkGuardado(
+      admin,
+      { organizationId: sessao.organization_id, channelSessionId: sessao.id, onboardingEm },
+      "historico_guardado",
+    );
   }
   return "guardado";
 }

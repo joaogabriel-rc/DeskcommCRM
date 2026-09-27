@@ -173,6 +173,12 @@ export interface EchoMessageEvent {
   text: string | null;
   sharedContact?: SharedContact | null;
   media: InboundMessageEvent["media"];
+  /**
+   * O item de `message_echoes[]` como a Meta mandou. Só a quarentena o lê
+   * (`lib/channels/meta/ecos-em-espera.ts`): o eco suspeito é guardado bruto, com
+   * as chaves que este parser ignora, e a promoção o relê por `ecoDoItem`.
+   */
+  bruto?: Record<string, unknown>;
 }
 
 /**
@@ -311,6 +317,34 @@ function corpoDaMensagem(raw: Record<string, unknown>): {
   };
 }
 
+/**
+ * Um item de `message_echoes[]` lido como eco. É a MESMA leitura do webhook e da
+ * promoção de um eco que estava em espera (que só tem o item bruto guardado), para
+ * as duas não divergirem. Sem `id` ou sem destinatário, não vira eco.
+ */
+export function ecoDoItem(
+  raw: Record<string, unknown>,
+  origem: { wabaId: string; phoneNumberId: string },
+): EchoMessageEvent | null {
+  const id = str(raw.id);
+  const to = str(raw.to);
+  if (!id || !to) return null; // payload capenga não vira linha meia-boca
+  const corpo = corpoDaMensagem(raw);
+  return {
+    kind: "echo_message",
+    wabaId: origem.wabaId,
+    phoneNumberId: origem.phoneNumberId,
+    externalId: id,
+    to,
+    sentAt: instanteDaMeta(raw.timestamp),
+    type: corpo.type,
+    text: corpo.text,
+    ...(corpo.sharedContact ? { sharedContact: corpo.sharedContact } : {}),
+    media: corpo.media,
+    bruto: raw,
+  };
+}
+
 export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEvent[] {
   const out: MetaWebhookEvent[] = [];
   if (envelope?.object !== "whatsapp_business_account") {
@@ -382,22 +416,8 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
         const numero = str(((v.metadata ?? {}) as Record<string, unknown>).phone_number_id);
         if (!numero) continue;
         for (const raw of v.message_echoes as Record<string, unknown>[]) {
-          const id = str(raw.id);
-          const to = str(raw.to);
-          if (!id || !to) continue; // payload capenga não vira linha meia-boca
-          const corpo = corpoDaMensagem(raw);
-          out.push({
-            kind: "echo_message",
-            wabaId,
-            phoneNumberId: numero,
-            externalId: id,
-            to,
-            sentAt: instanteDaMeta(raw.timestamp),
-            type: corpo.type,
-            text: corpo.text,
-            ...(corpo.sharedContact ? { sharedContact: corpo.sharedContact } : {}),
-            media: corpo.media,
-          });
+          const eco = ecoDoItem(raw, { wabaId, phoneNumberId: numero });
+          if (eco) out.push(eco);
         }
         continue;
       }

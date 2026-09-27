@@ -100,12 +100,14 @@ describe("sincronização do app (0420) — preservação sem efeitos", () => {
     expect(ultimaLinha(sql(CONTAGEM))).toBe(antes);
   });
 
-  it("a reentrega (mesmo canal, campo e hash) é recusada com 23505", () => {
+  it("a reentrega (mesmo canal, janela, campo e hash) é recusada com 23505 — inclusive sem janela", () => {
     const r = tentar(`
       insert into public.meta_sincronizacao_payloads (organization_id, channel_session_id, campo, payload, payload_hash)
         values ('${ORG_A}', '${SESSAO_A}', 'history', '{}'::jsonb, 'hash-historico-1');`);
     expect(r.ok).toBe(false);
-    expect(r.ok ? "" : r.erro).toContain("meta_sincronizacao_payloads_uma_entrega");
+    // A chave da 0420 era (canal, campo, hash); a 0436 incluiu a janela, com
+    // `nulls not distinct` — este pedaço não tem janela e continua deduplicado.
+    expect(r.ok ? "" : r.erro).toContain("meta_sincronizacao_payloads_uma_entrega_na_janela");
   });
 
   it("um pedido por (canal, onboarding, tipo): o mesmo onboarding recusa o segundo", () => {

@@ -7342,6 +7342,63 @@ export type Database = {
           },
         ]
       }
+      meta_ecos_em_espera: {
+        Row: {
+          bruto: Json
+          channel_session_id: string
+          consumido_em: string | null
+          created_at: string
+          decidido_em: string | null
+          estado: string
+          external_id: string
+          id: string
+          motivo: string | null
+          onboarding_em: string
+          organization_id: string
+          phone_number_id: string
+          recebido_em: string
+          sent_at: string
+          updated_at: string
+          waba_id: string | null
+        }
+        Insert: {
+          bruto: Json
+          channel_session_id: string
+          consumido_em?: string | null
+          created_at?: string
+          decidido_em?: string | null
+          estado?: string
+          external_id: string
+          id?: string
+          motivo?: string | null
+          onboarding_em: string
+          organization_id: string
+          phone_number_id: string
+          recebido_em?: string
+          sent_at: string
+          updated_at?: string
+          waba_id?: string | null
+        }
+        Update: {
+          bruto?: Json
+          channel_session_id?: string
+          consumido_em?: string | null
+          created_at?: string
+          decidido_em?: string | null
+          estado?: string
+          external_id?: string
+          id?: string
+          motivo?: string | null
+          onboarding_em?: string
+          organization_id?: string
+          phone_number_id?: string
+          recebido_em?: string
+          sent_at?: string
+          updated_at?: string
+          waba_id?: string | null
+        }
+        Relationships: []
+      }
       meta_sincronizacao_payloads: {
         Row: {
           campo: string
@@ -7362,6 +7419,7 @@ export type Database = {
           chunk_order?: number | null
           fase?: number | null
           id?: string
+          onboarding_em?: string | null
           organization_id: string
           payload: Json
           payload_hash: string
@@ -7375,6 +7433,7 @@ export type Database = {
           chunk_order?: number | null
           fase?: number | null
           id?: string
+          onboarding_em?: string | null
           organization_id?: string
           payload?: Json
           payload_hash?: string
@@ -10211,6 +10270,10 @@ export type Database = {
       fn_member_role_in_org: {
         Args: { p_org: string; p_user: string }
         Returns: string
+      }
+      fn_meta_ecos_correlacionar: {
+        Args: { p_onboarding: string; p_org: string; p_sessao: string }
+        Returns: { wamid: string }[]
       }
       fn_mesclar_contatos: {
         Args: {

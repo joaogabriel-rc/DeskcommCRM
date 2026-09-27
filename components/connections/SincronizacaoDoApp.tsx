@@ -8,6 +8,9 @@
  * caminho de quem conectou antes disso, e o de tentar de novo o que falhou. O
  * cartão diz o que foi pedido, o que já chegou e até quando dá para pedir — e não
  * promete importação: nesta fase o que chega é guardado, não aparece nas conversas.
+ * Também conta as mídias antigas que chegaram como eco do aplicativo (0436): as
+ * reconhecidas como histórico, as que aguardam o histórico e as que entraram nas
+ * conversas por não serem dele.
  *
  * Fora da coexistência (ou sem acesso ao estado), não renderiza nada.
  */
@@ -65,6 +68,13 @@ export function SincronizacaoDoApp({ conectado }: { conectado: boolean }) {
           ) : null}
         </li>
       </ul>
+
+      {situacao.ecos && situacao.ecos.aguardando + situacao.ecos.historico + situacao.ecos.promovido > 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="sincronizacao-ecos">
+          {t("Mídias antigas enviadas pelo aplicativo:")} {situacao.ecos.historico} {t("reconhecidas como histórico")} ·{" "}
+          {situacao.ecos.aguardando} {t("aguardando o histórico")} · {situacao.ecos.promovido} {t("entraram nas conversas")}
+        </p>
+      ) : null}
 
       <p className="text-xs text-muted-foreground" data-testid="sincronizacao-prazo">
         {situacao.dentroDoPrazo

@@ -90,6 +90,7 @@ const PROVA_PROPRIA: readonly Excecao[] = [
   { tabela: "event_service_origins", razao: "tests/invariants/service-event-origin.test.ts — recibo server-only, authenticated sem leitura/escrita, RPC rejeita tenant B real" },
   { tabela: "meta_sincronizacoes", razao: "tests/invariants/sincronizacao-do-app-sem-efeitos.test.ts — tabela exclusiva do servidor: `permission denied` medido sob `set role authenticated` + JWT do admin da própria organização e sob `anon`; RLS ligada com policy de organização + papel admin; FK composta (organization_id, channel_session_id) recusa o canal de outra organização" },
   { tabela: "meta_sincronizacao_payloads", razao: "tests/invariants/sincronizacao-do-app-sem-efeitos.test.ts — payload bruto (dado pessoal) exclusivo do servidor: `permission denied` sob `set role authenticated` + JWT e sob `anon`; RLS ligada com policy de organização + papel admin; FK composta recusa o canal de outra organização; cascade com o canal" },
+  { tabela: "meta_ecos_em_espera", razao: "tests/invariants/ecos-em-espera.test.ts — eco bruto (dado pessoal) exclusivo do servidor: `permission denied` sob `set role authenticated` + JWT do admin da própria organização e sob `anon`; RLS ligada com policy de organização + papel admin; FK composta recusa o canal de outra organização; cascade com o canal" },
   { tabela: "platform_support_sessions", razao: "tests/invariants/suporte-temporario.test.ts — grant por sessão, readonly e nenhuma escrita direta authenticated" },
   {
     tabela: "webhook_lead_captures",

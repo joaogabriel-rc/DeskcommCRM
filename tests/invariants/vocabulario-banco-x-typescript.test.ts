@@ -211,6 +211,13 @@ const PARES: Array<{
     arquivo: "lib/channels/meta/sincronizacao.ts",
     simbolo: "CAMPOS_DE_SINCRONIZACAO",
   },
+  // Ecos do app em espera (0436) — a quarentena do eco anterior ao onboarding.
+  {
+    tabela: "meta_ecos_em_espera",
+    coluna: "estado",
+    arquivo: "lib/channels/meta/ecos-em-espera.ts",
+    simbolo: "ESTADOS_DO_ECO_EM_ESPERA",
+  },
   {
     tabela: "messages",
     coluna: "sent_via",

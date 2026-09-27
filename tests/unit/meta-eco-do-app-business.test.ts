@@ -90,6 +90,8 @@ describe("parseMetaWebhook — smb_message_echoes", () => {
         type: "text",
         text: "respondi pelo celular",
         media: null,
+        // O item bruto vai junto: é o que a quarentena guarda (0436).
+        bruto: expect.objectContaining({ id: "wamid.E1", to: CLIENTE }),
       },
     ]);
   });
@@ -184,6 +186,24 @@ function bancoFalso(estado: Estado): SupabaseClient {
     return { data: null, error: null };
   };
   return { from, rpc } as unknown as SupabaseClient;
+}
+
+/** O banco falso, com a leitura de `channel_sessions.meta_onboarding_em` errando. */
+function bancoComOnboardingIlegivel(estado: Estado): SupabaseClient {
+  const banco = bancoFalso(estado);
+  const from = banco.from.bind(banco);
+  (banco as unknown as { from: (t: string) => unknown }).from = (t: string) => {
+    const q = from(t) as unknown as Record<string, unknown>;
+    if (t === "channel_sessions") {
+      const select = q.select as (c?: string) => unknown;
+      q.select = (c?: string) => {
+        if (c === "meta_onboarding_em") q.maybeSingle = async () => ({ data: null, error: { code: "57P01", message: "conexão caiu" } });
+        return select(c);
+      };
+    }
+    return q;
+  };
+  return banco;
 }
 
 function estadoNovo(): Estado {
@@ -289,6 +309,11 @@ const ecosIngeridos: Array<{ evento: EchoMessageEvent; org: string }> = [];
 const inboundIngeridos: unknown[] = [];
 let sessoesDaRota: Array<Record<string, unknown>> = [];
 let sessaoDoToken: { id: string; organizationId: string; wabaId: string | null } | null = null;
+/**
+ * A1: quando ligado, a rota chama o `ingestMetaEcho` REAL com um banco cuja leitura
+ * do onboarding do canal erra — é o caminho inteiro, da rota à porta de suspeita.
+ */
+let onboardingIlegivel: Estado | null = null;
 
 vi.mock("@/lib/channels/meta/app", () => ({ appDaMeta: vi.fn(async () => ({ appSecret: SEGREDO, verifyToken: "v" })) }));
 vi.mock("@/lib/channels/meta/ingest-eco", async (importOriginal) => {
@@ -296,6 +321,7 @@ vi.mock("@/lib/channels/meta/ingest-eco", async (importOriginal) => {
   return {
     ...real,
     ingestMetaEcho: vi.fn(async (admin: SupabaseClient, e: EchoMessageEvent, dono: { organizationId: string }) => {
+      if (onboardingIlegivel) return real.ingestMetaEcho(bancoComOnboardingIlegivel(onboardingIlegivel), e, dono);
       // Nas rotas, só o ROTEAMENTO interessa; a ingestão real está medida acima.
       if ((admin as unknown as { rota?: boolean }).rota) {
         ecosIngeridos.push({ evento: e, org: dono.organizationId });
@@ -368,6 +394,33 @@ describe("rotas de webhook — o eco chega à organização certa", () => {
       { id: "s-b", organization_id: ORG_B, provider: "meta_cloud", meta_phone_number_id: NUM_B, meta_waba_id: WABA_B, archived_at: null },
     ];
     sessaoDoToken = { id: "s-a", organizationId: ORG_A, wabaId: WABA_A };
+    onboardingIlegivel = null;
+  });
+
+  describe("A1 — onboarding do canal ilegível: a entrega falha e a Meta reentrega", () => {
+    it("universal: 500, sem mensagem, contato, conversa, pausa, auditoria nem evento", async () => {
+      const { POST } = await import("@/app/api/v1/webhooks/meta/route");
+      onboardingIlegivel = estadoNovo();
+      const res = await POST(entrega("https://crm.exemplo.com/api/v1/webhooks/meta", corpo(eco(WABA_A, NUM_A, "wamid.A1"))));
+      expect(res.status).toBe(500);
+      expect(onboardingIlegivel.mensagens).toHaveLength(0);
+      expect(onboardingIlegivel.rpcs).toHaveLength(0);
+      expect(pausarIaPorAtendimentoManual).not.toHaveBeenCalled();
+      expect(marcarConversaComMensagem).not.toHaveBeenCalled();
+      expect(audit).not.toHaveBeenCalled();
+    });
+
+    it("token: a exceção sobe da rota (o framework responde 5xx), sem efeito nenhum", async () => {
+      const { POST } = await import("@/app/api/v1/webhooks/meta/[token]/route");
+      onboardingIlegivel = estadoNovo();
+      const ctx = { params: Promise.resolve({ token: "token-de-teste" }) } as never;
+      await expect(
+        POST(entrega("https://crm.exemplo.com/api/v1/webhooks/meta/token-de-teste", corpo(eco(WABA_A, NUM_A, "wamid.A1T"))), ctx),
+      ).rejects.toThrow("channel_sessions (onboarding)");
+      expect(onboardingIlegivel.mensagens).toHaveLength(0);
+      expect(onboardingIlegivel.rpcs).toHaveLength(0);
+      expect(audit).not.toHaveBeenCalled();
+    });
   });
 
   describe("universal (/api/v1/webhooks/meta)", () => {

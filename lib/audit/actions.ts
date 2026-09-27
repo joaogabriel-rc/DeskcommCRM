@@ -891,6 +891,12 @@ export const AUDIT_ACTIONS = [
   // Pedido de sincronização do app WhatsApp Business (coexistência, migration
   // 0420): contatos e histórico, com o desfecho de cada tipo no metadata.
   "channel.app_sync_requested",
+  // Ecos do app em espera (migration 0436): o eco anterior ao onboarding que a
+  // correlação por wamid classificou como mídia HISTÓRICA (não vira mensagem), e
+  // o que foi promovido pelo caminho ao vivo porque o history terminou sem ele.
+  // Um registro por janela e por rodada que decidiu algo; rodada vazia não audita.
+  "meta.eco_historico_classificado",
+  "meta.eco_tardio_promovido",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
