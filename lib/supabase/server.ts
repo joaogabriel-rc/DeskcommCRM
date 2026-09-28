@@ -21,10 +21,12 @@ import { env } from "@/lib/env";
  * executa no IMPORT — antes do mock existir — e derruba a suíte inteira com
  * "Cannot access 'envMock' before initialization".
  */
+/** D-01.01: cookie name canônico alinhado ao middleware (`proxy.ts`). */
+export const NOME_DO_COOKIE_DE_SESSAO = "sb-deskcomm-auth";
+
 function opcoesDeCookie(sameSite: "strict" | "lax") {
-  // D-01.01: cookie name canônico alinhado ao middleware.
   return {
-    name: "sb-deskcomm-auth",
+    name: NOME_DO_COOKIE_DE_SESSAO,
     sameSite,
     httpOnly: true,
     secure: cookieSecure(),

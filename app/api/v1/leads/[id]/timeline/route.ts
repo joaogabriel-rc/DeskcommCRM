@@ -38,6 +38,7 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser } from "@/lib/auth/server";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { createClient } from "@/lib/supabase/server";
+import { getUserDaRequisicao } from "@/lib/auth/usuario-da-requisicao";
 import {
   TIMELINE_COLS,
   comNomeDoAtor,
@@ -61,7 +62,7 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const {
     data: { user },
     error: authErr,
-  } = await supabase.auth.getUser();
+  } = await getUserDaRequisicao(supabase);
   if (authErr || !user) {
     return fail("unauthenticated", "Auth required.", 401, { requestId });
   }

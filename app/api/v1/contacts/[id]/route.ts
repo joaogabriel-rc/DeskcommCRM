@@ -17,6 +17,7 @@ import { traduzir } from "@/lib/i18n/dicionario";
 import { contactPatchSchemaDoPais, validateRequest } from "@/lib/schemas";
 import { perfilDaOrganizacao } from "@/lib/legal/perfil-do-pais";
 import { createClient } from "@/lib/supabase/server";
+import { getUserDaRequisicao } from "@/lib/auth/usuario-da-requisicao";
 
 import { deleteContactHandler, getContactHandler, patchContactHandler } from "../_handler";
 
@@ -33,7 +34,7 @@ export async function GET(
   const {
     data: { user },
     error: authErr,
-  } = await supabase.auth.getUser();
+  } = await getUserDaRequisicao(supabase);
   if (authErr || !user) {
     return fail("unauthenticated", "Auth required.", 401, { requestId });
   }

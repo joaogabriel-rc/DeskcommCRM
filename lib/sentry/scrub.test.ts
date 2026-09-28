@@ -92,6 +92,45 @@ describe("sentryScrubHooks", () => {
     expect(JSON.stringify(event)).not.toContain(TOKEN);
   });
 
+  it("apaga a identidade que o proxy entrega ao handler — o User inteiro, em base64", () => {
+    // O e-mail vai codificado: `scrubMessage` não o enxergaria. Só apagar o header resolve.
+    const identidade = `v1.${Buffer.from(JSON.stringify({ u: { email: "pessoa@exemplo.com" } })).toString("base64url")}.assinatura`;
+    const event = sentryScrubHooks.beforeSend({
+      request: {
+        url: "https://crm.exemplo.com/api/v1/tags/cores",
+        headers: { "x-identidade-verificada": identidade, "content-type": "application/json" },
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    expect(event.request?.headers).not.toHaveProperty("x-identidade-verificada");
+    expect(event.request?.headers).toHaveProperty("content-type");
+    expect(JSON.stringify(event)).not.toContain(identidade);
+  });
+
+  it("apaga a identidade também dos atributos de header dos traces", () => {
+    const identidade = "v1.corpo-com-o-user.assinatura";
+    const transacao = sentryScrubHooks.beforeSendTransaction({
+      contexts: {
+        trace: {
+          data: {
+            "http.request.header.x_identidade_verificada": identidade,
+            "http.request.header.accept": "application/json",
+          },
+        },
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    expect(transacao.contexts?.trace?.data).not.toHaveProperty("http.request.header.x_identidade_verificada");
+    expect(transacao.contexts?.trace?.data).toHaveProperty("http.request.header.accept");
+
+    const span = sentryScrubHooks.beforeSendSpan({
+      description: "GET /api/v1/tags/cores",
+      data: { "http.request.header.x_identidade_verificada": identidade },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    expect(JSON.stringify(span)).not.toContain(identidade);
+  });
+
   it("beforeSendTransaction limpa os atributos de trace — o canal que não tinha guarda", () => {
     const event = sentryScrubHooks.beforeSendTransaction({
       transaction: `GET /api/v1/webhooks/in/${TOKEN}`,

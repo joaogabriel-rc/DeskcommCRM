@@ -42,8 +42,14 @@ type BreadcrumbLike = { message?: string; data?: Record<string, unknown> };
  * lista, e o arquivo passa a nomear provider — o que a doutrina de restrição de canal
  * proíbe fora de `lib/channels/` (`docs/doctrine/restricao-de-canal.md`). Casar pelo
  * que torna o header sensível cobre os dois casos de uma vez.
+ *
+ * `identidade` cobre `x-identidade-verificada`: o `User` inteiro (e-mail, nome,
+ * fatores) que o `proxy.ts` entrega ao handler (`lib/auth/identidade-assinada.ts`).
+ * Nenhum dos filtros padrão do Sentry casa com esse nome, e o e-mail em base64
+ * passa pelo `scrubMessage` sem ser visto.
  */
-const SENSITIVE_HEADER = /authorization|cookie|api[-_]?key|token|secret|password|credential/i;
+const SENSITIVE_HEADER =
+  /authorization|cookie|api[-_]?key|token|secret|password|credential|identidade/i;
 
 export function isSensitiveHeader(name: string): boolean {
   return SENSITIVE_HEADER.test(name);
@@ -106,11 +112,20 @@ const URL_ATTRIBUTES = [
   "http.request.url",
 ];
 
+/** Onde o Sentry grava header como atributo: `http.request.header.x_algum_header`. */
+const HEADER_ATTRIBUTE = /^http\.(request|response)\.header\.(.+)$/;
+
 function scrubAttributes(data: Record<string, unknown> | undefined): void {
   if (!data) return;
   for (const key of URL_ATTRIBUTES) {
     const value = data[key];
     if (typeof value === "string") data[key] = scrubUrl(value);
+  }
+  // O mesmo header que `scrubHeaders` apaga do evento chega por aqui nos traces,
+  // com `-` trocado por `_` — e o filtro do próprio Sentry não o conhece.
+  for (const key of Object.keys(data)) {
+    const nome = HEADER_ATTRIBUTE.exec(key)?.[2];
+    if (nome && isSensitiveHeader(nome)) delete data[key];
   }
 }
 

@@ -17,6 +17,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { empresaExigeMfa, exigeCadastroDeMfa } from "@/lib/auth/politica-mfa";
 import { normalizarIdioma } from "@/lib/i18n/idiomas";
 import type { AuthUser, Role, UserOrgMembership, ActiveOrg } from "./types";
+import {
+  escopoDaRequisicao,
+  getUserDaRequisicao,
+  usuarioVerificadoPeloProxy,
+} from "@/lib/auth/usuario-da-requisicao";
 
 const ACTIVE_ORG_COOKIE = "active_org";
 
@@ -119,12 +124,35 @@ export function ehSessaoAusente(error: { name?: string } | null | undefined): bo
   return error?.name === "AuthSessionMissingError";
 }
 
+/**
+ * Memo de `loadAuthUser` por REQUISIÇÃO — ver `escopoDaRequisicao`. O `cache()`
+ * do React abaixo continua valendo nos Server Components; este cobre os Route
+ * Handlers, onde ele é no-op e cada chamada refazia 4 idas ao Supabase.
+ */
+const authUserDaRequisicao = new WeakMap<object, Map<string, Promise<AuthUser | null>>>();
+
 export const loadAuthUser = cache(async (): Promise<AuthUser | null> => {
+  const escopo = await escopoDaRequisicao();
+  if (!escopo) return carregarAuthUser();
+  let porSessao = authUserDaRequisicao.get(escopo.chave);
+  if (!porSessao) {
+    porSessao = new Map();
+    authUserDaRequisicao.set(escopo.chave, porSessao);
+  }
+  let pendente = porSessao.get(escopo.vinculo);
+  if (!pendente) {
+    pendente = carregarAuthUser();
+    porSessao.set(escopo.vinculo, pendente);
+  }
+  return pendente;
+});
+
+async function carregarAuthUser(): Promise<AuthUser | null> {
   const supabase = await createClient();
   const {
     data: { user },
     error,
-  } = await supabase.auth.getUser();
+  } = await getUserDaRequisicao(supabase);
   // ⚠️ O `error` era DESCARTADO — nem chegava a ser desestruturado —, e aqui
   // `user: null` é tão ambíguo quanto o `data: null` que a query logo abaixo
   // trata com todo o cuidado: significa "não está logado" (estado normal) E
@@ -169,8 +197,17 @@ export const loadAuthUser = cache(async (): Promise<AuthUser | null> => {
   // ⚠️ `ORDER BY` NÃO É ENFEITE AQUI: esta lista decide QUAL ORGANIZAÇÃO FICA
   // ATIVA para quem não tem o cookie `active_org` — `resolveActiveOrg` pega
   // `organizations[0]`. Sem ordenação, "a primeira" é o que o Postgres devolver.
-  const [{ data: paRow, error: paErro }, { data: rawMemberships, error: membErro }] =
-    await Promise.all([
+  //
+  // `fn_support_context` entra no MESMO lote: ela resolve `auth.uid()` e
+  // `auth.session_id` do JWT, não depende de nenhuma das duas consultas, e
+  // esperava as duas terminarem só por estar escrita depois (uma ida a mais).
+  // `allSettled` preserva a ORDEM dos erros de antes: falha de permissão é
+  // reportada primeiro, e só então a do contexto de suporte.
+  const [
+    { data: paRow, error: paErro },
+    { data: rawMemberships, error: membErro },
+    suporteResolvido,
+  ] = await Promise.all([
       supabase
         .from("platform_admins")
         .select("user_id, revoked_at")
@@ -193,6 +230,10 @@ export const loadAuthUser = cache(async (): Promise<AuthUser | null> => {
         .is("revoked_at", null)
         .order("accepted_at", { ascending: true, nullsFirst: true })
         .order("organization_id", { ascending: true }),
+      readSupportContext(supabase).then(
+        (valor) => ({ ok: true as const, valor }),
+        (erro: unknown) => ({ ok: false as const, erro }),
+      ),
     ]);
 
   /**
@@ -246,7 +287,8 @@ export const loadAuthUser = cache(async (): Promise<AuthUser | null> => {
     };
   });
 
-  const support = await readSupportContext(supabase);
+  if (!suporteResolvido.ok) throw suporteResolvido.erro;
+  const support = suporteResolvido.valor;
   const fullName = (user.user_metadata?.full_name as string | undefined) ?? null;
   const avatarUrl = (user.user_metadata?.avatar_url as string | undefined) ?? null;
   const locale = (user.user_metadata?.locale as string | undefined) ?? null;
@@ -274,7 +316,7 @@ export const loadAuthUser = cache(async (): Promise<AuthUser | null> => {
     organizations: memberships,
     support,
   };
-});
+}
 
 /**
  * Resolves the active organization for the current request.
@@ -317,6 +359,15 @@ export async function requireAuth(): Promise<AuthUser> {
  * Use only in Server Components / Server Actions (cookie session).
  */
 export const isMfaEnrolled = cache(async (): Promise<boolean> => {
+  // `mfa.listFactors()` é `getUser()` + filtro dos `factors` (auth-js
+  // `_listFactors`) — uma ida ao GoTrue só para reler o usuário que o proxy
+  // acabou de validar. Com ele em mãos, o MESMO filtro, sem a ida.
+  const verificado = await usuarioVerificadoPeloProxy();
+  if (verificado) {
+    return (verificado.factors ?? []).some(
+      (f) => f.factor_type === "totp" && f.status === "verified",
+    );
+  }
   const supabase = await createClient();
   const { data } = await supabase.auth.mfa.listFactors();
   return !!data?.totp?.some((f) => f.status === "verified");
@@ -349,26 +400,26 @@ export const requiresMfa = cache(
   ): Promise<boolean> => {
     const admin = createAdminClient();
 
-    let plataformaExige: boolean | null = null;
-    if (isPlatformAdmin && userId) {
-      const { data } = await admin
-        .from("platform_admins")
-        .select("mfa_required")
-        .eq("user_id", userId)
-        .is("revoked_at", null)
-        .maybeSingle();
-      plataformaExige = (data?.mfa_required as boolean | undefined) ?? null;
-    }
-
-    let empresaExige = false;
-    if (orgId) {
-      const { data } = await admin
-        .from("organizations")
-        .select("settings")
-        .eq("id", orgId)
-        .maybeSingle();
-      empresaExige = empresaExigeMfa(data?.settings);
-    }
+    // As duas políticas são independentes: lidas juntas, não uma depois da outra.
+    const [plataformaExige, empresaExige] = await Promise.all([
+      isPlatformAdmin && userId
+        ? admin
+            .from("platform_admins")
+            .select("mfa_required")
+            .eq("user_id", userId)
+            .is("revoked_at", null)
+            .maybeSingle()
+            .then(({ data }) => (data?.mfa_required as boolean | undefined) ?? null)
+        : Promise.resolve<boolean | null>(null),
+      orgId
+        ? admin
+            .from("organizations")
+            .select("settings")
+            .eq("id", orgId)
+            .maybeSingle()
+            .then(({ data }) => empresaExigeMfa(data?.settings))
+        : Promise.resolve(false),
+    ]);
 
     return exigeCadastroDeMfa({ role, isPlatformAdmin, plataformaExige, empresaExige });
   },

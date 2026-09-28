@@ -7,11 +7,16 @@ import {
   verifyImpersonateCookieEdge,
   IMPERSONATE_COOKIE_NAME_EDGE,
 } from "@/lib/impersonate/cookie-edge";
+import { assinarIdentidade, CABECALHO_IDENTIDADE } from "@/lib/auth/identidade-assinada";
 
 const COOKIE_NAME = "sb-deskcomm-auth";
 
 export async function proxy(request: NextRequest) {
-  const response = NextResponse.next({ request: { headers: request.headers } });
+  // A identidade verificada só pode nascer AQUI. Apagada antes de qualquer ramo
+  // (inclusive o público): o que o navegador mandar com esse nome não chega ao
+  // handler. Ver `lib/auth/identidade-assinada.ts`.
+  request.headers.delete(CABECALHO_IDENTIDADE);
+  let response = NextResponse.next({ request: { headers: request.headers } });
 
   // Inject X-Request-Id for downstream correlation (audit log, error wrappers).
   const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
@@ -33,6 +38,7 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
+  const cookiesRenovados: { name: string; value: string; options: CookieOptions }[] = [];
   const supabase = createServerClient(
     env.NEXT_PUBLIC_SUPABASE_URL,
     env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
@@ -45,6 +51,7 @@ export async function proxy(request: NextRequest) {
           cookiesToSet.forEach(({ name, value, options }) => {
             request.cookies.set(name, value);
             response.cookies.set(name, value, options);
+            cookiesRenovados.push({ name, value, options });
           });
         },
       },
@@ -86,6 +93,32 @@ export async function proxy(request: NextRequest) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname + search);
     return NextResponse.redirect(loginUrl);
+  }
+
+  // Entrega ao handler o usuário que ESTE `getUser()` acabou de validar, para
+  // que `loadAuthUser`/`isMfaEnrolled`/rotas não repitam a mesma ida ao GoTrue
+  // (medido: 3 `GET /auth/v1/user` por requisição de API, ~250 ms cada).
+  //
+  // A resposta é RECONSTRUÍDA porque `NextResponse.next({ request })` copia os
+  // cabeçalhos no momento em que é criada: o `response` do topo foi montado
+  // antes do `getUser()` e não leva nem este cabeçalho nem os cookies que o
+  // refresh da sessão acabou de gravar em `request.cookies`. Com isso o handler
+  // passa a enxergar a MESMA sessão que o navegador vai receber — a amarra da
+  // assinatura é feita sobre ela.
+  const assinatura = await assinarIdentidade(
+    user,
+    { nome: COOKIE_NAME, todos: request.cookies.getAll() },
+    env.SUPABASE_SERVICE_ROLE_KEY,
+  );
+  if (assinatura) {
+    request.headers.set(CABECALHO_IDENTIDADE, assinatura);
+    const encaminhada = NextResponse.next({ request: { headers: request.headers } });
+    encaminhada.headers.set("x-request-id", requestId);
+    encaminhada.headers.set("x-pathname", pathname);
+    for (const { name, value, options } of cookiesRenovados) {
+      encaminhada.cookies.set(name, value, options);
+    }
+    response = encaminhada;
   }
 
   // EPIC-11 S-11.07: validate impersonate cookie on /app/* paths. Middleware
