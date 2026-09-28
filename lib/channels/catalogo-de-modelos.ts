@@ -38,6 +38,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { nomeDoCanal } from "./estado";
 import { slotKey } from "./meta/build-components";
 import { isStatusSendable } from "./meta/template-binding";
 import {
@@ -274,7 +275,7 @@ export async function conexoesComModelos(
     .filter((c) => !opcoes.fonte || fonteDeTemplates(c.provider) === opcoes.fonte)
     .map((c) => ({
       id: c.id,
-      rotulo: c.display_name?.trim() || c.phone_number?.trim() || "Número oficial",
+      rotulo: nomeDoCanal(c),
       wabaId: c.meta_waba_id,
     }));
 }
