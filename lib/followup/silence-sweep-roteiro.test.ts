@@ -79,7 +79,9 @@ describe("runSilenceSweep", () => {
         { id: "p-bom", organization_id: "org-2", active_version_id: "v2", threshold_minutes: 60, segments: [] },
       ],
       loadSilentContactIds: async () => ["contato"],
+      loadContatosComRetornoVivo: async () => new Set<string>(),
       loadTriggerNode: async () => ({ id: "t", pedeAgente: false }),
+      loadContactIdsEmCooldown: async () => new Set(),
       insertEnrollment: insert,
     };
     const resumo = await runSilenceSweep({

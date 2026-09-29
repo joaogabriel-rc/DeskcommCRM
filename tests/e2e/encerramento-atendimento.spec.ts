@@ -3,14 +3,14 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdirSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./helpers/test";
 import { credenciaisSupabaseDeTeste } from "../../scripts/lib/env-de-teste";
 
 const credentials = credenciaisSupabaseDeTeste();
 const db = createClient(credentials.url, credentials.serviceRole, {
   auth: { persistSession: false },
 });
-const evidence = ".superpowers/evidence/comunidade-360";
+const evidence = "evidence/comunidade-360";
 test.use({ trace: "on" });
 async function insert(table: string, values: Record<string, unknown>) {
   const { data, error } = await db.from(table).insert(values).select("id").single();

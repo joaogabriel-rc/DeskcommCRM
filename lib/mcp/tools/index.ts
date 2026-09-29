@@ -16,6 +16,7 @@ import {
   crmListConversations,
   crmGetConversation,
   crmGetConversationHistory,
+  crmCreateConversationDraft,
 } from "./conversations";
 import {
   crmListLeads,
@@ -23,8 +24,9 @@ import {
   crmCreateLead,
   crmUpdateLead,
   crmMoveLeadStage,
+  crmRetomarLead,
 } from "./leads";
-import { crmListPipelines } from "./pipelines";
+import { crmGetPipelineForecast, crmListPipelines } from "./pipelines";
 import { crmSendWhatsappMessage } from "./messages";
 import { crmStartConversationAndSend } from "./start-conversation";
 import {
@@ -49,6 +51,7 @@ import {
   crmSaveOrgMemory,
 } from "./evolucao";
 import { crmListContactOrders, crmSearchProducts } from "./comercio";
+import { crmGetHonorariosContrato, crmListHonorariosParcelas } from "./honorarios";
 import { crmDescribeExternalData, crmQueryExternalData } from "./dados-externos";
 import { crmListPrivacyRequests } from "./privacidade";
 import {
@@ -88,6 +91,7 @@ import {
   crmCloseDemand,
   crmProposeReactivation,
 } from "./retencao";
+import { crmDraftProposal, crmPrepararProposta } from "./propostas";
 
 // Cast via `unknown` porque McpToolDefinition<TInput> nao e covariante
 // em TInput (handler usa TInput em posicao contravariante). Coletar
@@ -109,6 +113,7 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmListLeads,
   crmGetLead,
   crmListPipelines,
+  crmGetPipelineForecast,
   crmSearchKnowledge,
   crmListKnowledgeSources,
   crmListImprovementProposals,
@@ -116,6 +121,9 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmSaveOrgMemory,
   crmListContactOrders,
   crmSearchProducts,
+  crmGetHonorariosContrato,
+  crmListHonorariosParcelas,
+  crmPrepararProposta,
   crmDescribeExternalData,
   crmQueryExternalData,
   crmListPrivacyRequests,
@@ -146,8 +154,10 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmCreateLead,
   crmUpdateLead,
   crmMoveLeadStage,
+  crmRetomarLead,
   crmSendWhatsappMessage,
   crmStartConversationAndSend,
+  crmCreateConversationDraft,
   crmAssignConversation,
   crmManageTags,
   // write — organizar a operação (W4)
@@ -165,6 +175,7 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmAddCaseNote,
   crmCloseHumanCase,
   crmResumeAiAttendance,
+  crmDraftProposal,
   // handoff (special)
   crmRequestHumanHandoff,
 ] as unknown as ReadonlyArray<McpToolDefinition>;

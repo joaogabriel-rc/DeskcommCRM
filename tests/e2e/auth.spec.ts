@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./helpers/test";
 import AxeBuilder from "@axe-core/playwright";
 
 test.describe("auth flow", () => {
@@ -25,6 +25,9 @@ test.describe("auth flow", () => {
     await expect(page.locator("#email")).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(page.locator("#password")).toBeFocused();
+    await page.keyboard.press("Tab");
+    // O botão de mostrar a senha fica no Tab de propósito: quem usa só o teclado precisa alcançá-lo.
+    await expect(page.getByRole("button", { name: "Mostrar senha" })).toBeFocused();
     await page.keyboard.press("Tab");
     // Next focusable is the submit button
     const submit = page.getByRole("button", { name: "Entrar", exact: true });

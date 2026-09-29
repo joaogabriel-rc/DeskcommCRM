@@ -19,7 +19,12 @@ import type {
   ChaveDeOrcamentoDaInstalacao,
   ComportamentoDaInstalacao,
 } from "@/lib/instalacao/comportamento";
-import type { ModuloOpcional } from "@/lib/instalacao/modulos";
+import type { ModuloOpcional, MODULOS_OPCIONAIS_POR_FLAG } from "@/lib/instalacao/modulos";
+
+/** Só os módulos que esta tela liga/desliga — nunca "honorarios" (módulo de
+ * tabela, ADR-0002): `updateModuloDaInstalacao` não aceita esse valor, e o tipo
+ * aqui existe pra isso dar erro em build, não silenciosamente em runtime. */
+type ModuloPorFlag = (typeof MODULOS_OPCIONAIS_POR_FLAG)[number];
 
 /**
  * Cada interruptor salva na hora, sem botão de confirmar — mesmo desenho do
@@ -181,19 +186,58 @@ export function FormularioDeComportamento({ inicial }: { inicial: ComportamentoD
  * aqui, que se ligam (doc 24: liga/desliga de configuração geral tem tela, sem
  * `.env`). Mesmo desenho do cartão de cima: salva no clique, volta no erro.
  */
+/** Cada módulo, como ele aparece aqui. O texto diz o que ligar ABRE, não só o nome. */
+const MODULOS_NA_TELA: ReadonlyArray<{ modulo: ModuloPorFlag; id: string; rotulo: string; descricao: string }> = [
+  {
+    modulo: "banco_externo",
+    id: "modulo-banco-externo",
+    rotulo: "Banco de dados externo",
+    descricao:
+      "Ligado, cada empresa pode conectar o banco de outro sistema (um ERP, outro CRM) para o agente consultar. Isso guarda a senha daquele banco neste servidor e abre conexão com ele. Desligado, a tela, o menu e as ferramentas do agente somem.",
+  },
+  {
+    modulo: "fluxos_atendimento",
+    id: "modulo-fluxos-atendimento",
+    rotulo: "Fluxos de atendimento",
+    descricao:
+      "Ligado, cada empresa pode montar roteiros de perguntas que a IA conduz durante a conversa (nome, CPF, interesse…), e as respostas aparecem na ficha do cliente. Desligado, a tela, o menu e o roteiro no atendimento da IA somem.",
+  },
+  {
+    modulo: "propostas",
+    id: "modulo-propostas",
+    rotulo: "Propostas comerciais",
+    descricao:
+      "Ligado, cada empresa pode ligar em Configurações › Propostas o módulo de proposta comercial: a IA levanta o que o cliente precisa, monta a proposta pelos modelos da empresa e o PDF sai pelo WhatsApp. Desligado, nenhuma empresa vê a tela, o menu nem as ferramentas do agente.",
+  },
+  {
+    modulo: "crm_b2b",
+    id: "modulo-crm-b2b",
+    rotulo: "Empresas e pessoas (venda para empresas)",
+    descricao:
+      "Ligado, cada empresa ganha no CRM o cadastro de Empresas (razão social e CNPJ, com os dados públicos preenchidos pela BrasilAPI), as Pessoas que decidem dentro delas, com vários telefones, e a importação de planilha CSV ou Excel. Consultar um CNPJ manda o número para a BrasilAPI. Desligado, as telas e o menu somem.",
+  },
+];
+
 export function FormularioDeModulos({ ligados }: { ligados: readonly ModuloOpcional[] }) {
   const t = useT();
-  const [bancoExterno, setBancoExterno] = useState(ligados.includes("banco_externo"));
+  const [estado, setEstado] = useState<ReadonlySet<ModuloOpcional>>(new Set(ligados));
   const [erro, setErro] = useState<string | null>(null);
   const [pendente, startTransition] = useTransition();
 
-  function trocar(valor: boolean) {
+  function trocar(modulo: ModuloPorFlag, valor: boolean) {
     setErro(null);
-    setBancoExterno(valor);
+    const alternar = (ligar: boolean) =>
+      setEstado((atual) => {
+        const proximo = new Set(atual);
+        if (ligar) proximo.add(modulo);
+        else proximo.delete(modulo);
+        return proximo;
+      });
+    alternar(valor);
     startTransition(async () => {
-      const r = await updateModuloDaInstalacao({ modulo: "banco_externo", ligado: valor });
+      const r = await updateModuloDaInstalacao({ modulo, ligado: valor });
       if (!r.ok) {
-        setBancoExterno(!valor);
+        alternar(!valor);
         setErro(t("Não deu para salvar. Tente de novo em instantes."));
       }
     });
@@ -210,25 +254,23 @@ export function FormularioDeModulos({ ligados }: { ligados: readonly ModuloOpcio
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
-          <div className="space-y-1">
-            <Label htmlFor="modulo-banco-externo" className="text-base">
-              {t("Banco de dados externo")}
-            </Label>
-            <p className="text-sm text-muted-foreground">
-              {t(
-                "Ligado, cada empresa pode conectar o banco de outro sistema (um ERP, outro CRM) para o agente consultar. Isso guarda a senha daquele banco neste servidor e abre conexão com ele. Desligado, a tela, o menu e as ferramentas do agente somem.",
-              )}
-            </p>
+        {MODULOS_NA_TELA.map((m) => (
+          <div key={m.modulo} className="flex items-start justify-between gap-4 rounded-lg border p-4">
+            <div className="space-y-1">
+              <Label htmlFor={m.id} className="text-base">
+                {t(m.rotulo)}
+              </Label>
+              <p className="text-sm text-muted-foreground">{t(m.descricao)}</p>
+            </div>
+            <Switch
+              id={m.id}
+              checked={estado.has(m.modulo)}
+              onCheckedChange={(valor) => trocar(m.modulo, valor)}
+              disabled={pendente}
+              aria-label={t(m.rotulo)}
+            />
           </div>
-          <Switch
-            id="modulo-banco-externo"
-            checked={bancoExterno}
-            onCheckedChange={trocar}
-            disabled={pendente}
-            aria-label={t("Banco de dados externo")}
-          />
-        </div>
+        ))}
 
         {erro && (
           <p className="text-sm text-destructive" role="alert">

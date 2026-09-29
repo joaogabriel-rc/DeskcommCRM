@@ -9,7 +9,7 @@
  */
 import { appDaMeta } from "@/lib/channels/meta/app";
 import { lerEnvelopeMeta } from "@/lib/channels/meta/envelope";
-import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
+import { ingestMetaEcho, ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import type { MetaWebhookSession } from "@/lib/channels/meta/session";
 import { parseMetaWebhook, verifyMetaSignature, type MetaWebhookEvent } from "@/lib/channels/meta/webhook";
 import { logger } from "@/lib/logger";
@@ -95,6 +95,23 @@ export async function processarEventoDaMeta(
       });
     }
     return r.status;
+  }
+
+  if (e.kind === "outbound_echo") {
+    // Coexistência: resposta dada pelo app WhatsApp Business. Entra na conversa
+    // como saída de humano e pausa a IA — ver `ingestMetaEcho`. Mesmo desenho da
+    // rota por token (`/meta/[token]`): 2xx sempre, falha no log e no desfecho.
+    const r = await ingestMetaEcho(admin, e, { organizationId: sessao.organizationId });
+    if (r.status === "failed" || r.status === "no_session") {
+      logger.error("[meta.ingest] eco do app não ingerido", {
+        status: r.status,
+        reason: r.status === "failed" ? r.reason : undefined,
+        external_id: e.externalId,
+        phone_number_id: e.phoneNumberId,
+        organization_id: sessao.organizationId,
+      });
+    }
+    return `eco:${r.status}`;
   }
 
   if (e.kind === "template_status") {

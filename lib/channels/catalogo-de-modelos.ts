@@ -38,6 +38,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { nomeDoCanal } from "./estado";
 import { slotKey } from "./meta/build-components";
 import { isStatusSendable } from "./meta/template-binding";
 import {
@@ -180,7 +181,12 @@ export function modeloDaLinha(linha: LinhaDoCatalogo): ModeloDoCatalogo {
     channelSessionId: linha.channel_session_id,
     utilizavel: isStatusSendable(linha.status),
     conteudo: {
-      header: conteudo.header,
+      // Projeta para o contrato do catálogo: `lerConteudo` também devolve o
+      // `midiaUrl` do exemplo de cabeçalho (serve para preencher a EDIÇÃO da
+      // definição), e quem escolhe modelo em Fluxos e Disparos não o usa.
+      header: conteudo.header
+        ? { formato: conteudo.header.formato, texto: conteudo.header.texto }
+        : null,
       body: conteudo.body,
       footer: conteudo.footer,
       botoes: conteudo.botoes,
@@ -274,7 +280,7 @@ export async function conexoesComModelos(
     .filter((c) => !opcoes.fonte || fonteDeTemplates(c.provider) === opcoes.fonte)
     .map((c) => ({
       id: c.id,
-      rotulo: c.display_name?.trim() || c.phone_number?.trim() || "Número oficial",
+      rotulo: nomeDoCanal(c),
       wabaId: c.meta_waba_id,
     }));
 }

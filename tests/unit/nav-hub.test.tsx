@@ -56,25 +56,25 @@ describe("NavHub", () => {
   };
 
   it("apresenta a IA nas três etapas da jornada, na ordem", () => {
-    render(<NavHub group="ia" isPlatformAdmin role={null} title="Agente de IA" subtitle="" />);
+    render(<NavHub modulosLigados={[]} group="ia" isPlatformAdmin role={null} title="Agente de IA" subtitle="" />);
     const secoes = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent?.trim());
     expect(secoes).toEqual(["Montar o agente", "Ensinar o agente", "Acompanhar o agente"]);
   });
 
   it("desenterra Conhecimento, que só existia atrás das abas", () => {
-    render(<NavHub group="ia" isPlatformAdmin role={null} title="Agente de IA" subtitle="" />);
+    render(<NavHub modulosLigados={[]} group="ia" isPlatformAdmin role={null} title="Agente de IA" subtitle="" />);
     const link = screen.getByRole("link", { name: /Conhecimento/ });
     expect(link).toHaveAttribute("href", "/app/ai/knowledge/sources");
   });
 
   it("cada card explica para que serve — é o que o sidebar não cabe dizer", () => {
-    render(<NavHub group="ia" isPlatformAdmin role={null} title="Agente de IA" subtitle="" />);
+    render(<NavHub modulosLigados={[]} group="ia" isPlatformAdmin role={null} title="Agente de IA" subtitle="" />);
     const link = screen.getByRole("link", { name: /Conhecimento/ });
     expect(link.textContent).toMatch(/consulta antes de responder/i);
   });
 
   it("mostra também o que já está no sidebar — é inventário, não sobra", () => {
-    render(<NavHub group="ia" isPlatformAdmin role={null} title="Agente de IA" subtitle="" />);
+    render(<NavHub modulosLigados={[]} group="ia" isPlatformAdmin role={null} title="Agente de IA" subtitle="" />);
     expect(screen.getByRole("link", { name: /Agentes/ })).toBeTruthy();
   });
 
@@ -92,7 +92,7 @@ describe("NavHub", () => {
      * sobre todo grupo e todo papel, em vez de sobre uma seção nomeada.
      */
     render(
-      <NavHub group="organizacao" isPlatformAdmin={false} role="viewer" title="Org" subtitle="" />,
+      <NavHub modulosLigados={["banco_externo"]} group="organizacao" isPlatformAdmin={false} role="viewer" title="Org" subtitle="" />,
     );
     const secoes = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent?.trim());
     expect(secoes).toContain("Sua conta");
@@ -144,8 +144,29 @@ describe("NavHub", () => {
     );
   });
 
+  it("a porta de Propostas no hub do CRM some com a capacidade desligada e volta ligada", () => {
+    render(
+      <NavHub group="crm" isPlatformAdmin={false} role="admin" title="CRM" subtitle="" modulosLigados={[]} capacidadesLigadas={[]} />,
+    );
+    expect(screen.queryByRole("link", { name: /Propostas/ })).toBeNull();
+    cleanup();
+
+    render(
+      <NavHub
+        group="crm"
+        isPlatformAdmin={false}
+        role="admin"
+        title="CRM"
+        subtitle=""
+        modulosLigados={[]}
+        capacidadesLigadas={["propostas"]}
+      />,
+    );
+    expect(screen.getByRole("link", { name: /Propostas/ })).toHaveAttribute("href", "/app/proposals");
+  });
+
   it("agrupa os cards sob a própria seção, não numa lista solta", () => {
-    render(<NavHub group="ia" isPlatformAdmin role={null} title="Agente de IA" subtitle="" />);
+    render(<NavHub modulosLigados={[]} group="ia" isPlatformAdmin role={null} title="Agente de IA" subtitle="" />);
     const ensinar = screen.getByRole("region", { name: "Ensinar o agente" });
     expect(within(ensinar).getByRole("link", { name: /Memória/ })).toBeTruthy();
     expect(within(ensinar).queryByRole("link", { name: /Credenciais/ })).toBeNull();
@@ -153,7 +174,7 @@ describe("NavHub", () => {
 
   it("traduz o conteúdo do hub quando a página entrega o idioma", () => {
     render(
-      <NavHub
+      <NavHub modulosLigados={[]}
         group="ia"
         isPlatformAdmin
         role={null}
@@ -187,7 +208,7 @@ describe("NavHub", () => {
 
   it("integra contribuições tipadas no CRM sem aceitar destino vindo do pacote", () => {
     render(
-      <NavHub
+      <NavHub modulosLigados={[]}
         group="crm"
         isPlatformAdmin={false}
         role="viewer"
@@ -209,7 +230,7 @@ describe("NavHub", () => {
 
   it("expõe falha de leitura das contribuições sem derrubar o hub do CRM", () => {
     render(
-      <NavHub
+      <NavHub modulosLigados={[]}
         group="crm"
         isPlatformAdmin={false}
         role="viewer"

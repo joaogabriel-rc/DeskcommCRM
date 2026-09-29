@@ -258,12 +258,46 @@ function tiposConsumidos(): Set<string> {
  * Migrations seguem varridas pelas OUTRAS asserções (trigger + backfill nos
  * dois caminhos), que é onde a história importa.
  */
-function tiposDeRegistro(): Set<string> {
+function tiposDeRegistroNoBaseline(): Set<string> {
   const texto = semComentarios(readFileSync(join(RAIZ, "supabase/baseline.sql"), "utf8"));
   const definicoes = [...texto.matchAll(new RegExp(DEF_REGISTRO.source, "g"))];
   const ultima = definicoes[definicoes.length - 1];
   if (!ultima) throw new Error("baseline.sql sem definição de fn_event_log_e_registro");
   return new Set([...ultima[1]!.matchAll(/'([a-z0-9_.]+)'/g)].map((x) => x[1]!));
+}
+
+/**
+ * A lista que o banco usa para fechar o registro no nascimento.
+ *
+ * A ÚLTIMA definição, e não a união de todas: `fn_event_log_e_registro` é
+ * `create or replace`, então o que vale é a última escrita em ordem de
+ * aplicação — o baseline (o replay do schema, lido primeiro) e depois as
+ * migrations em ordem alfabética. União só era equivalente enquanto todas as
+ * definições eram idênticas, e a migration 0417 tirou `message.failed` da
+ * lista (ele ganhou consumidor na #1614) sem poder apagar a 0239, que já
+ * rodou em toda instalação existente. Ler a 0239 aqui acusaria um tipo como
+ * "nascendo `done`" quando o banco já nem o conhece.
+ */
+function tiposDeRegistroNaCadeia(): Set<string> {
+  let vigente = new Set<string>();
+  for (const f of arquivosSql()) {
+    const m = DEF_REGISTRO.exec(semComentarios(readFileSync(f, "utf8")));
+    if (m) {
+      vigente = new Set([...m[1]!.matchAll(/'([a-z0-9_.]+)'/g)].map((x) => x[1]!));
+    }
+  }
+  return vigente;
+}
+
+/**
+ * As DUAS leituras acima, unidas. Cada uma responde por um caminho de schema:
+ * o `baseline.sql` é o que o self-hoster aplica (install e update), e a cadeia
+ * de migrations é o que o banco que atualiza por `supabase db push` executa.
+ * As duas precisam concordar; um tipo presente em QUALQUER uma delas nasce
+ * `done` em pelo menos um desses bancos, e é isso que as asserções cobram.
+ */
+function tiposDeRegistro(): Set<string> {
+  return new Set([...tiposDeRegistroNoBaseline(), ...tiposDeRegistroNaCadeia()]);
 }
 
 /**

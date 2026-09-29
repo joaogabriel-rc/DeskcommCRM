@@ -15,6 +15,7 @@ import { resolverMarcaDaOrganizacao } from "@/lib/branding/organizacao";
 import { env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { modulosLigados } from "@/lib/instalacao/modulos";
+import { capacidadesLigadas } from "@/lib/organizacao/capacidades";
 import {
   ImpersonateBanner,
 } from "@/components/app/ImpersonateBanner";
@@ -123,6 +124,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       // Mesma linha de `settings` já lida acima — nenhuma consulta a mais.
       cliente_pela_agenda: clientePelaAgendaLigado(orgRow?.settings),
       modulos_ligados: modulos,
+      // Mesma linha de `settings` já lida acima — nenhuma consulta a mais.
+      capacidades_ligadas: capacidadesLigadas(orgRow?.settings, modulos),
     };
 
     // `marcaDaInstalacao()` é memoizada por TTL no PROCESSO (`lib/branding/
@@ -167,6 +170,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     // do produtor existir, de propósito — foi o que fez o upload por organização
     // ser só a camada, sem mais uma passada pela casca inteira.
     const marcaDoTenant = {
+      logoDarkUrl: marca.logoDarkUrl ?? null,
       ...(marca.origens.nome === "organizacao" ? { nome: marca.name } : {}),
       ...(marca.origens.logoUrl === "organizacao" && marca.logoUrl !== null
         ? { logoUrl: marca.logoUrl }

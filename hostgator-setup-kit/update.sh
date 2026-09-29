@@ -43,6 +43,17 @@ recusar_projeto_de_outra_arvore || die "Atualização interrompida para não que
 # "já está na versão mais recente" sairia sem entregar a troca.
 if [ "${SINGLE_SERVER:-0}" = "1" ]; then
   recusar_supabase_de_outra_arvore || die "Atualização interrompida para não mexer no Supabase de outra instalação."
+  # A porta direta do GoTrue acompanha o `signup_mode` da instalação (#1653).
+  # Antes do SMTP de propósito: é o caminho que roda MESMO quando o update não
+  # tem nada a atualizar (a saída "você já está na versão mais recente" fica
+  # mais abaixo), então quem trocou "só convite" na tela e rodou o update leva
+  # o `DISABLE_SIGNUP` no mesmo comando — e é ele que fecha
+  # `POST /auth/v1/signup` para quem tem a anon key. Esta chamada roda com o
+  # kit ANTERIOR ao checkout; a da versão nova fica dentro de
+  # `atualizar_supabase_single_server` (_common.sh), mais abaixo.
+  if sincronizar_signup_mode_do_gotrue; then
+    dc_supabase up -d --no-deps auth >/dev/null 2>&1 || c_ylw "⚠ Não consegui reiniciar o auth do Supabase com o modo de cadastro (#1653)."
+  fi
   if sincronizar_smtp_do_gotrue; then
     dc_supabase up -d --no-deps auth >/dev/null 2>&1 || c_ylw "⚠ Não consegui reiniciar o auth do Supabase com o SMTP do CRM."
   else
@@ -60,8 +71,13 @@ setup_update_agent_cron
 # ── 1. Tem atualização mesmo? ────────────────────────────────────────────────
 step "Procurando atualizações"
 git fetch --tags --quiet origin 2>/dev/null || c_ylw "⚠ não consegui falar com o GitHub — sigo com o código que já está aqui."
-[ -n "$TARGET_TAG" ] || TARGET_TAG="$(git tag -l 'v*' --sort=-v:refname | head -1)"
-[ -n "$TARGET_TAG" ] || die "Não encontrei nenhuma versão publicada para instalar."
+# A AUTORIDADE é a release publicada, NUNCA a maior tag — ver
+# `ultima_release_estavel` em _common.sh. Um `TARGET_TAG` passado à mão
+# continua valendo (instalar uma versão específica é operação legítima de
+# quem sabe o que está fazendo); o que deixou de existir é ESCOLHER sozinho a
+# maior tag, que instalaria código sem release publicada.
+[ -n "$TARGET_TAG" ] || TARGET_TAG="$(ultima_release_estavel)"
+[ -n "$TARGET_TAG" ] || die "Não encontrei nenhuma versão publicada para instalar. (Tag existir não basta: o alvo é a última release estável publicada no GitHub. Se o servidor não conseguiu falar com a API, tente de novo mais tarde; para instalar uma versão específica, passe --to vX.Y.Z.)"
 git rev-parse --verify --quiet "${TARGET_TAG}^{commit}" >/dev/null \
   || die "Não conheço a versão $TARGET_TAG aqui. Confira o nome (ex.: v1.1.0) ou tente de novo quando o servidor conseguir falar com o GitHub."
 CURRENT_TAG="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"
@@ -211,6 +227,9 @@ source "$KIT_DIR/manutencao.sh"
 # Single-server: o Supabase vai para a versão pinada no código novo ANTES do
 # banco (o passo 4 pausa peças dele, e um `up` depois as religaria).
 if [ "${SINGLE_SERVER:-0}" = "1" ]; then
+  # Esta função também sincroniza o modo de cadastro com o GoTrue (#1653). A
+  # chamada mora DENTRO dela, e não numa linha aqui, porque é o corpo dela que
+  # o update.sh antigo executa na atualização que traz o conserto.
   atualizar_supabase_single_server || die "O Supabase desta VPS não subiu (erro acima). NÃO mexi no banco do CRM."
 fi
 
@@ -345,6 +364,35 @@ if [ -f supabase/baseline.sql ]; then
   # cima de decisão deliberada, e falso positivo derruba a confiança no aviso
   # inteiro. Vale a ÚLTIMA operação de cada regra no arquivo: quem termina
   # criada é esperada; quem termina apagada, não.
+  #
+  # ── E A COMPARAÇÃO RODA EM ORDEM DE BYTES, SEMPRE ─────────────────────────
+  #
+  # ⛔ `sort` e `comm` precisam concordar na ordenação. No GNU coreutils os dois
+  # seguem o mesmo locale e concordam (medido: Ubuntu 20.04–25.10, Debian 12,
+  # AlmaLinux 8/9 dão 0 em C, C.UTF-8, en_US e pt_BR). No Ubuntu 26.04, que troca
+  # o coreutils pelo uutils (Rust, 0.8.0), o `sort` ordena pelo locale e o `comm`
+  # compara BYTES: sob en_US/pt_BR.UTF-8, `orgs_select` cai entre `org_guardrail_*`
+  # e `org_voice_calls_*`, o `comm` perde o passo — "comm: file 2 is not in
+  # sorted order" na stderr — e o que devolve depois é lixo.
+  #
+  # MEDIDO numa instalação real, 2026-09-28: com as 114 regras TODAS no banco, a
+  # comparação acusou 2 faltando (`org_voice_calls_admin_write` e
+  # `org_voice_calls_select`). O alarme falso faz o script tentar recriar as
+  # duas, o banco responde "already exists", a conferência seguinte tropeça no
+  # mesmo erro de ordenação — e a atualização PARA, deixando o aviso de
+  # manutenção de pé. O CRM passou 8 horas em 503 com o banco íntegro, e a tela
+  # mandava o dono procurar regra que nunca faltou.
+  #
+  # A cura é forçar o locale da comparação para `C`, que é ordem de bytes: aí o
+  # `sort` produz exatamente o que o `comm` espera, em qualquer ambiente.
+  #
+  # ⚠️ `LC_COLLATE=C` NÃO basta, e a diferença custa uma sessão de depuração:
+  # o POSIX dá precedência a `LC_ALL` sobre `LC_COLLATE`, então basta alguém
+  # exportar `LC_ALL=…UTF-8` — systemd, um `docker exec`, o terminal de quem
+  # roda o update à mão — para o pin virar enfeite e o defeito voltar inteiro.
+  # MEDIDO, com as 114 regras reais: `LC_ALL=C` devolve 0 em qualquer condição;
+  # `LC_COLLATE=C` devolve 0 com `LC_ALL` vazio e 2 com `LC_ALL` preenchido.
+  # `LC_ALL=C` vale só para os comandos abaixo — não alcança as mensagens.
   esperadas="$(awk '
     match($0, /drop policy if exists "?[a-zA-Z0-9_]+"? on public\.[a-zA-Z0-9_]+/) {
       linha = substr($0, RSTART, RLENGTH); acao = "drop"
@@ -357,13 +405,52 @@ if [ -f supabase/baseline.sql ]; then
       estado[linha] = acao; acao = ""
     }
     END { for (k in estado) if (estado[k] == "create") print k }
-  ' supabase/baseline.sql | sort -u)"
+  ' supabase/baseline.sql | LC_ALL=C sort -u)"
+
+  # ── E SÓ SE COBRE QUEM TEM A RELAÇÃO NO BANCO ──────────────────────────────
+  #
+  # MEDIDO na issue #1897: as 8 regras de honorários moram DENTRO do corpo de
+  # public.fn_honorarios_provisionar() (supabase/baseline.sql:36801, primeira
+  # policy em :36896), e essa função só executa quando um administrador chama
+  # fn_modulo_instalar('honorarios', …) — criar a função não cria tabela nenhuma,
+  # como a própria migration 0480 / ADR-0002 avisa. Num VPS SEM o módulo,
+  # honorarios_contratos e honorarios_parcelas não existem: o awk de cima enxerga
+  # o `create policy` no TEXTO do arquivo, a recriação responde
+  # `relation does not exist`, a segunda conferência acusa as MESMAS 8 e o script
+  # sai em 1 com o CRM parado — era a atualização inteira de toda instalação sem
+  # o módulo de honorários (a tela mostrava as 8 e mais nada).
+  #
+  # A régua passa a cobrir só policy cuja RELAÇÃO já existe em `public`. É mais
+  # genérico do que caçar `$f$`/`$$` no texto: cobre os próximos módulos da
+  # ADR-0002, venham eles por corpo de função, por migration ou por qualquer
+  # outra forma de escrever o baseline. E NÃO afrouxa nada: policy de tabela que
+  # EXISTE continua sendo cobrada, que é o caso para o qual o aviso existe — a
+  # regra que some do banco com a tabela de pé continua derrubando a atualização.
+  #
+  # ⚠️ Se a consulta vier VAZIA (banco fora do ar, URL trocada), NÃO se filtra.
+  # Sem a lista de relações, filtrar derrubaria `esperadas` inteira e o ✓ sairia
+  # com "0 declaradas" — o aviso viraria mudo exatamente quando ninguém consegue
+  # ler o banco. Vale o comportamento antigo, que é barulhento: tudo é cobrado e
+  # a conferência para. Surdo nunca.
+  tabelas="$(pg_container -i postgres:17-alpine psql "$(url_do_schema)" -t -A -c \
+    "select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
+       where n.nspname='public';" 2>/dev/null | LC_ALL=C sort -u)"
+
+  if [ -n "$tabelas" ]; then
+    # `esperadas` é `regra|tabela`; o filtro olha só a tabela. A saída do awk
+    # segue a ordem do SEGUNDO arquivo (o `esperadas` já ordenado), e o
+    # segundo `sort` reforça o MESMO pino de antes (LC_ALL=C): o `comm` logo
+    # abaixo lê em `LC_ALL=C` e não perdoa entrada fora de ordem.
+    esperadas="$(awk 'NR == FNR { existe[$0] = 1; next }
+      { split($0, par, "[|]"); if (existe[par[2]]) print }' \
+      <(printf '%s\n' "$tabelas") <(printf '%s\n' "$esperadas") | LC_ALL=C sort -u)"
+  fi
 
   existentes="$(pg_container -i postgres:17-alpine psql "$(url_do_schema)" -t -A -F'|' -c \
     "select p.polname, c.relname from pg_policy p join pg_class c on c.oid=p.polrelid
-       join pg_namespace n on n.oid=c.relnamespace where n.nspname='public';" 2>/dev/null | sort -u)"
+       join pg_namespace n on n.oid=c.relnamespace where n.nspname='public';" 2>/dev/null | LC_ALL=C sort -u)"
 
-  faltando="$(comm -23 <(printf '%s\n' "$esperadas") <(printf '%s\n' "$existentes") || true)"
+  faltando="$(LC_ALL=C comm -23 <(printf '%s\n' "$esperadas") <(printf '%s\n' "$existentes") || true)"
 
   if [ -n "$faltando" ]; then
     # ── RECRIAR AS QUE FALTAM, NUNCA REAPLICAR O ARQUIVO ─────────────────────
@@ -417,8 +504,10 @@ if [ -f supabase/baseline.sql ]; then
 
     existentes="$(pg_container -i postgres:17-alpine psql "$(url_do_schema)" -t -A -F'|' -c \
       "select p.polname, c.relname from pg_policy p join pg_class c on c.oid=p.polrelid
-         join pg_namespace n on n.oid=c.relnamespace where n.nspname='public';" 2>/dev/null | sort -u)"
-    faltando="$(comm -23 <(printf '%s\n' "$esperadas") <(printf '%s\n' "$existentes") || true)"
+         join pg_namespace n on n.oid=c.relnamespace where n.nspname='public';" 2>/dev/null | LC_ALL=C sort -u)"
+    # Mesma ordenação da primeira conferência, e pelo mesmo motivo: `LC_ALL=C`
+    # é o que faz `sort` e `comm` concordarem. Ver o bloco acima.
+    faltando="$(LC_ALL=C comm -23 <(printf '%s\n' "$esperadas") <(printf '%s\n' "$existentes") || true)"
   fi
 
   if [ -n "$faltando" ]; then
@@ -462,6 +551,12 @@ if [ -f supabase/baseline.sql ]; then
 else
   c_ylw "⚠ supabase/baseline.sql não encontrado — pulei a parte do banco."
 fi
+# Retentativa não cura estes: a migration NÃO chegou, e seguir daqui trocava o
+# app por cima de um banco pela metade com status 0 — o "deu certo" do cron.
+# DEPOIS da conferência das regras de isolamento, nunca antes: ela recria as que
+# faltam e, se não conseguir, mantém o CRM parado. Sair antes dela deixaria o
+# trap subir o app sem regra — tela vazia para todo mundo.
+[ -z "$BANCO_RESTANTE" ] || die "O banco NÃO terminou limpo e os erros acima repetir não cura: a migration NÃO chegou. A atualização PARA aqui."
 [ -n "${DESKCOMM_AGENT_REPORT:-}" ] && eval "${DESKCOMM_AGENT_REPORT_CMD}" banco
 
 # ── 4.5 E-mails de acesso, para quem já estava instalado ────────────────────
@@ -631,6 +726,12 @@ step "Conferindo se o app voltou no ar"
 ok=""
 wait_app_healthy 20 3 >/dev/null && ok=1
 if [ -n "$ok" ]; then
+  # O marcador que a guarda de ARM lê (#1778). Instalação ARM nova é recusada,
+  # então toda instalação ARM que existe veio de antes do marcador e só seria
+  # reconhecida pelo contêiner — que um `down` sem `-v` apaga. Gravar aqui, com
+  # o app saudável, fecha esse caso a partir desta atualização. Falhar em
+  # gravar não desfaz nada: a guarda segue caindo no sinal do contêiner.
+  marcar_instalacao_feita "$TARGET_TAG" || true
   if [ -n "$BANCO_INCOMPLETO" ]; then
     c_ylw "⚠ App no ar e saudável, mas o banco NÃO terminou limpo — o que fazer está no fim desta saída."
   else

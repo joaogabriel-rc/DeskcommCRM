@@ -22,7 +22,7 @@ import { generateText, type LanguageModel } from "ai";
 
 import { DEFAULT_BOT_MODEL, gatewayConfig, gatewayHeaders } from "@/lib/ai/gateway";
 import { embedText } from "@/lib/ai/embed";
-import { MODELO_DE_EMBEDDING } from "@/lib/ai/embeddings/chave";
+import { MODELO_DE_EMBEDDING_DO_GOOGLE } from "@/lib/ai/embeddings/chave";
 import { getBudgetStatus, type BudgetStatus } from "@/lib/ai/budget/check";
 import {
   AVISO_CORPO,
@@ -61,6 +61,20 @@ const RAG_TOP_K = 5;
 // Com 0.72 toda parafrase — que e como o cliente escreve — era descartada, e o RAG parecia quebrado funcionando.
 // O banco moveu o default; estes tres sitios de codigo ficaram para tras e venciam o banco, porque quem corta pelo limiar e o TypeScript.
 const RAG_THRESHOLD = 0.4;
+/**
+ * Limiar do gate G3 (bot inseguro) — era o `config` do agente, que a tela
+ * deixou de oferecer (issue #1660).
+ *
+ * O campo "Confidence threshold" prometia escalar para humano abaixo do limiar
+ * e não controlava nada: quem lia a chave era ESTE bloco, que roda depois de
+ * `if (!elegivelParaWorkerLegado(ctx.agent)) return ...`, e a régua devolve
+ * `false` desde 07/09 — ou seja, o valor gravado nunca foi ouvido. Em vez de
+ * deixar o worker lendo uma chave que nenhum formulário mais escreve
+ * (referência órfã), o gate fica com o número que já era o fallback quando a
+ * chave faltava. Religar o worker legado mantém o G3 funcionando; é este
+ * limiar que vale, e não mais o que estiver gravado no jsonb do agente.
+ */
+const LIMIAR_DE_CONFIANCA_G3 = 0.5;
 const WINDOW_24H_MS = 24 * 60 * 60 * 1000;
 const HANDOFF_RECENT_GUARD_MS = 5_000;
 
@@ -249,15 +263,11 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
     // zero é uma AFIRMAÇÃO ("o material é péssimo") que escala para humano toda
     // resposta que não consultou a base. Ver o cabeçalho de `checkG3`.
     const confidence = response.citations[0]?.similarity ?? null;
-    const confidenceThreshold =
-      typeof ctx.agent.config?.["confidence_threshold"] === "number"
-        ? (ctx.agent.config["confidence_threshold"] as number)
-        : 0.5;
     if (
       checkG3({
         confidence,
         outputText: response.text,
-        threshold: confidenceThreshold,
+        threshold: LIMIAR_DE_CONFIANCA_G3,
       })
     ) {
       const persisted = await persistAndDispatch(ctx, response, post.text, {
@@ -275,7 +285,7 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
           message_id: ctx.message_id,
           outbound_message_id: persisted.outbound_message_id,
           confidence,
-          confidence_threshold: confidenceThreshold,
+          limiar: LIMIAR_DE_CONFIANCA_G3,
           source: "g3_low_confidence",
         },
       });
@@ -913,12 +923,14 @@ async function retrieveContext(input: RetrieveInput): Promise<RagHit[]> {
   if (fontes.length === 0 && !input.kbVersionId) return [];
 
   let embedding: number[];
+  let modelo: string;
   try {
-    const { embedding: e } = await embedText(input.query, {
+    const { embedding: e, model } = await embedText(input.query, {
       organizationId: input.organizationId,
       ponto: "embedding_consultar",
     });
     embedding = e;
+    modelo = model;
   } catch (err) {
     logger.warn("[ai-response-worker] embed falhou; segue sem RAG", {
       error: err instanceof Error ? err.message : String(err),
@@ -937,10 +949,13 @@ async function retrieveContext(input: RetrieveInput): Promise<RagHit[]> {
             p_embedding: embedding as unknown as string,
             p_k: RAG_TOP_K,
             p_threshold: RAG_THRESHOLD,
-            p_embedding_model: MODELO_DE_EMBEDDING,
+            p_embedding_model: modelo,
           } as never,
         )
-      : await admin.rpc(
+      : modelo === MODELO_DE_EMBEDDING_DO_GOOGLE
+        ? // Legado sem filtro de modelo e só com vetores OpenAI (ver search-knowledge.ts).
+          { data: [], error: null }
+        : await admin.rpc(
           "retrieve_top_k_chunks" as never,
           {
             p_organization_id: input.organizationId,

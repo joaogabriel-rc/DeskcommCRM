@@ -49,6 +49,12 @@ const PARES: Array<{
   simbolo: string;
 }> = [
   {
+    tabela: "ad_platform_connections",
+    coluna: "google_api",
+    arquivo: "lib/plataformas-de-anuncio/types.ts",
+    simbolo: "ApiDeConversaoGoogle",
+  },
+  {
     tabela: "extension_operations",
     coluna: "kind",
     // O recibo das extensões (0271). Quatro cópias no TypeScript viraram uma; um kind
@@ -329,6 +335,15 @@ const PARES: Array<{
     // seria a pergunta sumir em vez de a resposta falhar.
     arquivo: "lib/ai/conversa-do-caso/vocabulario.ts",
     simbolo: "CASE_CHAT_AUTHOR_KINDS",
+  },
+  {
+    tabela: "knowledge_searches",
+    coluna: "author_kind",
+    // lib/ai/knowledge/busca.ts → KNOWLEDGE_SEARCH_AUTHOR_KINDS (tupla `as const`).
+    // Nasce com a migration 0484 (#1877): a rota da caixa "Acervo" grava
+    // `'human'` e a Evolução separa as séries por esta coluna.
+    arquivo: "lib/ai/knowledge/busca.ts",
+    simbolo: "KNOWLEDGE_SEARCH_AUTHOR_KINDS",
   },
   {
     tabela: "passagens_de_atendimento",
