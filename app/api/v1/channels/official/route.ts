@@ -195,7 +195,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           // `smb_message_echoes`: o que a empresa manda pelo app WhatsApp Business
           // num número em coexistência. Sem coexistência a Meta não o envia, então
           // assinar é inofensivo para quem não usa.
-          fields: ["messages", "message_template_status_update", "smb_message_echoes"],
+          // `account_update`: é por ele que a Meta avisa que o número foi
+          // desconectado da API (pelo app WhatsApp Business ou pelo Gerenciador).
+          // Sem assinar, a conexão só percebe na próxima varredura de saúde.
+          fields: ["messages", "message_template_status_update", "smb_message_echoes", "account_update"],
         }
       : null,
     /**

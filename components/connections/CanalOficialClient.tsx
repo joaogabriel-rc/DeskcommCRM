@@ -14,6 +14,7 @@ import {
   useRegistrarWebhookOficial,
 } from "@/hooks/channels/useOfficialChannel";
 import { copyToClipboard } from "@/lib/clipboard";
+import { lerEstadoDoCanal, rotuloDoEstadoDoCanal } from "@/lib/channels/estado";
 import { useT } from "@/hooks/i18n/useT";
 import { BotaoCadastroIncorporado } from "./BotaoCadastroIncorporado";
 import { ChannelAiAccess } from "./ChannelAiAccess";
@@ -97,7 +98,13 @@ export function CanalOficialClient() {
                 {estado.phoneNumber}
               </Badge>
             ) : null}
-            <Badge>{estado.status ?? "—"}</Badge>
+            {/* O estado em português, e na cor dele — nunca o `WORKING` cru. */}
+            <Badge
+              variant={lerEstadoDoCanal(estado.status).utilizavel ? "default" : "destructive"}
+              data-testid="canal-oficial-estado"
+            >
+              {rotuloDoEstadoDoCanal(estado.status, t)}
+            </Badge>
             {/* Mostra que o token EXISTE, nunca qual é. */}
             <Badge variant={estado.hasToken ? "outline" : "destructive"}>
               {estado.hasToken ? t("credencial guardada") : t("sem credencial")}
@@ -112,6 +119,20 @@ export function CanalOficialClient() {
             WABA <span className="font-mono">{estado.wabaId}</span> · {t("número")}{" "}
             <span className="font-mono">{estado.phoneNumberId}</span>
           </p>
+          {/* A conexão existe, mas a Meta diz que o número saiu da API — o caso de
+              quem desconecta pelo app WhatsApp Business. Mostrar "Conectado" aqui
+              era o defeito; apagar a conexão, a solução errada (perde a âncora do
+              histórico). O caminho é conectar de novo, logo abaixo. */}
+          {!lerEstadoDoCanal(estado.status).utilizavel ? (
+            <p
+              className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              data-testid="canal-oficial-desconectado"
+            >
+              {t(
+                "Este número não está conectado à API. Se ele foi desconectado pelo app WhatsApp Business ou pela Meta, conecte de novo — o mesmo número ou outro — pelo botão abaixo. O histórico de conversas é mantido.",
+              )}
+            </p>
+          ) : null}
         </Card>
       ) : null}
       {estado?.channel_session_id && <ChannelAiAccess channelId={estado.channel_session_id} />}

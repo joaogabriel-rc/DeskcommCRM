@@ -27,6 +27,10 @@ import {
 import { reactivateChannelSession } from "@/lib/channels/reactivate";
 import { metadataInicialDoCanal } from "@/lib/ai/elegibilidade/pre-go-live";
 import { logger } from "@/lib/logger";
+import { graphVersion } from "@/lib/graph-version";
+import { nomeDoCanal } from "@/lib/channels/estado";
+import { sincronizarSaudeDaConexao } from "@/lib/channels/health";
+import { syncTemplates } from "@/lib/channels/meta/template-sync";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { encryptWebhookSecret } from "@/lib/webhooks/secrets";
 
@@ -162,6 +166,17 @@ export async function conectarCanalOficial(entrada: EntradaDaConexao): Promise<D
     await gravarValidadeDoToken(admin, organizationId, idDaSessao, entrada.tokenExpiraEm, requestId);
   }
 
+  if (idDaSessao) {
+    await depoisDeConectar(admin, {
+      organizationId,
+      channelSessionId: idDaSessao,
+      wabaId,
+      token,
+      apelido: nomeDoCanal(linha),
+      requestId,
+    });
+  }
+
   return {
     ok: true,
     channelSessionId: idDaSessao,
@@ -194,4 +209,61 @@ async function gravarValidadeDoToken(
     channelSessionId,
     schemaDesatualizado: (error.message ?? "").includes("meta_token_expires_at"),
   });
+}
+
+/**
+ * O que a conexão (nova, ou a volta depois de uma desconexão) deixa em dia, e
+ * nada disto desfaz a conexão se falhar — o número já está gravado e validado.
+ *
+ * 1. FECHA o aviso de desconexão. A desconexão que a Meta empurrou
+ *    (`account_update` → `PARTNER_REMOVED`) abre o episódio marcado como
+ *    empurrão, e a varredura não o fecha por construção (`health.ts`). Quem
+ *    acabou de validar a credencial na Graph é autoridade sobre o número:
+ *    fecha como empurrão também.
+ * 2. SINCRONIZA os modelos da conta conectada. Trocar de número costuma trocar
+ *    de conta, e sem isto a lista ficava vazia (a da conta anterior deixou de
+ *    ser oferecida) até alguém lembrar do botão "Sincronizar".
+ */
+async function depoisDeConectar(
+  admin: EntradaDaConexao["admin"],
+  a: {
+    organizationId: string;
+    channelSessionId: string;
+    wabaId: string;
+    token: string;
+    apelido: string;
+    requestId: string;
+  },
+): Promise<void> {
+  try {
+    await sincronizarSaudeDaConexao(
+      admin,
+      { id: a.channelSessionId, organization_id: a.organizationId, status: "WORKING" },
+      { reachable: true, status: "WORKING", detail: null },
+      a.apelido,
+      "empurrao",
+    );
+  } catch (err) {
+    logger.warn("[meta.conectar] aviso de desconexão não fechado", {
+      requestId: a.requestId,
+      channelSessionId: a.channelSessionId,
+      erro: err instanceof Error ? err.message : String(err),
+    });
+  }
+  try {
+    await syncTemplates({
+      organizationId: a.organizationId,
+      wabaId: a.wabaId,
+      token: a.token,
+      graphVersion: graphVersion(),
+    });
+  } catch (err) {
+    // "Sincronizar" continua na tela para tentar de novo; a mensagem da Graph
+    // (token sem permissão de modelos, rede) fica no log, sem o token.
+    logger.warn("[meta.conectar] modelos da conta não sincronizados", {
+      requestId: a.requestId,
+      channelSessionId: a.channelSessionId,
+      erro: (err instanceof Error ? err.message : String(err)).slice(0, 300),
+    });
+  }
 }

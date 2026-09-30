@@ -14,7 +14,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { normalizarTags } from "@/lib/contacts/tag-normalizada";
+import Link from "next/link";
+import { EscolherEtiqueta } from "@/components/catalogo/EscolherEtiqueta";
+import { ChipDeEtiqueta } from "@/components/tags/ChipDeEtiqueta";
+import {
+  acrescentarTag,
+  campoVazio,
+  definirCampo,
+  limparCampo,
+  removerTag,
+  valorParaTela,
+} from "@/lib/contacts/ficha-do-contato";
+import { cn } from "@/lib/utils";
 import { contactPatchSchema, type ContactPatch } from "@/lib/schemas/contacts";
 import { useUpdateContact } from "@/hooks/contacts/useUpdateContact";
 import { CustomFieldsEditor, type CustomFieldDef } from "@/components/contacts/CustomFieldsEditor";
@@ -27,7 +38,8 @@ interface FormShape {
   phone_number?: string;
   /** `AAAA-MM-DD` — a MESMA forma de `contactPatchSchema` e da coluna do banco. */
   birthdate?: string;
-  tagsRaw?: string;
+  /** Uma tag por item — nunca mais texto com vírgula (a vírgula no nome partia a tag). */
+  tags?: string[];
   custom_fields?: Record<string, unknown>;
 }
 
@@ -50,12 +62,13 @@ export function EditContactDialog({ contact, open, onOpenChange, customFieldDefs
       email: contact.email ?? "",
       phone_number: contact.phone_number ? phoneForDisplay(contact.phone_number) : "",
       birthdate: contact.birthdate ?? "",
-      tagsRaw: contact.tags.join(", "),
+      tags: [...contact.tags],
       custom_fields: contact.custom_fields ?? {},
     },
   });
 
   const customFields = useWatch({ control: form.control, name: "custom_fields" });
+  const tags = useWatch({ control: form.control, name: "tags" }) ?? [];
 
   useEffect(() => {
     if (open) {
@@ -64,7 +77,7 @@ export function EditContactDialog({ contact, open, onOpenChange, customFieldDefs
         email: contact.email ?? "",
         phone_number: contact.phone_number ? phoneForDisplay(contact.phone_number) : "",
         birthdate: contact.birthdate ?? "",
-        tagsRaw: contact.tags.join(", "),
+        tags: [...contact.tags],
         custom_fields: contact.custom_fields ?? {},
       });
     }
@@ -72,9 +85,6 @@ export function EditContactDialog({ contact, open, onOpenChange, customFieldDefs
 
   async function onSubmit(values: FormShape) {
     setServerError(null);
-    // A MESMA normalização da API (lib/contacts/tag-normalizada): o que a ficha
-    // grava é o que o filtro `?tag=` casa (issue #1224).
-    const tags = normalizarTags((values.tagsRaw ?? "").split(","));
 
     const payload: Record<string, unknown> = {};
     if (values.name?.trim()) payload.name = values.name.trim();
@@ -85,7 +95,9 @@ export function EditContactDialog({ contact, open, onOpenChange, customFieldDefs
     // exigem), então o diálogo não normaliza nada — o que se digita é o que se
     // grava, e a ficha recarregada mostra a MESMA string.
     if (values.birthdate?.trim()) payload.birthdate = values.birthdate.trim();
-    payload.tags = tags;
+    // A lista inteira: o PATCH substitui, e é assim que remover um chip chega
+    // ao banco. A normalização é a do servidor (`contactPatchSchema`, #1224).
+    payload.tags = values.tags ?? [];
     // Sempre no payload, mesmo vazio: o PATCH SUBSTITUI, e é assim que apagar um
     // campo pela tela chega ao banco.
     payload.custom_fields = values.custom_fields ?? {};
@@ -146,42 +158,38 @@ export function EditContactDialog({ contact, open, onOpenChange, customFieldDefs
         </DialogHeader>
         <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 pb-4">
-            <div className="space-y-2">
-              <Label htmlFor="ec-name">{t("Nome")}</Label>
-              <Input id="ec-name" {...form.register("name")} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ec-email">Email</Label>
-              <Input id="ec-email" type="email" {...form.register("email")} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ec-phone">{t("Telefone (E.164)")}</Label>
-              <Input id="ec-phone" {...form.register("phone_number")} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ec-birthdate">{t("Data de nascimento")}</Label>
-              <Input id="ec-birthdate" type="date" {...form.register("birthdate")} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ec-tags">{t("Tags")}</Label>
-              <Input id="ec-tags" {...form.register("tagsRaw")} />
-            </div>
-            {customFieldDefs.length > 0 && (
-              <div className="space-y-3 rounded-md border border-border p-3">
-                <div>
-                  <h3 className="text-sm font-medium">{t("Campos personalizados")}</h3>
-                  <p className="text-xs text-muted-foreground">
-                    {t("Campos declarados em Configurações › Campos do Usuário, mais os do funil.")}
-                  </p>
-                </div>
-                <CustomFieldsEditor
-                  fields={customFieldDefs}
-                  mode="contact"
-                  value={customFields ?? {}}
-                  onChange={(next) => form.setValue("custom_fields", next, { shouldDirty: true })}
-                />
+            <section className="space-y-3" aria-labelledby="ec-sistema">
+              <h3 id="ec-sistema" className="text-sm font-medium">
+                {t("Campos do sistema")}
+              </h3>
+              <div className="space-y-2">
+                <Label htmlFor="ec-name">{t("Nome")}</Label>
+                <Input id="ec-name" {...form.register("name")} />
               </div>
-            )}
+              <div className="space-y-2">
+                <Label htmlFor="ec-email">Email</Label>
+                <Input id="ec-email" type="email" {...form.register("email")} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ec-phone">{t("Telefone (E.164)")}</Label>
+                <Input id="ec-phone" {...form.register("phone_number")} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ec-birthdate">{t("Data de nascimento")}</Label>
+                <Input id="ec-birthdate" type="date" {...form.register("birthdate")} />
+              </div>
+            </section>
+
+            <TagsDoContato
+              tags={tags}
+              onChange={(next) => form.setValue("tags", next, { shouldDirty: true })}
+            />
+
+            <CamposPersonalizadosDoContato
+              definicoes={customFieldDefs}
+              valores={customFields ?? {}}
+              onChange={(next) => form.setValue("custom_fields", next, { shouldDirty: true })}
+            />
           </div>
           {/* O ERRO fica junto do rodapé, fora da área que rola: uma recusa do
               servidor que aparecesse no meio de vinte campos passaria batida
@@ -205,5 +213,162 @@ export function EditContactDialog({ contact, open, onOpenChange, customFieldDefs
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * As TAGS do contato: cada uma um chip com "×", e "+ Adicionar tag" abre a lista
+ * pesquisável das tags da organização (registro + as já aplicadas). Adicionar
+ * não substitui nada — era um campo de texto com vírgula, em que apagar uma
+ * letra a mais levava a tag vizinha junto.
+ */
+function TagsDoContato({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
+  const t = useT();
+  return (
+    <section className="space-y-2" aria-labelledby="ec-tags" data-testid="ficha-tags">
+      <div className="flex items-center justify-between gap-2">
+        <h3 id="ec-tags" className="text-sm font-medium">
+          {t("Tags do contato")}
+        </h3>
+        <EscolherEtiqueta
+          jaEscolhidas={tags}
+          onEscolher={(nome) => onChange(acrescentarTag(tags, nome))}
+          testId="ficha-adicionar-tag"
+        />
+      </div>
+      {tags.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("Nenhuma tag neste contato.")}</p>
+      ) : (
+        <ul className="flex flex-wrap gap-1.5">
+          {tags.map((tag) => (
+            <li key={tag}>
+              <ChipDeEtiqueta tag={tag} className="h-6 gap-1 px-2 text-xs">
+                <button
+                  type="button"
+                  className="ml-0.5 opacity-70 hover:opacity-100"
+                  aria-label={`${t("Remover tag")} ${tag}`}
+                  onClick={() => onChange(removerTag(tags, tag))}
+                >
+                  ×
+                </button>
+              </ChipDeEtiqueta>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** Quantos campos a ficha mostra antes de "Mostrar todos". */
+const CAMPOS_VISIVEIS = 6;
+
+/**
+ * TODOS os campos personalizados da organização, cada um com o valor deste
+ * contato ou "Não definido" — e um clique abre o campo para preencher ali mesmo.
+ *
+ * As definições vêm do registro (Configurações › Campos do Usuário) somado ao
+ * legado do funil (`camposDoContato`): um campo criado depois aparece na ficha
+ * sem ninguém precisar declará-lo em outro lugar.
+ */
+function CamposPersonalizadosDoContato({
+  definicoes,
+  valores,
+  onChange,
+}: {
+  definicoes: CustomFieldDef[];
+  valores: Record<string, unknown>;
+  onChange: (next: Record<string, unknown>) => void;
+}) {
+  const t = useT();
+  const [editando, setEditando] = useState<string | null>(null);
+  const [todos, setTodos] = useState(false);
+  const visiveis = todos ? definicoes : definicoes.slice(0, CAMPOS_VISIVEIS);
+
+  return (
+    <section className="space-y-2" aria-labelledby="ec-campos" data-testid="ficha-campos">
+      <div>
+        <h3 id="ec-campos" className="text-sm font-medium">
+          {t("Campos personalizados")}
+        </h3>
+        <Link
+          href="/app/settings/contact-fields"
+          className="text-xs text-accent-600 underline-offset-4 hover:underline"
+        >
+          {t("Gerenciar campos personalizados")}
+        </Link>
+      </div>
+      {definicoes.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("Nenhum campo personalizado cadastrado ainda.")}</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {visiveis.map((def) => {
+            const texto = valorParaTela(def, valores[def.key], t);
+            const aberto = editando === def.key;
+            return (
+              <li key={def.key} data-testid={`campo-${def.key}`}>
+                {aberto ? (
+                  <div className="space-y-2 rounded-lg border border-accent-300 bg-accent-soft p-2.5">
+                    <CustomFieldsEditor
+                      fields={[def]}
+                      mode="contact"
+                      value={valores}
+                      onChange={(next) => onChange(definirCampo(valores, def.key, next[def.key]))}
+                      className="md:grid-cols-1"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={campoVazio(valores[def.key])}
+                        onClick={() => onChange(limparCampo(valores, def.key))}
+                      >
+                        {t("Limpar")}
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => setEditando(null)}>
+                        {t("Concluir")}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setEditando(def.key)}
+                    className={cn(
+                      "w-full rounded-lg border px-3 py-1.5 text-left text-sm transition-colors",
+                      texto === null
+                        ? "border-border hover:border-accent-300"
+                        : "border-accent-200 bg-accent-soft hover:border-accent-300",
+                    )}
+                    aria-label={`${t("Editar campo")} ${def.label}`}
+                  >
+                    <span className="text-muted-foreground">{def.label}: </span>
+                    {texto === null ? (
+                      <span className="text-text-subtle" data-testid="nao-definido">
+                        {t("Não definido")}
+                      </span>
+                    ) : (
+                      <span className="break-words">{texto}</span>
+                    )}
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {definicoes.length > CAMPOS_VISIVEIS && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={() => setTodos((v) => !v)}
+        >
+          {todos ? t("Mostrar menos") : `${t("Mostrar todos")} (${definicoes.length})`}
+        </Button>
+      )}
+    </section>
   );
 }

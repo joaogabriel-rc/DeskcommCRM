@@ -25,11 +25,13 @@ import { resolveMetaCreds } from "@/lib/channels/meta/credentials";
 import { metaSessionForOrg } from "@/lib/channels/meta/session";
 import {
   conexoesComModelos,
+  escopoDasConexoes,
   modeloDaLinha,
   type ConexaoComModelos,
   type LinhaDoCatalogo,
 } from "@/lib/channels/catalogo-de-modelos";
 import { deriveTemplateContract } from "@/lib/channels/meta/template-contract";
+import { fonteDeTemplates } from "@/lib/channels/templates-fonte";
 import { syncTemplates } from "@/lib/channels/meta/template-sync";
 import { mesclarValoresSalvos } from "@/lib/channels/meta/valores-salvos";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -113,19 +115,40 @@ export async function GET(): Promise<NextResponse> {
   const admin = createAdminClient();
   // As conexões OFICIAIS em que se pode criar modelo — a mesma lista do
   // catálogo central, recortada à fonte oficial.
-  const conexoes: ConexaoComModelos[] = await conexoesComModelos(admin, r.orgId, { fonte: "oficial" }).catch(
-    () => [],
-  );
-  const { data, error } = await admin
-    .from("meta_templates")
-    .select(
-      "id, waba_id, channel_session_id, name, language, status, category, rejected_reason, quality_score, parameter_format, contract_hash, components, synced_at, saved_values",
-    )
-    .eq("organization_id", r.orgId)
-    .order("status")
-    .order("name");
+  // Lança em vez de virar lista vazia: sem a lista de conexões não há recorte, e
+  // a tela diria "nenhum modelo" para quem tem modelos.
+  let ativas: ConexaoComModelos[];
+  try {
+    ativas = await conexoesComModelos(admin, r.orgId);
+  } catch (err) {
+    return fail("internal_error", err instanceof Error ? err.message : "conexoes", 500, { requestId });
+  }
+  const conexoes = ativas.filter((c) => fonteDeTemplates(c.provider) === "oficial");
 
-  if (error) return fail("internal_error", error.message, 500, { requestId });
+  // Só os modelos das conexões ATIVAS, cada uma recortada pela conta dela
+  // (`escopoDasConexoes`). Antes a leitura era a organização inteira, e o
+  // modelo de um número desconectado (excluído, ou trocado por outro) seguia
+  // na lista — o "Sincronizar" não resolvia, porque ele só escreve na conta
+  // atual e nunca apagou nem esconde a linha da conta anterior. As linhas
+  // continuam no banco: voltar a conectar a MESMA conta as mostra de novo, sem
+  // duplicar (a chave do espelho é organização + conta + nome + idioma).
+  const escopo = escopoDasConexoes(
+    ativas.map((c) => ({ id: c.id, provider: c.provider, meta_waba_id: c.wabaId })),
+  );
+  let data: unknown[] = [];
+  if (escopo) {
+    const lido = await admin
+      .from("meta_templates")
+      .select(
+        "id, waba_id, channel_session_id, name, language, status, category, rejected_reason, quality_score, parameter_format, contract_hash, components, synced_at, saved_values",
+      )
+      .eq("organization_id", r.orgId)
+      .or(escopo)
+      .order("status")
+      .order("name");
+    if (lido.error) return fail("internal_error", lido.error.message, 500, { requestId });
+    data = lido.data ?? [];
+  }
 
   // A derivação é a do CATÁLOGO central (`lib/channels/catalogo-de-modelos.ts`):
   // contrato, chave de cada espaço, prévias, links salvos. Esta rota só projeta

@@ -181,11 +181,54 @@ export interface OutboundEchoEvent {
   } | null;
 }
 
+/**
+ * Mudança na CONTA (WABA) — o campo `account_update` do webhook.
+ *
+ * É por aqui que a Meta avisa que o cliente se DESCONECTOU da Cloud API: evento
+ * `PARTNER_REMOVED`, que num número em coexistência (app WhatsApp Business +
+ * API) traz `disconnection_info` com o motivo e quem iniciou. Sem ler este
+ * campo, desconectar pelo celular deixava a tela de Conexões dizendo
+ * "Conectado" indefinidamente — o vigia de saúde pergunta pelo número, e o
+ * número continua existindo na conta.
+ *
+ * Referência: developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/account_update
+ */
+export interface AccountUpdateEvent {
+  kind: "account_update";
+  /** `waba_info.waba_id` quando vem; senão o `entry.id`. */
+  wabaId: string;
+  /** `PARTNER_REMOVED`, `ACCOUNT_DELETED`, `ACCOUNT_RECONNECTED`… */
+  event: string;
+  /** `disconnection_info.reason` — só em `PARTNER_REMOVED` de coexistência. */
+  reason: string | null;
+  /** `disconnection_info.initiated_by` — `USER` ou `SYSTEM`. */
+  initiatedBy: string | null;
+}
+
+/**
+ * Os eventos de conta que significam "esta conta não fala mais pela API
+ * desta instalação". Os demais `account_update` (preço, restrição, parceiro
+ * adicionado…) não mudam se o número entra e sai, e ficam fora.
+ */
+export const EVENTOS_DE_DESCONEXAO_DA_CONTA = [
+  "PARTNER_REMOVED",
+  "ACCOUNT_DELETED",
+  "ACCOUNT_OFFBOARDED",
+] as const;
+
+/** A conta voltou a se conectar — fecha o aviso; o vigia confirma o número. */
+export const EVENTO_DE_RECONEXAO_DA_CONTA = "ACCOUNT_RECONNECTED";
+
+export function ehDesconexaoDaConta(event: string): boolean {
+  return (EVENTOS_DE_DESCONEXAO_DA_CONTA as readonly string[]).includes(event);
+}
+
 export type MetaWebhookEvent =
   | TemplateStatusEvent
   | MessageStatusEvent
   | InboundMessageEvent
-  | OutboundEchoEvent;
+  | OutboundEchoEvent
+  | AccountUpdateEvent;
 
 /**
  * O formato do fio mora em `./envelope.ts`, onde é um schema Zod — e o tipo
@@ -271,6 +314,23 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
           templateLanguage: language,
           event: str(v.event) ?? "UNKNOWN",
           reason: normalizeRejectedReason(v.reason),
+        });
+        continue;
+      }
+
+      if (change.field === "account_update") {
+        const event = str(v.event);
+        if (!event) continue;
+        const info = (v.waba_info ?? {}) as Record<string, unknown>;
+        const desconexao = (v.disconnection_info ?? {}) as Record<string, unknown>;
+        const conta = str(info.waba_id) ?? wabaId;
+        if (!conta) continue;
+        out.push({
+          kind: "account_update",
+          wabaId: conta,
+          event,
+          reason: str(desconexao.reason),
+          initiatedBy: str(desconexao.initiated_by),
         });
         continue;
       }

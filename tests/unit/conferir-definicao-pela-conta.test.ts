@@ -90,10 +90,15 @@ describe("pré-voo pela conta do número", () => {
     const db = banco([linha({ waba_id: "111" }), linha({ waba_id: "222", status: "PAUSED" })]);
     await expect(conferir(db, SESSAO_A2)).rejects.toThrow(/template_not_approved.*PAUSED/s);
     await expect(conferir(db, SESSAO_A)).resolves.toBeUndefined();
-    // Linha gravada COM a conexão (canal parceiro/Graph) continua casando por ela.
+    // Linha gravada COM a conexão continua casando por ela — na conta dela.
     await expect(
-      conferir(banco([linha({ waba_id: "outro", channel_session_id: SESSAO_A, status: "REJECTED" })]), SESSAO_A),
+      conferir(banco([linha({ waba_id: "111", channel_session_id: SESSAO_A, status: "REJECTED" })]), SESSAO_A),
     ).rejects.toThrow(/template_not_approved/);
+    // Com o id da conexão OFICIAL mas de OUTRA conta (a sessão foi reconectada
+    // em outra WABA): não é o catálogo deste número — é de outra conta.
+    await expect(
+      conferir(banco([linha({ waba_id: "999", channel_session_id: SESSAO_A, status: "APPROVED" })]), SESSAO_A),
+    ).rejects.toThrow(/template_other_account/);
   });
 
   it("6 · sem número (base anterior à 0144): a regra de sempre — resolve se é único; ambíguo, passa", async () => {

@@ -36,6 +36,7 @@ import { parseMetaWebhook, verificationChallenge, verifyMetaSignature } from "@/
 import { statusUpdate } from "@/lib/channels/meta/status-update";
 import { ingestMetaEcho, ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { metaSessionByWebhookToken } from "@/lib/channels/meta/session";
+import { processarEventoDaMeta } from "@/lib/channels/meta/processar-evento";
 import { logger } from "@/lib/logger";
 import {
   emitirFalhaDeEntrega,
@@ -170,6 +171,14 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
           phone_number_id: e.phoneNumberId,
         });
       }
+      continue;
+    }
+
+    if (e.kind === "account_update") {
+      // A conta desconectou (ou voltou) da API: o estado da conexão segue a
+      // Meta. Mesma regra da rota universal — mora em `processar-evento.ts`.
+      const d = await processarEventoDaMeta(admin, e, session, now);
+      if (d) desfechos.push(d);
       continue;
     }
 

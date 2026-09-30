@@ -3279,3 +3279,20 @@ o CI só publica artefato em falha). Medido no run 36309605444, parte 3, head
 | J34.3 | Termo em 2 de 4 mensagens (uma em maiúsculas) | contador "Resultados nas mensagens carregadas: 2"; as 2 bolhas com o anel no `box-shadow` COMPUTADO (`0 0 0 4px`, cor ≠ fundo), uma enviada e uma recebida; as outras 2 sem anel | PASS — anel `rgb(28, 26, 22) 0 0 0 4px` sobre recebida `rgb(245, 243, 238)` e enviada `rgb(80, 109, 72)`; sem anel nas outras |
 | J34.4 | Esc fecha | campo, contador e marcas somem; o foco volta à lupa | PASS |
 | J34.5 | Trocar de conversa pela lista, sem recarregar | a conversa B (que tem o termo) abre sem campo, sem contador e sem marca; abrir a busca nela começa vazia | PASS |
+
+## Rodada 29/09/2026 — Inbox, conexão oficial, modelos, ficha do contato e disparo em seções
+
+Cinco ajustes vindos de uso real. **NÃO MEDIDO EM TELA NESTA RODADA:** esta
+máquina não tinha `pnpm` no PATH nem Supabase local de pé, então nenhum dos casos
+abaixo foi dirigido pelo navegador num banco fresco. A prova é por unidade
+(rotas e handlers de verdade sobre o banco em memória, e os componentes pelo
+Testing Library), e a prova pela tela fica pendente, com prioridade.
+
+| # | Caso | Prova | Resultado |
+|---|------|-------|-----------|
+| J41.1 | Inbox abre na ordem do WhatsApp: mensagem mais nova no topo, e uma mensagem nova reposiciona a conversa; a paginação não repete nem pula | `tests/unit/inbox-ordena-por-atividade.test.ts` | unidade — **tela pendente** |
+| J41.2 | Fila com "Esperando há mais tempo" mantém a ordem por espera e a posição "1º, 2º…" | idem + `fila-ordena-por-tempo-de-espera.test.ts` | unidade — **tela pendente** |
+| J41.3 | `account_update` `PARTNER_REMOVED` → conexão `STOPPED` e aviso crítico na Central; a varredura não desfaz; a reconexão fecha | `tests/unit/meta-desconexao-da-conta.test.ts` | unidade — **webhook real da Meta NÃO MEDIDO** (sem conta Meta no rig) |
+| J41.4 | Trocar a conta do número oficial esconde os modelos da conta anterior (inclusive os criados pelo CRM), sem apagar; reconectar a mesma conta não duplica | `tests/unit/modelos-isolados-pela-conta-da-conexao.test.ts` | unidade — **tela pendente** |
+| J41.5 | Ficha do contato: tags como chips, "+ Adicionar tag" com busca soma sem substituir, remover uma a uma; todos os campos com valor ou "Não definido", preencher e limpar | `tests/unit/ficha-do-contato-tags-e-campos.test.tsx` + `contato-ficha-persistencia.test.ts` | componente + handler — **tela pendente** |
+| J41.6 | Disparo em seções; "+ Condição" abre cheio com o registro de tags vazio; campos do sistema contam; horário passado é recusado; ida e volta ao construtor sem duplicar o fluxo | `tests/unit/disparo-menu-de-condicao.test.tsx` + `disparo-publico-e-agendamento.test.ts` | componente + rotas — **tela pendente** |

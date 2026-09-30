@@ -210,6 +210,8 @@ export interface ConexaoComModelos {
   id: string;
   rotulo: string;
   wabaId: string | null;
+  /** O provider da conexão — o que `escopoDaConexao` precisa para recortar. */
+  provider: string;
 }
 
 interface LinhaDeConexao {
@@ -218,6 +220,19 @@ interface LinhaDeConexao {
   display_name: string | null;
   phone_number: string | null;
   meta_waba_id: string | null;
+  /** Opcional: bases e dublês antigos não trazem a coluna — ausente é "não parada". */
+  status?: string | null;
+}
+
+/**
+ * A conexão está PARADA (`STOPPED`) — o estado que a desconexão pela Meta grava
+ * (`account_update` → `PARTNER_REMOVED`, ou o número fora da API na varredura).
+ * Os modelos dela saem do catálogo enquanto ela estiver assim: um número que não
+ * fala pela API não tem modelo para oferecer. Nada é apagado — reconectar volta a
+ * `WORKING` e os modelos da conta voltam a aparecer.
+ */
+export function conexaoParada(conexao: { status?: string | null }): boolean {
+  return conexao.status === "STOPPED";
 }
 
 /**
@@ -246,14 +261,39 @@ const ID_NUMERICO = /^\d+$/;
  */
 export function escopoDaConexao(conexao: { id: string; provider: string; meta_waba_id: string | null }): string {
   const daConexao = `channel_session_id.eq.${conexao.id}`;
-  if (
-    fonteDeTemplates(conexao.provider) === "oficial" &&
-    conexao.meta_waba_id &&
-    ID_NUMERICO.test(conexao.meta_waba_id)
-  ) {
-    return `${daConexao},and(channel_session_id.is.null,waba_id.eq.${conexao.meta_waba_id})`;
+  if (fonteDeTemplates(conexao.provider) === "oficial") {
+    // O CANAL OFICIAL É UMA LINHA SÓ POR ORGANIZAÇÃO, e conectar outro número
+    // REAPROVEITA essa linha trocando `meta_waba_id` (`lib/channels/meta/conectar.ts`).
+    // Recortar só por `channel_session_id` deixava os modelos criados pelo CRM na
+    // conta ANTERIOR (que carregam o id da sessão) aparecendo como se fossem da
+    // conta nova — o "número de teste" que continuava na lista depois da troca.
+    // O modelo oficial é da CONTA (WABA): a conta atual é condição sempre.
+    // Sem conta numérica não há o que recortar com segurança — lista vazia.
+    if (!conexao.meta_waba_id || !ID_NUMERICO.test(conexao.meta_waba_id)) {
+      return "id.is.null";
+    }
+    return `and(waba_id.eq.${conexao.meta_waba_id},or(${daConexao},channel_session_id.is.null))`;
   }
   return daConexao;
+}
+
+/**
+ * O recorte de VÁRIAS conexões — o que a organização enxerga quando a leitura
+ * não escolhe número (a tela de Modelos, o catálogo sem conexão). `null` quando
+ * não há conexão ativa: a resposta certa é lista vazia, nunca "todas as linhas
+ * da organização" — era por essa porta que o modelo de uma conexão excluída
+ * seguia aparecendo.
+ */
+export function escopoDasConexoes(
+  conexoes: ReadonlyArray<{ id: string; provider: string; meta_waba_id: string | null }>,
+): string | null {
+  if (conexoes.length === 0) return null;
+  return conexoes.map((c) => {
+    const e = escopoDaConexao(c);
+    // Um termo solto (`col.op.v`) entra direto; o de duas partes vira `and(...)`
+    // para a vírgula não o partir em dois termos do `or` de fora.
+    return e.startsWith("and(") || !e.includes(",") ? e : `or(${e})`;
+  }).join(",");
 }
 
 /**
@@ -270,18 +310,20 @@ export async function conexoesComModelos(
 ): Promise<ConexaoComModelos[]> {
   const { data, error } = await db
     .from("channel_sessions")
-    .select("id, provider, display_name, phone_number, meta_waba_id")
+    .select("id, provider, display_name, phone_number, meta_waba_id, status")
     .eq("organization_id", organizationId)
     .is("archived_at", null)
     .order("created_at", { ascending: true });
   if (error) throw new Error(`catalogo_de_modelos: leitura das conexões falhou — ${error.message}`);
   return ((data ?? []) as LinhaDeConexao[])
     .filter((c) => conexaoUsaOEspelho(c.provider))
+    .filter((c) => !conexaoParada(c))
     .filter((c) => !opcoes.fonte || fonteDeTemplates(c.provider) === opcoes.fonte)
     .map((c) => ({
       id: c.id,
       rotulo: nomeDoCanal(c),
       wabaId: c.meta_waba_id,
+      provider: c.provider,
     }));
 }
 
@@ -300,7 +342,7 @@ export async function conexaoDaOrganizacao(
 ): Promise<LinhaDeConexao | null> {
   const { data, error } = await db
     .from("channel_sessions")
-    .select("id, provider, display_name, phone_number, meta_waba_id")
+    .select("id, provider, display_name, phone_number, meta_waba_id, status")
     .eq("organization_id", organizationId)
     .eq("id", channelSessionId)
     .is("archived_at", null)
@@ -331,7 +373,25 @@ export async function listarModelos(db: SupabaseClient, filtro: FiltroDoCatalogo
     // Conexão que não é desta organização (ou não tem catálogo) não devolve
     // nada — nunca "a organização inteira" por falta de recorte.
     if (!conexao) return [];
+    // Parada pela Meta: o catálogo desta conexão fica vazio até ela voltar.
+    // (Só a LISTA — o pré-voo do envio lê a conexão por `conexaoDaOrganizacao`
+    // e segue respondendo pelo motivo dele.)
+    if (conexaoParada(conexao)) return [];
     q = q.or(escopoDaConexao(conexao));
+  } else {
+    // Sem número escolhido, a organização enxerga os modelos das conexões
+    // ATIVAS dela — não o espelho inteiro. A linha de uma conta que saiu
+    // (conexão excluída, ou trocada por outro número) fica no banco, com o
+    // histórico, mas não é mais oferecida.
+    const escopo = escopoDasConexoes(
+      (await conexoesComModelos(db, filtro.organizationId)).map((c) => ({
+        id: c.id,
+        provider: c.provider,
+        meta_waba_id: c.wabaId,
+      })),
+    );
+    if (!escopo) return [];
+    q = q.or(escopo);
   }
 
   const { data, error } = await q.order("status").order("name").order("language");

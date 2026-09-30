@@ -475,7 +475,11 @@ describe("CONTROLE DE VACUIDADE — o receptor viu requisição, alguma", () => 
     expect(noReceptor.some((u) => u.startsWith(`GET /v19.0/${WABA}/message_templates`))).toBe(true);
     // `checkHealth` e o lookup de mídia pedem o MESMO caminho da validação e do
     // `send` — eles são distinguidos pelo CAMPO pedido, e é isso que se mede.
-    expect(noReceptor.some((u) => u === `GET /v19.0/${NUMERO}?fields=display_phone_number,quality_rating`)).toBe(true);
+    // `status,platform_type` entraram para o vigia saber se o número saiu da
+    // API (desconectado pelo app WhatsApp Business) — ver `numeroForaDaApi`.
+    expect(
+      noReceptor.some((u) => u === `GET /v19.0/${NUMERO}?fields=display_phone_number,quality_rating,status,platform_type`),
+    ).toBe(true);
     expect(noReceptor.some((u) => u === "GET /v19.0/987654321")).toBe(true);
     // Dois caminhos do ANÚNCIO, com a versão do eixo (`v22.0`), não a do canal.
     expect(noReceptor.some((u) => u.startsWith("POST /v22.0/dataset-de-prova/events"))).toBe(true);

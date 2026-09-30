@@ -66,6 +66,17 @@ export const REF_KIND_SESSAO = "channel_session";
 export const DETALHE_CREDENCIAL_RECUSADA = "credencial_recusada_pelo_transporte";
 
 /**
+ * Prefixo do `detail` quando o PROVEDOR disse que o número saiu da API — a conta
+ * se desconectou (webhook) ou o número deixou de estar `CONNECTED` (varredura).
+ * O que vem depois dos dois-pontos é o motivo que a plataforma deu, para a
+ * Central dizer por que caiu em vez de só "fora do ar".
+ */
+export const PREFIXO_DESCONECTADO_NO_PROVEDOR = "desconectado_no_provedor:";
+
+/** O nome do episódio da desconexão pelo provedor — o que a Central já avisou. */
+export const EPISODIO_DESCONECTADO_NO_PROVEDOR = "DESCONECTADO_NO_PROVEDOR";
+
+/**
  * Marca do episódio aberto por um EMPURRÃO do provedor.
  *
  * A varredura não fecha episódio com esta marca: ela mede credencial e conta,
@@ -136,6 +147,22 @@ export function avisoDaConexao(saude: SaudeObservada, apelido: string): AvisoDeC
   if (!status || status === STATUS_SAUDAVEL) return null;
   if (!(STATUS_QUE_AVISAM as readonly string[]).includes(status)) return null;
 
+  if (saude.detail?.startsWith(PREFIXO_DESCONECTADO_NO_PROVEDOR)) {
+    // A desconexão foi feita FORA do CRM (pelo app WhatsApp Business ou pelo
+    // Gerenciador da Meta). Escanear QR não existe neste canal, e "fora do ar"
+    // sugere instabilidade: o que resolve é conectar o número de novo.
+    const motivo = saude.detail.slice(PREFIXO_DESCONECTADO_NO_PROVEDOR.length);
+    return {
+      kind: "channel_number_alert",
+      severity: "critical",
+      title: `WhatsApp "${apelido}" foi desconectado da API`,
+      body: `A Meta informou que este número não está mais conectado a esta instalação${
+        motivo ? ` (${motivo})` : ""
+      }. Nenhuma mensagem entra nem sai por ele. Para voltar, conecte o número de novo em Conexões.`,
+      episodio: EPISODIO_DESCONECTADO_NO_PROVEDOR,
+    };
+  }
+
   if (status === "SCAN_QR_CODE") {
     return {
       kind: "qr_rescan",
@@ -203,6 +230,57 @@ export async function listarConexoesCaidas(
     apelido: (s.display_name as string | null) ?? (s.phone_number as string | null) ?? "sem nome",
     status: (s.status as string | null) ?? "",
   }));
+}
+
+/**
+ * O episódio aberto nesta conexão (`escalated_status`), ou `null`. Falha de
+ * leitura responde `null`: na dúvida a varredura segue como sempre.
+ */
+async function episodioAberto(
+  admin: SupabaseClient,
+  sessionId: string,
+  organizationId: string,
+): Promise<string | null> {
+  const { data } = await admin
+    .from("channel_session_health")
+    .select("escalated_status")
+    .eq("organization_id", organizationId)
+    .eq("channel_session_id", sessionId)
+    .maybeSingle();
+  return (data as { escalated_status?: string | null } | null)?.escalated_status ?? null;
+}
+
+/**
+ * Há um episódio aberto pelo PROVEDOR nesta conexão? É o que impede a varredura
+ * de gravar `WORKING` por cima de uma desconexão que a plataforma avisou.
+ */
+export async function episodioDoEmpurraoAberto(
+  admin: SupabaseClient,
+  sessionId: string,
+  organizationId: string,
+): Promise<boolean> {
+  const ep = await episodioAberto(admin, sessionId, organizationId);
+  return Boolean(ep?.startsWith(PREFIXO_EMPURRAO));
+}
+
+/**
+ * A desconexão avisada PELO PROVEDOR (`PARTNER_REMOVED` e afins) está aberta?
+ *
+ * Enquanto estiver, a varredura não mexe no `status` da conexão (fica o
+ * `STOPPED` que o provedor gravou) — nem para `WORKING`, nem para `FAILED`: o
+ * token que perdeu o acesso junto com a conta faria a varredura trocar o estado
+ * a cada rodada, e o catálogo de modelos voltaria a mostrar a conexão.
+ */
+export function ehDesconexaoDoProvedor(episodio: string | null | undefined): boolean {
+  return episodio === `${PREFIXO_EMPURRAO}${EPISODIO_DESCONECTADO_NO_PROVEDOR}`;
+}
+
+export async function desconexaoDoProvedorAberta(
+  admin: SupabaseClient,
+  sessionId: string,
+  organizationId: string,
+): Promise<boolean> {
+  return ehDesconexaoDoProvedor(await episodioAberto(admin, sessionId, organizationId));
 }
 
 interface SessaoParaVigiar {
@@ -290,6 +368,15 @@ export async function sincronizarSaudeDaConexao(
   // Mesmo episódio: já foi avisado, e repetir é ruído. Um episódio DIFERENTE
   // (caiu por QR, agora está FAILED) avisa de novo — mudou o que fazer.
   if (jaEscalado === episodio) return "ja_avisado";
+
+  // O MESMO INCIDENTE, VISTO POR OUTRO LADO. Depois de uma desconexão avisada
+  // pelo provedor, a varredura costuma ver a consequência — o token perdeu o
+  // acesso (`FAILED`) ou o número saiu da API — e o nome do episódio dela é
+  // outro. Sem esta linha a Central ganhava um SEGUNDO aviso crítico para o
+  // mesmo número, e o episódio do provedor era trocado pelo da varredura (que
+  // perde a proteção contra o falso `WORKING`). Fica o aviso original, com o
+  // motivo que o provedor deu; quem fecha é o provedor ou a reconexão.
+  if (origem === "varredura" && ehDesconexaoDoProvedor(jaEscalado)) return "ja_avisado";
 
   await admin.from("agent_inbox_items").insert({
     organization_id: sessao.organization_id,

@@ -81,7 +81,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     for (const e of eventos) {
-      if (e.kind === "template_status") {
+      // Evento de CONTA (modelo mudou de estado, conta desconectou) não traz
+      // número: vai a toda sessão ativa daquela WABA, cada uma escopada a si.
+      if (e.kind === "template_status" || e.kind === "account_update") {
         let sessoes = porWaba.get(e.wabaId);
         if (!sessoes) {
           sessoes = await metaSessionsByWabaId(admin, e.wabaId);
@@ -91,7 +93,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           desfechos.push("no_session");
           continue;
         }
-        for (const sessao of sessoes) await processarEventoDaMeta(admin, e, sessao, agora);
+        for (const sessao of sessoes) {
+          const desfecho = await processarEventoDaMeta(admin, e, sessao, agora);
+          if (desfecho && e.kind === "account_update") desfechos.push(desfecho);
+        }
         continue;
       }
 

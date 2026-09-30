@@ -19,6 +19,7 @@
  *    da bolha de voz. E a Meta **não converte** — quem manda mp3 com `voice:true` erra;
  *    o outro canal converte por nós, este não.
  */
+import { PREFIXO_DESCONECTADO_NO_PROVEDOR } from "@/lib/channels/health";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { metaContactsPayload } from "@/lib/channels/meta/contact-card";
 import { graphBaseUrl } from "@/lib/channels/meta/graph-base";
@@ -162,7 +163,7 @@ export const metaCloudAdapter: ChannelAdapter = {
 
     try {
       const res = await fetch(
-        `${graphBaseUrl()}/${input.sessionRef}?fields=display_phone_number,quality_rating`,
+        `${graphBaseUrl()}/${input.sessionRef}?fields=display_phone_number,quality_rating,status,platform_type`,
         {
           headers: { Authorization: `Bearer ${creds.token}` },
           // Teto de espera: um endpoint que pendura a conexão penduraria o cron
@@ -172,6 +173,8 @@ export const metaCloudAdapter: ChannelAdapter = {
       );
       const body = (await res.json().catch(() => ({}))) as {
         error?: { message?: string; code?: number };
+        status?: string;
+        platform_type?: string;
       };
 
       if (res.status === 401 || res.status === 403) {
@@ -182,6 +185,14 @@ export const metaCloudAdapter: ChannelAdapter = {
         // de credencial, não indisponibilidade. Tratar como "não sei" deixaria
         // justamente a falha calada sem aviso.
         return { reachable: true, status: "FAILED", detail: (body.error?.message ?? "").slice(0, 200) || null };
+      }
+      // A chamada responder 200 NÃO quer dizer que o número fala pela API: um
+      // número desconectado pelo app WhatsApp Business continua existindo na
+      // conta. Quem diz é o `status` do número (a Meta exige `CONNECTED` para
+      // enviar e receber) e o `platform_type` (`CLOUD_API` = registrado aqui).
+      const fora = numeroForaDaApi(body);
+      if (fora) {
+        return { reachable: true, status: "STOPPED", detail: `${PREFIXO_DESCONECTADO_NO_PROVEDOR}${fora}` };
       }
       return { reachable: true, status: "WORKING", detail: null };
     } catch (err) {
@@ -330,3 +341,22 @@ export const metaCloudAdapter: ChannelAdapter = {
     return { externalId: body.messages?.[0]?.id ?? null };
   },
 };
+
+/**
+ * Os estados do número em que ele, com certeza, não entra nem sai pela API.
+ * Lista FECHADA de propósito: `FLAGGED` (qualidade baixa), `RATE_LIMITED` e
+ * estados novos que a Meta acrescente continuam enviando ou são transitórios —
+ * derrubar a conexão por eles ensinaria o operador a ignorar o aviso.
+ */
+const STATUS_DO_NUMERO_FORA_DA_API = new Set(["DISCONNECTED", "DELETED", "BANNED", "MIGRATED"]);
+
+/** O motivo pelo qual o número está fora da API, ou `null` se ele está nela. */
+export function numeroForaDaApi(body: { status?: unknown; platform_type?: unknown }): string | null {
+  const status = typeof body.status === "string" ? body.status.toUpperCase() : null;
+  if (status && STATUS_DO_NUMERO_FORA_DA_API.has(status)) return `numero_${status}`;
+  const plataforma = typeof body.platform_type === "string" ? body.platform_type.toUpperCase() : null;
+  // Ausente não é prova de nada (resposta antiga, campo não pedido); presente e
+  // diferente de CLOUD_API é número que saiu da Cloud API.
+  if (plataforma && plataforma !== "CLOUD_API") return `plataforma_${plataforma}`;
+  return null;
+}

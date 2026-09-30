@@ -195,8 +195,15 @@ describe("a régua da ordem tem um lugar só", () => {
       expect(semComentarios, `${caminho}: o predicado da Fila voltou a ser escrito à mão`).not.toMatch(
         PROIBIDO,
       );
-      expect(fonte(caminho), `${caminho}: não usa ehAFila`).toContain("ehAFila");
+      // `ordenaPelaEspera` é o `ehAFila` com a ORDEM escolhida na tela junto
+      // (recentes | espera) — a mesma pergunta, num lugar só, para a rota e a lista.
+      expect(fonte(caminho), `${caminho}: não usa ehAFila/ordenaPelaEspera`).toMatch(
+        /\b(ehAFila|ordenaPelaEspera)\b/,
+      );
     }
+    expect(fonte("lib/inbox/comando-da-conversa.ts")).toMatch(
+      /export function ordenaPelaEspera[\s\S]*?ehAFila\(f\)/,
+    );
   });
 
   it("⛔ o literal não voltou como régua própria — e a cerca morde", () => {

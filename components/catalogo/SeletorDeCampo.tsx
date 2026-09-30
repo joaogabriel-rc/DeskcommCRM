@@ -19,9 +19,11 @@
  */
 import { useMemo, useState } from "react";
 
+import { EscolherEtiqueta } from "@/components/catalogo/EscolherEtiqueta";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useCamposDoContato, useTags } from "@/hooks/catalogo/useCatalogo";
+import { useCamposDoContato } from "@/hooks/catalogo/useCatalogo";
+import { useOpcoesDeEtiqueta } from "@/hooks/catalogo/useOpcoesDeEtiqueta";
 import { useT } from "@/lib/i18n/IdiomaProvider";
 
 /** Valor sentinela do item "digitar outra chave" — `SelectItem` não aceita "". */
@@ -43,6 +45,12 @@ export function SeletorDeCampo({
     () => !!valor && !campos.some((c) => c.key === valor),
     [campos, valor],
   );
+  // "Outra chave" só quando a pessoa ESCOLHE digitar. Antes, campo ainda vazio
+  // já mostrava "Outra chave (digitar)" selecionado e uma caixa de chave
+  // técnica aberta — a primeira coisa que o critério novo pedia era um
+  // identificador de banco, no lugar de "escolha o campo".
+  const [digitando, setDigitando] = useState(false);
+  const mostrarChave = foraDoRegistro || (digitando && !campos.some((c) => c.key === valor));
 
   if (isLoading && campos.length === 0) {
     return <Input id={id} value={valor} onChange={(e) => onChange(e.target.value)} disabled />;
@@ -70,8 +78,15 @@ export function SeletorDeCampo({
   return (
     <div className="flex flex-col gap-1">
       <Select
-        value={foraDoRegistro || !valor ? OUTRO : valor}
-        onValueChange={(v) => onChange(v === OUTRO ? valor : v)}
+        value={mostrarChave ? OUTRO : valor || undefined}
+        onValueChange={(v) => {
+          if (v === OUTRO) {
+            setDigitando(true);
+            return;
+          }
+          setDigitando(false);
+          onChange(v);
+        }}
       >
         <SelectTrigger id={id} aria-label={t("Campo")}>
           <SelectValue placeholder={t("Escolha o campo")} />
@@ -82,10 +97,10 @@ export function SeletorDeCampo({
               {campo.label}
             </SelectItem>
           ))}
-          <SelectItem value={OUTRO}>Outra chave (digitar)</SelectItem>
+          <SelectItem value={OUTRO}>{t("Outra chave (digitar)")}</SelectItem>
         </SelectContent>
       </Select>
-      {(foraDoRegistro || !valor) && (
+      {mostrarChave && (
         <Input
           className="font-mono"
           value={valor}
@@ -133,77 +148,54 @@ export function SeletorDeTags({
   id?: string;
   /** @deprecated Sem efeito desde o seletor por chips. */
   placeholder?: string;
-  /** `false` = só etiquetas do registro (público de disparo). */
+  /** `false` = só etiquetas que já existem (público de disparo). */
   permitirNova?: boolean;
 }) {
   const t = useT();
-  const { data: tags = [] } = useTags();
-  const [nova, setNova] = useState("");
-  const escolhidas = new Set(valor.map((v) => v.toLowerCase()));
-  const disponiveis = tags.filter((tag) => !escolhidas.has(tag.name.toLowerCase()));
+  // Registro + vocabulário (`useOpcoesDeEtiqueta`): ler só o registro deixava o
+  // menu VAZIO numa organização cujas etiquetas nunca foram declaradas.
+  const { opcoes, doRegistro } = useOpcoesDeEtiqueta();
+  const conhecidas = new Set(opcoes.map((o) => o.toLowerCase()));
 
   function acrescentar(nome: string) {
     const limpo = nome.trim();
-    if (!limpo || escolhidas.has(limpo.toLowerCase())) return;
+    if (!limpo || valor.some((v) => v.toLowerCase() === limpo.toLowerCase())) return;
     onChange([...valor, limpo]);
   }
 
   return (
     <div className="flex flex-col gap-1.5" data-testid={id ? `seletor-de-tags-${id}` : undefined}>
-      {valor.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5">
-          {valor.map((nome) => {
-            const doRegistro = tags.some((tag) => tag.name.toLowerCase() === nome.toLowerCase());
-            return (
-              <li
-                key={nome}
-                className="flex items-center gap-1 rounded-md border border-border bg-surface-elevated px-2 py-0.5 text-xs"
-                title={doRegistro ? undefined : t("Etiqueta fora do registro")}
+      <ul className="flex flex-wrap items-center gap-1.5">
+        {valor.map((nome) => {
+          const conhecida = conhecidas.has(nome.toLowerCase()) || doRegistro.has(nome.toLowerCase());
+          return (
+            <li
+              key={nome}
+              className="flex items-center gap-1 rounded-full border border-border bg-surface-elevated px-2.5 py-0.5 text-xs"
+              title={conhecida ? undefined : t("Etiqueta fora do registro")}
+            >
+              <span className={conhecida ? "" : "italic text-text-muted"}>{nome}</span>
+              <button
+                type="button"
+                className="text-text-muted hover:text-text"
+                aria-label={`${t("Remover etiqueta")} ${nome}`}
+                onClick={() => onChange(valor.filter((v) => v !== nome))}
               >
-                <span className={doRegistro ? "" : "italic text-text-muted"}>{nome}</span>
-                <button
-                  type="button"
-                  className="text-text-muted hover:text-text"
-                  aria-label={`${t("Remover etiqueta")} ${nome}`}
-                  onClick={() => onChange(valor.filter((v) => v !== nome))}
-                >
-                  ×
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        <Select value="" onValueChange={acrescentar}>
-          <SelectTrigger id={id} className="w-56" aria-label={t("Adicionar etiqueta")}>
-            <SelectValue placeholder={disponiveis.length ? t("Adicionar etiqueta") : t("Nenhuma etiqueta a adicionar")} />
-          </SelectTrigger>
-          <SelectContent>
-            {disponiveis.map((tag) => (
-              <SelectItem key={tag.id} value={tag.name}>
-                {tag.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {permitirNova && (
-          <Input
-            className="w-44"
-            value={nova}
-            placeholder={t("Nova etiqueta")}
-            aria-label={t("Nova etiqueta")}
-            onChange={(e) => setNova(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                acrescentar(nova);
-                setNova("");
-              }
-            }}
+                ×
+              </button>
+            </li>
+          );
+        })}
+        <li>
+          <EscolherEtiqueta
+            jaEscolhidas={valor}
+            onEscolher={acrescentar}
+            permitirNova={permitirNova}
+            rotulo={t("Adicionar etiqueta")}
+            testId={id ? `adicionar-etiqueta-${id}` : undefined}
           />
-        )}
-      </div>
+        </li>
+      </ul>
     </div>
   );
 }

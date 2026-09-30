@@ -52,7 +52,11 @@ import {
   type ChannelProvider,
   type ChannelSessionRef,
 } from "@/lib/channels";
-import { sincronizarSaudeDaConexao } from "@/lib/channels/health";
+import {
+  desconexaoDoProvedorAberta,
+  episodioDoEmpurraoAberto,
+  sincronizarSaudeDaConexao,
+} from "@/lib/channels/health";
 import { ehNomeDeSessaoE2E } from "@/lib/channels/sessoes-e2e";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -159,7 +163,22 @@ async function handle(req: NextRequest): Promise<Response> {
       // gravar por cima com um erro de rede transitório trocaria informação boa
       // por ruído, e é o mesmo cuidado que a tela de conexões já toma.
       let statusFinal = s.status;
-      if (saude.reachable && saude.status && saude.status !== s.status) {
+      // A varredura não DESFAZ o que a plataforma empurrou: se a Meta avisou que
+      // a conta saiu da API (episódio marcado como empurrão), um "responde" da
+      // credencial não prova que o número voltou — pôr `WORKING` aqui trazia de
+      // volta o "Conectado" falso que o aviso veio corrigir. Quem fecha esse
+      // episódio é o próprio provedor ou a reconexão pela tela.
+      //
+      // E com a DESCONEXÃO avisada pelo provedor aberta, a varredura não troca o
+      // estado para nada: fica o `STOPPED` gravado por ele. Um `FAILED` por cima
+      // (o token perdeu o acesso junto com a conta) mudaria o estado a cada
+      // rodada e traria os modelos da conexão de volta ao catálogo.
+      const mudaria = Boolean(saude.reachable && saude.status && saude.status !== s.status);
+      const bloqueadaPeloEmpurrao = mudaria
+        ? (await desconexaoDoProvedorAberta(admin, s.id, s.organization_id)) ||
+          (saude.status === "WORKING" && (await episodioDoEmpurraoAberto(admin, s.id, s.organization_id)))
+        : false;
+      if (saude.reachable && saude.status && saude.status !== s.status && !bloqueadaPeloEmpurrao) {
         statusFinal = saude.status;
         const agora = new Date().toISOString();
         await admin

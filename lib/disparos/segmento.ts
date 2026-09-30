@@ -44,8 +44,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { CHAVE_DE_CAMPO } from "@/lib/schemas/contact-fields";
 import {
+  CAMPOS_DO_SISTEMA_DO_PUBLICO,
   NEGACAO_DO_OPERADOR,
   SEGMENTO_VAZIO,
+  ehCampoDoSistema,
   type CriterioDeCampo,
   type Segmento,
 } from "@/lib/schemas/disparos";
@@ -108,11 +110,17 @@ export function regexDeContem(valor: string): string {
   return valor.replace(/[\\.^$|?*+()[\]{}]/g, (c) => `\\${c}`);
 }
 
-function colunaDoCampo(key: string): string {
+function colunaDoCampo(c: Pick<CriterioDeCampo, "key"> & { origem?: CriterioDeCampo["origem"] }): string {
+  // Campo do SISTEMA é coluna do contato, e só da lista fechada — a chave vira
+  // nome de coluna, então nada fora de `CAMPOS_DO_SISTEMA_DO_PUBLICO` passa.
+  if (c.origem === "sistema") {
+    if (!ehCampoDoSistema(c.key)) throw new Error(`segmento: campo do sistema inválido: ${JSON.stringify(c.key)}`);
+    return c.key;
+  }
   // O schema já recusa chave fora da regra; a checagem repete AQUI porque esta
   // função é a última porta antes de a chave virar nome de coluna.
-  if (!CHAVE_DE_CAMPO.test(key)) throw new Error(`segmento: chave de campo inválida: ${JSON.stringify(key)}`);
-  return `custom_fields->>${key}`;
+  if (!CHAVE_DE_CAMPO.test(c.key)) throw new Error(`segmento: chave de campo inválida: ${JSON.stringify(c.key)}`);
+  return `custom_fields->>${c.key}`;
 }
 
 /**
@@ -120,7 +128,7 @@ function colunaDoCampo(key: string): string {
  * esta forma. Cada valor vai entre aspas.
  */
 function termoDoCampo(c: CriterioDeCampo): string {
-  const col = colunaDoCampo(c.key);
+  const col = colunaDoCampo(c);
   switch (c.op) {
     case "eq":
       return `${col}.eq.${citar(c.value)}`;
@@ -140,7 +148,7 @@ function termoDoCampo(c: CriterioDeCampo): string {
 
 /** Um critério de campo do grupo E, como filtro próprio (fora de `or`). */
 function filtroDoCampo(c: CriterioDeCampo): FiltroDoSegmento {
-  const col = colunaDoCampo(c.key);
+  const col = colunaDoCampo(c);
   switch (c.op) {
     case "eq":
       // `.eq()` manda o valor como parâmetro da query: vírgula e aspas não
@@ -287,8 +295,14 @@ const SIMBOLO: Record<CriterioDeCampo["op"], string> = {
   unset: "vazio",
 };
 
+/** O nome do campo na frase: o rótulo do sistema, ou a chave do personalizado. */
+function nomeDoCampo(c: CriterioDeCampo): string {
+  return c.origem === "sistema" && ehCampoDoSistema(c.key) ? CAMPOS_DO_SISTEMA_DO_PUBLICO[c.key] : c.key;
+}
+
 function frase(c: CriterioDeCampo): string {
-  return c.op === "set" || c.op === "unset" ? `${c.key} ${SIMBOLO[c.op]}` : `${c.key} ${SIMBOLO[c.op]} "${c.value}"`;
+  const nome = nomeDoCampo(c);
+  return c.op === "set" || c.op === "unset" ? `${nome} ${SIMBOLO[c.op]}` : `${nome} ${SIMBOLO[c.op]} "${c.value}"`;
 }
 
 /**
@@ -316,9 +330,10 @@ export function resumoDoSegmento(segmento: Partial<Segmento> | null | undefined)
   if (s.tags_any.length) partes.push(`com ${s.tags_any.join(" ou ")}`);
   if (s.tags_none.length) partes.push(`sem ${s.tags_none.join(" nem ")}`);
   for (const f of s.fields) {
-    if (f.op === "set") partes.push(`${f.key} preenchido`);
-    else if (f.op === "unset") partes.push(`${f.key} vazio`);
-    else partes.push(`${f.key} ${f.op === "neq" ? "≠" : f.op === "contains" ? "~" : f.op === "not_contains" ? "!~" : "="} ${f.value}`);
+    const nome = nomeDoCampo(f);
+    if (f.op === "set") partes.push(`${nome} preenchido`);
+    else if (f.op === "unset") partes.push(`${nome} vazio`);
+    else partes.push(`${nome} ${f.op === "neq" ? "≠" : f.op === "contains" ? "~" : f.op === "not_contains" ? "!~" : "="} ${f.value}`);
   }
   if (s.fields_any.length) partes.push(`ou: ${s.fields_any.map(frase).join(" ou ")}`);
   if (s.fields_none.length) partes.push(`nenhum de: ${s.fields_none.map(frase).join(", ")}`);

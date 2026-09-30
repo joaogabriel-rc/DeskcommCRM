@@ -1,5 +1,5 @@
 "use client";
-import { ehAFila } from "@/lib/inbox/comando-da-conversa";
+import { ordenaPelaEspera } from "@/lib/inbox/comando-da-conversa";
 import { useEffect, useMemo } from "react";
 import { useT } from "@/hooks/i18n/useT";
 import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query";
@@ -58,7 +58,10 @@ export function ConversationList({
   // A Fila deixou de mandar `assigned_to=unassigned` (agora pede `comando`), e
   // sem esta linha a numeração "1º, 2º…" e o tempo de espera sumiriam da única
   // visão em que servem para alguma coisa — sem erro nenhum, só sumiriam.
-  const isQueue = ehAFila(filters);
+  // Com a ordem "Mais recentes", a Fila continua sendo a Fila, mas a posição
+  // deixa de ser o índice: numerar por espera uma lista ordenada por atividade
+  // mostraria "1º" em quem chegou por último.
+  const isQueue = ordenaPelaEspera(filters);
   // Uma leitura por lista, compartilhada por todas as linhas (react-query dedupa
   // com o cabeçalho, que faz a mesma pergunta).
   const automaticoDaOrg = useAutomaticoAtivo();
