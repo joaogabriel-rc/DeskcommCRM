@@ -25,7 +25,7 @@
  * o diálogo cabe, o miolo rola, e cabeçalho e rodapé NÃO se movem quando o
  * miolo rola até o fim.
  */
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./helpers/test";
 
 import { lerCreds, loginComoAdmin } from "./helpers/login-admin";
 

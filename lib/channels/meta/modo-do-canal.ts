@@ -2,7 +2,7 @@
  * O MODO de um canal oficial: número só na Cloud API, ou número que continua no
  * aplicativo WhatsApp Business ao mesmo tempo (coexistência).
  *
- * O vocabulário é o do CHECK de `channel_sessions.meta_modo` (migration 0417), e
+ * O vocabulário é o do CHECK de `channel_sessions.meta_modo` (migration 0494), e
  * o par é cobrado por `tests/invariants/vocabulario-banco-x-typescript.test.ts`.
  *
  * ─── Quem decide é a META, nunca o navegador ────────────────────────────────

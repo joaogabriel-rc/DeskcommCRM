@@ -132,6 +132,8 @@ const TIPO_DO_NO: Record<FlowNode["type"], string> = {
   collect: "Pergunta",
   skill: "Skill",
   action: "Mensagem",
+  // #1540 — não é "Mensagem": é o passo que NÃO fala com o cliente.
+  internal_task: "Lembrete interno",
   end: "Fim",
 };
 
@@ -196,6 +198,10 @@ export function resumoDoNo(node: FlowNode): NoDoDossie {
               ? "envia um texto fixo"
               : "envia uma mensagem de modelo pronto",
       };
+    case "internal_task": {
+      const prazo = node.config.vence_em_dias === 0 ? "hoje" : `em ${node.config.vence_em_dias} dia(s)`;
+      return { ...base, resumo: `cria a tarefa "${node.config.titulo}" para ${prazo} — sem mensagem ao cliente` };
+    }
     case "end":
       return { ...base, resumo: `encerra — ${DESFECHO[node.config.outcome] ?? node.config.outcome}` };
   }
@@ -388,6 +394,17 @@ export function descreveEvento(
       return {
         titulo: "Segurou o envio até o horário permitido",
         detalhe: ate ? `a janela estava fechada; envia em ${ate}` : "a janela estava fechada",
+        ...motor,
+      };
+    }
+    case "held_by_return": {
+      // Como o adiamento pela janela: segurar NÃO é falhar. Sem esta linha o
+      // operador veria o fluxo parado por dias sem saber que ele está esperando
+      // o retorno que o agente combinou com o cliente.
+      const ate = quandoLegivel(p.next_eval_at, idioma);
+      return {
+        titulo: "Segurou o fluxo por causa de um retorno agendado",
+        detalhe: ate ? `volta a andar em ${ate}, um dia depois do retorno` : null,
         ...motor,
       };
     }

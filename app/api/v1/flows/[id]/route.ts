@@ -157,9 +157,10 @@ export async function PATCH(req: NextRequest, ctx: RouteCtx): Promise<Response> 
       ...problemasDosModelos(nos, await modelosDosNos(supabase, activeOrg.orgId, nos)),
     ];
     if (problemas.length > 0) {
-      return fail("invalid_request", problemas.map((p) => t(p)).join(" "), 422, {
+      const mensagens = problemas.map((p) => t(p));
+      return fail("invalid_request", mensagens.join(" "), 422, {
         requestId,
-        details: problemas.map((p) => ({ path: "flow", message: t(p) })),
+        details: mensagens.map((message) => ({ path: "flow", message })),
       });
     }
   }

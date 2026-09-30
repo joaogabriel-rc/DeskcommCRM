@@ -1,5 +1,5 @@
 /**
- * A rota e o cartão da sincronização do app WhatsApp Business (0420).
+ * A rota e o cartão da sincronização do app WhatsApp Business (0495).
  *
  * Rota: a organização vem da sessão (nunca do corpo), só `admin`, guarda de
  * suporte antes do efeito, e o desfecho de cada tipo volta para a tela.

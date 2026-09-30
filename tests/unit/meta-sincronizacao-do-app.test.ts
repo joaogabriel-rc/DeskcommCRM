@@ -1,5 +1,5 @@
 /**
- * Sincronização do app WhatsApp Business — a fase de PRESERVAÇÃO (0420).
+ * Sincronização do app WhatsApp Business — a fase de PRESERVAÇÃO (0495).
  *
  * O que cada bloco tranca:
  *   - o PEDIDO: contatos antes do histórico, histórico só depois de contatos
@@ -66,7 +66,7 @@ const PADROES: Record<string, Linha> = {
 };
 const UNICOS: Record<string, string[]> = {
   meta_sincronizacoes: ["channel_session_id", "onboarding_em", "tipo"],
-  // A chave da 0436: a janela faz parte da identidade (`null === null`, como o `nulls not distinct`).
+  // A chave da 0496: a janela faz parte da identidade (`null === null`, como o `nulls not distinct`).
   meta_sincronizacao_payloads: ["channel_session_id", "onboarding_em", "campo", "payload_hash"],
 };
 
@@ -320,7 +320,7 @@ describe("solicitarSincronizacaoDoApp", () => {
     const banco = bancoComSessoes();
     await solicitarSincronizacaoDoApp(banco.admin, { organizationId: ORG_A, agora: DENTRO });
     const tabelas = new Set(banco.tocadas.map((t) => t.split(":")[1]));
-    // A quarentena dos ecos (0436) só é LIDA — é a contagem que a tela mostra.
+    // A quarentena dos ecos (0496) só é LIDA — é a contagem que a tela mostra.
     expect([...tabelas].sort()).toEqual(["channel_sessions", "meta_ecos_em_espera", "meta_sincronizacoes"]);
     expect(banco.tocadas.filter((t) => t.endsWith(":meta_ecos_em_espera")).every((t) => t.startsWith("select:"))).toBe(true);
     expect(banco.tocadas.filter((t) => t.startsWith("select:") === false).every((t) => t.endsWith(":meta_sincronizacoes"))).toBe(true);
@@ -462,7 +462,7 @@ const VALOR_RECUSADO = {
   history: [{ errors: [{ code: 2593109, title: "History sync is turned off by the business from the WhatsApp Business App" }] }],
 };
 
-/** Toda RPC é o `emit_event` de `meta.historico.chunk_guardado` (0436) — e nada mais. */
+/** Toda RPC é o `emit_event` de `meta.historico.chunk_guardado` (0496) — e nada mais. */
 function apenasOAvisoAoResolvedor(rpcs: unknown[]): boolean {
   return rpcs.every((r) => {
     const [nome, args] = r as [string, Record<string, unknown>];
@@ -526,7 +526,7 @@ describe("guardarPayloadDeSincronizacao", () => {
     expect(banco.tabelas.meta_sincronizacao_payloads).toHaveLength(1);
   });
 
-  it("nenhuma escrita em messages, conversations ou contacts; nenhuma RPC além do aviso ao resolvedor dos ecos (0436)", async () => {
+  it("nenhuma escrita em messages, conversations ou contacts; nenhuma RPC além do aviso ao resolvedor dos ecos (0496)", async () => {
     const banco = bancoComSessoes();
     for (const [campo, value] of [["history", VALOR_HISTORICO], ["smb_app_state_sync", VALOR_CONTATOS], ["history", VALOR_RECUSADO]] as const) {
       await guardarPayloadDeSincronizacao(banco.admin, { campo, phoneNumberId: NUM_A, value }, { organizationId: ORG_A });

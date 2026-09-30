@@ -1,14 +1,14 @@
 "use client";
 /**
  * Histórico e contatos do aplicativo WhatsApp Business — o cartão da página do
- * canal oficial num número em coexistência (Fase 2.0, migration 0420).
+ * canal oficial num número em coexistência (Fase 2.0, migration 0495).
  *
  * A Meta só entrega o histórico e a agenda do aplicativo se o CRM PEDIR em até
  * 24h da conexão, e uma vez só. Conexões novas já pedem sozinhas; este botão é o
  * caminho de quem conectou antes disso, e o de tentar de novo o que falhou. O
  * cartão diz o que foi pedido, o que já chegou e até quando dá para pedir — e não
  * promete importação: nesta fase o que chega é guardado, não aparece nas conversas.
- * Também conta as mídias antigas que chegaram como eco do aplicativo (0436): as
+ * Também conta as mídias antigas que chegaram como eco do aplicativo (0496): as
  * reconhecidas como histórico, as que aguardam o histórico e as que entraram nas
  * conversas por não serem dele.
  *

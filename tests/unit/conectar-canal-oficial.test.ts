@@ -161,7 +161,7 @@ describe("conectarCanalOficial", () => {
     expect(escritas).toHaveLength(0);
   });
 
-  describe("o modo do número (migration 0417) — quem decide é a Meta", () => {
+  describe("o modo do número (migration 0494) — quem decide é a Meta", () => {
     const escritaDoModo = (escritas: Escrita[]) =>
       escritas.find((e) => e.tipo === "update" && ("meta_modo" in e.patch || "meta_onboarding_em" in e.patch));
 
@@ -179,7 +179,7 @@ describe("conectarCanalOficial", () => {
         ["organization_id", "org-1"],
         ["id", "sessao-1"],
       ]);
-      // O modo não vai no insert: banco sem a 0417 continua conectando.
+      // O modo não vai no insert: banco sem a 0494 continua conectando.
       expect(escritas[0]!.patch).not.toHaveProperty("meta_modo");
     });
 
@@ -211,7 +211,7 @@ describe("conectarCanalOficial", () => {
       expect(await conectarCanalOficial({ ...ENTRADA, admin, onboarding: true })).toMatchObject({ ok: true, modo: null });
     });
 
-    it("banco sem a migration 0417: o modo não grava, a conexão continua", async () => {
+    it("banco sem a migration 0494: o modo não grava, a conexão continua", async () => {
       const { admin } = adminFalso({ erroDaValidade: 'column "meta_modo" does not exist' });
       const r = await conectarCanalOficial({ ...ENTRADA, admin, onboarding: true });
       expect(r.ok).toBe(true);

@@ -1,6 +1,6 @@
 /**
  * Ecos do app WhatsApp Business em espera — a quarentena do eco SUSPEITO
- * (migration 0436).
+ * (migration 0496).
  *
  * ─── O defeito que isto fecha ───────────────────────────────────────────────
  * Durante a sincronização do histórico, parte da MÍDIA histórica que a empresa
@@ -33,7 +33,7 @@ import type { EchoMessageEvent } from "./webhook";
 
 type Admin = SupabaseClient;
 
-/** Vocabulário do CHECK `meta_ecos_em_espera.estado` (0436). */
+/** Vocabulário do CHECK `meta_ecos_em_espera.estado` (0496). */
 export const ESTADOS_DO_ECO_EM_ESPERA = ["aguardando", "historico", "promovido", "duplicado"] as const;
 export type EstadoDoEcoEmEspera = (typeof ESTADOS_DO_ECO_EM_ESPERA)[number];
 
@@ -77,7 +77,7 @@ export function classificarEco(sentAt: Date, onboardingEm: string | null): Class
 /**
  * O onboarding atual do canal. `null` quer dizer só uma coisa: o canal NÃO TEM
  * onboarding (Cloud API dedicada, ou conectado antes da coexistência) — e aí o
- * eco segue ao vivo, como antes da 0436.
+ * eco segue ao vivo, como antes da 0496.
  *
  * Falha de leitura LANÇA, e nunca vira `null`: confundir "não consegui ler" com
  * "não existe" mandaria o eco suspeito pelo caminho ao vivo, que cria contato,

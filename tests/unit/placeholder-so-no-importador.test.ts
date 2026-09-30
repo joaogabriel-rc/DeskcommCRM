@@ -4,7 +4,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 /**
- * SÓ O IMPORTADOR DE HISTORY TRANSFORMA `media_placeholder` EM MENSAGEM (0436).
+ * SÓ O IMPORTADOR DE HISTORY TRANSFORMA `media_placeholder` EM MENSAGEM (0496).
  *
  * No history da sincronização do app, a mídia vem como `media_placeholder` — sem
  * a mídia — e a mídia chega depois, por outro webhook, com o MESMO wamid. Quem
@@ -108,6 +108,6 @@ describe("media_placeholder só no importador de history", () => {
       }
     }
     expect(foraDaFuncao).toEqual([]);
-    expect(corpos, "a função da 0436 existe na migration e no baseline").toBeGreaterThanOrEqual(2);
+    expect(corpos, "a função da 0496 existe na migration e no baseline").toBeGreaterThanOrEqual(2);
   });
 });

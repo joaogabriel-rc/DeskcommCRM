@@ -75,6 +75,8 @@ interface Excecao {
  * linhas da OUTRA organização, não uma leitura como superusuário.
  */
 const PROVA_PROPRIA: readonly Excecao[] = [
+  { tabela: "golden_candidates", razao: "tests/invariants/golden-candidates.test.ts — dois tenants reais por JWT (agent): leitura positiva local e ZERO do vizinho nos dois sentidos, a tabela inteira sem filtro igual à própria, anon recusado, e insert/update/delete de authenticated sem efeito (só o servidor grava)." },
+  { tabela: "jev_observacoes", razao: "tests/invariants/jev-observacoes.test.ts — dois tenants reais por JWT (agent): leitura positiva local e ZERO do vizinho nos dois sentidos, a tabela inteira sem filtro igual à própria, anon recusado, e insert/update/delete de authenticated sem efeito (só o servidor grava)." },
   { tabela: "prospecting_settings", razao: "tests/invariants/prospecting.test.ts — tabela exclusiva do servidor, ACL e RLS verificadas; FK composta e comandos autenticados cercam a organização." },
   { tabela: "prospecting_campaigns", razao: "tests/invariants/prospecting.test.ts — tabela exclusiva do servidor, ACL e RLS verificadas; FK composta e comandos autenticados cercam a organização." },
   { tabela: "prospecting_candidates", razao: "tests/invariants/prospecting.test.ts — tabela exclusiva do servidor, ACL e RLS verificadas; FK composta e comandos autenticados cercam a organização." },
@@ -92,6 +94,25 @@ const PROVA_PROPRIA: readonly Excecao[] = [
   { tabela: "meta_sincronizacao_payloads", razao: "tests/invariants/sincronizacao-do-app-sem-efeitos.test.ts — payload bruto (dado pessoal) exclusivo do servidor: `permission denied` sob `set role authenticated` + JWT e sob `anon`; RLS ligada com policy de organização + papel admin; FK composta recusa o canal de outra organização; cascade com o canal" },
   { tabela: "meta_ecos_em_espera", razao: "tests/invariants/ecos-em-espera.test.ts — eco bruto (dado pessoal) exclusivo do servidor: `permission denied` sob `set role authenticated` + JWT do admin da própria organização e sob `anon`; RLS ligada com policy de organização + papel admin; FK composta recusa o canal de outra organização; cascade com o canal" },
   { tabela: "platform_support_sessions", razao: "tests/invariants/suporte-temporario.test.ts — grant por sessão, readonly e nenhuma escrita direta authenticated" },
+  {
+    tabela: "crm_proposal_counters",
+    razao:
+      "tests/invariants/proposta-contador-e-server-side.test.ts — server-side " +
+      "only (RLS ligada, zero policies, revoke all de anon/authenticated, " +
+      "migration 0466): authenticated e anon barrados com `permission denied` " +
+      "em leitura e escrita, não zero linhas. Não entra em TABLES pelo mesmo " +
+      "motivo do eixo de anúncios: lá o caso viraria `permission denied` e a " +
+      "'correção' natural seria abrir policy — expondo pelo PostgREST o " +
+      "contador que decide a numeração jurídica da proposta (D9).",
+  },
+  {
+    tabela: "proposal_templates",
+    razao:
+      "tests/invariants/proposta-templates-isolamento-entre-organizacoes.test.ts " +
+      "— isolamento cross-org com `countAs` real (membro da org A não vê a " +
+      "cópia de modelo da org B) + `writeCountAs` provando o piso de papel na " +
+      "escrita (viewer barrado, agent permitido), migration 0471 (M0).",
+  },
   {
     tabela: "webhook_lead_captures",
     razao:
@@ -253,6 +274,23 @@ const PROVA_PROPRIA: readonly Excecao[] = [
       "de captura de gclid redireciona.",
   },
   {
+    tabela: "google_ads_conversion_rules",
+    razao:
+      "tests/invariants/captura-de-clique-e-server-side.test.ts — RLS ligada, " +
+      "zero policies, privilégios revogados e permission denied sob set role " +
+      "anon/authenticated. O servidor aplica organization_id às regras por etapa. " +
+      "tests/invariants/google-regras-etapa-isoladas.test.ts também prova a FK " +
+      "composta que recusa etapa de outra organização.",
+  },
+  {
+    tabela: "ad_tracking_links",
+    razao:
+      "tests/invariants/captura-de-clique-e-server-side.test.ts — mesmo teste " +
+      "comportamental deny-all, com controle positivo de service_role. " +
+      "tests/invariants/links-rastreaveis-isolados.test.ts prova as FKs compostas " +
+      "e o isolamento das métricas por organização.",
+  },
+  {
     tabela: "google_ads_click_refs",
     razao:
       "tests/invariants/captura-de-clique-e-server-side.test.ts — mesmo " +
@@ -273,6 +311,19 @@ const PROVA_PROPRIA: readonly Excecao[] = [
       "tests/invariants/captura-de-clique-e-server-side.test.ts — mesmo " +
       "`describe.each`. Guarda as UTMs de cada clique no botão da landing " +
       "page e o ref curto que as liga à mensagem do WhatsApp.",
+  },
+  {
+    tabela: "channel_session_groups",
+    razao:
+      "tests/invariants/grupos-na-inbox.test.ts, dois casos. \"isola por " +
+      "organização (RLS), membro só LÊ e só o service role escreve\": com uma " +
+      "linha REAL semeada na outra organização (e um controle que confere que " +
+      "ela existe), o manager da organização de teste lê 0 linhas dela por JWT " +
+      "e o agent lê a da própria; insert/update/delete de manager, insert de " +
+      "agent e de anon são recusados; o service_role grava e altera. \"nenhuma " +
+      "escrita concedida a anon/authenticated\": o catálogo não tem INSERT, " +
+      "UPDATE, DELETE nem TRUNCATE para anon, authenticated ou PUBLIC. O " +
+      "isolamento é medido num sentido só (org de teste → outra). Migration 0482.",
   },
 ];
 

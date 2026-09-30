@@ -20,7 +20,8 @@ import { McpAuthError, ensureRole, ensureScope } from "@/lib/mcp/auth";
 import type { McpAuthResult } from "@/lib/mcp/auth";
 import { logger } from "@/lib/logger";
 import { allTools, getToolByName } from "@/lib/mcp/tools";
-import { catalogEntry, deModuloDesligado } from "@/lib/mcp/tools/catalog";
+import { catalogEntry, deCapacidadeDesligada, deModuloDesligado } from "@/lib/mcp/tools/catalog";
+import type { CapacidadeDaOrganizacao } from "@/lib/organizacao/capacidades";
 import type { ModuloOpcional } from "@/lib/instalacao/modulos";
 import { higienizarUuidsDeAterro } from "@/lib/mcp/uuid-de-aterro";
 import { recusaDeCapacidadeParaOModelo } from "@/lib/mcp/recusa-para-o-modelo";
@@ -40,6 +41,7 @@ export interface PickToolsInput {
   auth: McpAuthResult;
   toolIds: string[];
   handoffToolEnabled: boolean;
+  proposalAiDraftEnabled?: boolean;
   /**
    * Funis em que ESTE agente pode escrever (`ai_agent_versions.pipeline_ids`).
    *
@@ -54,11 +56,121 @@ export interface PickToolsInput {
    * tenha perguntado — a direção segura, como a de `pipelineIds`.
    */
   modulosLigados?: readonly ModuloOpcional[];
+  /**
+   * Capacidades que a ORGANIZAÇÃO ligou (`capacidadesDaOrganizacao()`). Ausente
+   * vale como nenhuma, pela mesma razão de `modulosLigados`.
+   */
+  capacidadesLigadas?: readonly CapacidadeDaOrganizacao[];
   /** Mutable signal — runtime checks after each step. */
   handoffSignal: RuntimeHandoffSignal;
+  /**
+   * O CONTATO que este turno atende, quando o turno é de uma conversa.
+   *
+   * No motor do agente, "lead" é o CONTATO (`job.contact_id`), e é esse id que o
+   * modelo vê rotulado como lead. As ferramentas do catálogo chamam de
+   * `lead_id` o NEGÓCIO (`crm_leads.id`). Medido em produção: o assistente
+   * fechou um pedido e chamou `crm_update_lead` duas vezes com o id do contato
+   * — as duas recusadas, e o pedido confirmado ficou sem valor. Com o contato
+   * do turno à mão, esse id é traduzido para o negócio aberto dele.
+   */
+  contatoDoTurno?: string;
+}
+
+/**
+ * `lead_id` que é o id do CONTATO do turno → o negócio ABERTO desse contato.
+ *
+ * Só o contato do turno, e só quando o negócio aberto é um só: com dois
+ * abertos a escolha não é do runtime e o id segue como veio, para a recusa de
+ * sempre. Quem recusa é o guarda abaixo, não `resolveActiveLeadForContact` —
+ * ela só chama de ambíguo o EMPATE de atividade; fora dele, escolhe o mais
+ * recente, e uma escrita (valor, ganho/perdido) cairia num cartão por palpite.
+ * Falha de leitura também devolve o id intacto.
+ */
+export async function leadIdDoContatoDoTurno(
+  supabase: SupabaseClient,
+  organizationId: string,
+  contatoDoTurno: string | undefined,
+  leadId: unknown,
+): Promise<string | null> {
+  if (!contatoDoTurno || leadId !== contatoDoTurno) return null;
+  const { data, error } = await supabase
+    .from("crm_leads")
+    .select("id, organization_id, pipeline_id, status, last_activity_at, created_at")
+    .eq("organization_id", organizationId)
+    .eq("contact_id", contatoDoTurno);
+  if (error) return null;
+  const candidatos = (data ?? []) as LeadCandidate[];
+  if (candidatos.filter((l) => l.status === "open").length !== 1) return null;
+  const r = resolveActiveLeadForContact(candidatos);
+  return r.routed ? r.leadId : null;
+}
+
+/**
+ * Uma ESCRITA do agente numa conversa só mira um negócio DO CONTATO desta
+ * conversa.
+ *
+ * `leadIdDoContatoDoTurno`, logo acima, conserta a confusão contato × negócio.
+ * Ficavam dois casos de fora, e o segundo é o que faz dano calado:
+ *
+ *  1. o id INVENTADO. Medido em produção (2026-09-15): o assistente ouviu "sim,
+ *     já tenho os textos", chamou `crm_update_lead` com a chave certa e um
+ *     `lead_id` que não existe em lugar nenhum. O escopo recusou, e a
+ *     resposta do cliente se perdeu.
+ *  2. o id REAL de OUTRO cliente, no mesmo funil. O escopo aprova (o funil é
+ *     do agente), a escrita acontece, a auditoria grava sucesso — e o dado de
+ *     um cliente vai para a ficha de outro, sem erro para ninguém investigar.
+ *
+ * A regra segue a de `leadIdDoContatoDoTurno`: o runtime não escolhe por
+ * palpite. Um negócio deste contato segue como veio; fora dele, só se troca
+ * quando o contato tem UM negócio aberto; com nenhum ou vários, recusa com o
+ * motivo, em texto, para o modelo seguir a conversa.
+ */
+export async function negocioDaEscritaDoTurno(
+  supabase: SupabaseClient,
+  organizationId: string,
+  contatoDoTurno: string,
+  leadId: string,
+): Promise<
+  | { ok: true; leadId: string; trocado: boolean }
+  | { ok: false; motivo: "indisponivel" | "sem_negocio" | "negocio_ambiguo"; mensagem: string }
+> {
+  const { data, error } = await supabase
+    .from("crm_leads")
+    .select("id, status")
+    .eq("organization_id", organizationId)
+    .eq("contact_id", contatoDoTurno);
+  if (error) {
+    // Falha de leitura nunca vira "não é seu negócio": o modelo leria como
+    // veredito e pararia de tentar. Mesma disciplina do escopo de funil.
+    return {
+      ok: false,
+      motivo: "indisponivel",
+      mensagem: "não consegui conferir o negócio desta conversa agora; tente de novo.",
+    };
+  }
+  const negocios = (data ?? []) as Array<{ id: string; status: string }>;
+  if (negocios.some((n) => n.id === leadId)) return { ok: true, leadId, trocado: false };
+  const abertos = negocios.filter((n) => n.status === "open");
+  if (abertos.length === 1) return { ok: true, leadId: abertos[0]!.id, trocado: true };
+  if (abertos.length === 0) {
+    return {
+      ok: false,
+      motivo: "sem_negocio",
+      mensagem: "esta pessoa ainda não tem um negócio aberto — siga a conversa normalmente.",
+    };
+  }
+  return {
+    ok: false,
+    motivo: "negocio_ambiguo",
+    mensagem:
+      "esta pessoa tem mais de um negócio aberto e o id enviado não é de nenhum deles — " +
+      "siga a conversa e deixe que alguém da equipe registre.",
+  };
 }
 
 const HANDOFF_TOOL_NAME = "crm_request_human_handoff";
+const DRAFT_PROPOSAL_TOOL_NAME = "crm_draft_proposal";
+const PREPARAR_PROPOSTA_TOOL_NAME = "crm_preparar_proposta";
 
 function shapeToZodObject(shape: Record<string, z.ZodTypeAny>): z.ZodTypeAny {
   // The MCP tool inputSchema is a Zod *raw shape* (object of zod types).
@@ -93,6 +205,20 @@ function wrapMcpTool(
         (args ?? {}) as Record<string, unknown>,
       );
       const argsRecord = higiene.limpos;
+      if ("lead_id" in argsRecord) {
+        const traduzido = await leadIdDoContatoDoTurno(
+          input.supabase,
+          input.ctx.organizationId,
+          input.contatoDoTurno,
+          argsRecord.lead_id,
+        );
+        if (traduzido) {
+          logger.info("lead_id era o contato do turno — traduzido para o negócio aberto", {
+            tool: def.name,
+          });
+          argsRecord.lead_id = traduzido;
+        }
+      }
       // O que vai ao audit não é necessariamente o que vai ao handler: a tool
       // pode declarar como tirar PII dos args (ex.: valores de filtro).
       const argsAudit = def.redigirParaAuditoria ? def.redigirParaAuditoria(argsRecord) : argsRecord;
@@ -107,6 +233,45 @@ function wrapMcpTool(
       try {
         ensureScope(input.auth.scopes, def.requiresScope);
         ensureRole(input.auth.role, def.requiresRole);
+
+        // ── DE QUE NEGÓCIO É ESTA ESCRITA — do contato da conversa ──────────
+        //
+        // Só ESCRITA: `crm_list_followups`, `crm_list_appointments` e irmãs têm
+        // `lead_id` e são leituras; trocar ali faria o modelo perguntar por um
+        // negócio e receber outro. Só com contato do turno: o Operador, a rota
+        // HTTP e as automações seguem com o `lead_id` de quem chamou. Antes do
+        // escopo, para o escopo julgar o negócio que de fato vai ser escrito.
+        if (
+          input.contatoDoTurno &&
+          def.category === "write" &&
+          typeof argsRecord.lead_id === "string"
+        ) {
+          const alvo = await negocioDaEscritaDoTurno(
+            input.supabase,
+            input.ctx.organizationId,
+            input.contatoDoTurno,
+            argsRecord.lead_id,
+          );
+          if (!alvo.ok) {
+            void auditMcpToolCall({
+              ctx: input.ctx,
+              toolName: def.name,
+              args: argsAudit,
+              durationMs: Date.now() - startedAt,
+              success: false,
+              errorMessage: `negocio_da_conversa:${alvo.motivo}`,
+            });
+            return { permitido: false, motivo: alvo.motivo, mensagem: alvo.mensagem };
+          }
+          if (alvo.trocado) {
+            // Não é cosmético: é a única forma de saber que o modelo chuta, e
+            // com que frequência.
+            logger.info("lead_id fora do contato do turno — trocado pelo negócio aberto dele", {
+              tool: def.name,
+            });
+            argsRecord.lead_id = alvo.leadId;
+          }
+        }
 
         // ── ESCOPO DE FUNIL (spec 17 passo 3) ────────────────────────────────
         //
@@ -282,6 +447,20 @@ export function pickToolsFromMcp(input: PickToolsInput): Record<string, Tool> {
     // agente a tenha marcada de quando o módulo estava ligado.
     if (deModuloDesligado(def.name, input.modulosLigados ?? [])) continue;
 
+    // Capacidade que a ORGANIZAÇÃO desligou: a ferramenta não é oferecida ao
+    // modelo, mesmo marcada na versão do agente.
+    if (deCapacidadeDesligada(def.name, input.capacidadesLigadas ?? [])) continue;
+
+    // A chave da VERSÃO DO AGENTE manda nos dois sentidos: antes ela só
+    // impedia o acréscimo automático, e a ferramenta vinda do pacote `vender`
+    // passava com a chave desligada. Vale para o rascunho e para o preparo —
+    // os dois andam juntos, nas mesmas condições.
+    if (
+      (def.name === DRAFT_PROPOSAL_TOOL_NAME || def.name === PREPARAR_PROPOSTA_TOOL_NAME) &&
+      !input.proposalAiDraftEnabled
+    )
+      continue;
+
     result[def.name] = wrapMcpTool(def, input);
   }
 
@@ -291,6 +470,19 @@ export function pickToolsFromMcp(input: PickToolsInput): Record<string, Tool> {
     const handoff = allTools.find((t) => t.name === HANDOFF_TOOL_NAME);
     if (handoff) {
       result[HANDOFF_TOOL_NAME] = wrapMcpTool(handoff, input);
+    }
+  }
+
+  // A ferramenta de rascunho entra sozinha quando a chave da versão está
+  // ligada — o preparo vai junto, nas mesmas condições: sem ele o modelo não
+  // tem como saber o que perguntar antes de rascunhar.
+  if (input.proposalAiDraftEnabled) {
+    for (const nome of [DRAFT_PROPOSAL_TOOL_NAME, PREPARAR_PROPOSTA_TOOL_NAME]) {
+      if (deCapacidadeDesligada(nome, input.capacidadesLigadas ?? []) || result[nome]) continue;
+      const tool = allTools.find((t) => t.name === nome);
+      if (tool) {
+        result[nome] = wrapMcpTool(tool, input);
+      }
     }
   }
 

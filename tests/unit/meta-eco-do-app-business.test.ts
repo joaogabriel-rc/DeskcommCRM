@@ -90,7 +90,7 @@ describe("parseMetaWebhook — smb_message_echoes", () => {
         type: "text",
         text: "respondi pelo celular",
         media: null,
-        // O item bruto vai junto: é o que a quarentena guarda (0436).
+        // O item bruto vai junto: é o que a quarentena guarda (0496).
         bruto: expect.objectContaining({ id: "wamid.E1", to: CLIENTE }),
       },
     ]);
@@ -112,7 +112,7 @@ describe("parseMetaWebhook — smb_message_echoes", () => {
     expect(parseMetaWebhook(corpo(eco(WABA_A, NUM_A, "", {})))).toEqual([]);
   });
 
-  it("history e smb_app_state_sync nunca viram mensagem nem eco — só payload de sincronização (0420)", () => {
+  it("history e smb_app_state_sync nunca viram mensagem nem eco — só payload de sincronização (0495)", () => {
     const outros = ["history", "smb_app_state_sync"].map((field) => ({
       id: WABA_A,
       changes: [{ field, value: { metadata: { phone_number_id: NUM_A }, history: [], state_sync: [] } }],

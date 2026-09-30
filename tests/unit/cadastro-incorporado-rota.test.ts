@@ -365,7 +365,7 @@ describe("concluir o Cadastro Incorporado", () => {
       const body = (await res.json()) as { data: Record<string, unknown> };
 
       expect(res.status).toBe(200);
-      // Em coexistência, o pedido de histórico e contatos (0420) sai DEPOIS da conexão.
+      // Em coexistência, o pedido de histórico e contatos (0495) sai DEPOIS da conexão.
       expect(ordem).toEqual(["insert:calendar_oauth_nonces", "troca", "inspecao", "descoberta", "conectar", "sincronizacao"]);
       expect(vi.mocked(inspecionarToken).mock.calls[0]![0]).toBe(TOKEN);
       // Quem vai para a persistência é o que a Meta confirmou, e a organização é a da sessão.
@@ -452,7 +452,7 @@ describe("concluir o Cadastro Incorporado", () => {
     });
   });
 
-  describe("coexistência: o pedido de histórico e contatos sai ao concluir (0420)", () => {
+  describe("coexistência: o pedido de histórico e contatos sai ao concluir (0495)", () => {
     function conectaEmCoexistencia() {
       vi.mocked(conectarCanalOficial).mockImplementation(async () => {
         ordem.push("conectar");

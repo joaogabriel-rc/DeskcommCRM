@@ -1,6 +1,6 @@
 /**
  * GET/POST /api/v1/cron/meta-ecos-em-espera — a rede do resolvedor dos ecos em
- * espera (migration 0436).
+ * espera (migration 0496).
  *
  * O caminho normal é o evento `meta.historico.chunk_guardado`, emitido a cada
  * pedaço de history guardado. Este cron

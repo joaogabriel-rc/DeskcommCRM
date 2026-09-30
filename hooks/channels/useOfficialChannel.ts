@@ -166,7 +166,7 @@ export function useConcluirCadastroIncorporado() {
 }
 
 /**
- * Estado da sincronização do app WhatsApp Business (coexistência, 0420): prazo de
+ * Estado da sincronização do app WhatsApp Business (coexistência, 0495): prazo de
  * 24h e, por tipo, se foi pedido, quando chegou e o erro.
  */
 export function useSincronizacaoDoApp(habilitado: boolean) {

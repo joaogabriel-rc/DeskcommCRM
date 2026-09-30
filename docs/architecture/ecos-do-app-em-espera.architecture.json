@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "Ecos do app em espera",
-    "subtitle": "Mídia histórica que chega como smb_message_echoes fica em quarentena até a correlação por wamid com o history da mesma janela (0436)",
+    "subtitle": "Mídia histórica que chega como smb_message_echoes fica em quarentena até a correlação por wamid com o history da mesma janela (0496)",
     "output": "ecos-do-app-em-espera.html",
     "quality_profile": "standard"
   },

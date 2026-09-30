@@ -35,7 +35,7 @@ vi.mock("@/lib/webhooks/secrets", () => ({
 }));
 vi.mock("@/lib/channels/meta/validate-credentials", () => ({
   validateMetaCredentials: vi.fn(),
-  // O modo do número (0417) tem os próprios testes em `conectar-canal-oficial`;
+  // O modo do número (0494) tem os próprios testes em `conectar-canal-oficial`;
   // aqui a pergunta fica sem resposta, que não grava nada a mais.
   consultarModoDoNumero: vi.fn(async () => ({ ok: false, motivo: "fora do escopo deste teste" })),
 }));

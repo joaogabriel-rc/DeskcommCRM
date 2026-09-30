@@ -1,7 +1,7 @@
 import { requireSupportWrite } from "@/lib/impersonate/support";
 /**
  * GET|POST /api/v1/channels/official/sincronizacao — a sincronização do app
- * WhatsApp Business num número em coexistência (Fase 2.0, migration 0420).
+ * WhatsApp Business num número em coexistência (Fase 2.0, migration 0495).
  *
  * GET devolve o estado: prazo de 24h, e, por tipo (contatos, histórico), se foi
  * pedido, o `request_id` da Meta, quando o primeiro payload chegou e o erro.

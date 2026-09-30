@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { beforeAll, describe, expect, it } from "vitest";
 
 /**
- * A SINCRONIZAÇÃO DO APP (0420) GUARDA E NÃO FAZ MAIS NADA — e não vaza.
+ * A SINCRONIZAÇÃO DO APP (0495) GUARDA E NÃO FAZ MAIS NADA — e não vaza.
  *
  * O risco desta fase não é o que ela faz, é o que um engano faria: uma linha de
  * histórico em `messages` dispara `message.received` (IA, push, fluxos), e uma
@@ -78,7 +78,7 @@ beforeAll(() => {
   `);
 });
 
-describe("sincronização do app (0420) — preservação sem efeitos", () => {
+describe("sincronização do app (0495) — preservação sem efeitos", () => {
   it("guardar payloads e mexer nos pedidos NÃO toca event_log, messages, conversations nem contacts", () => {
     const antes = ultimaLinha(sql(CONTAGEM));
     sql(`
@@ -105,7 +105,7 @@ describe("sincronização do app (0420) — preservação sem efeitos", () => {
       insert into public.meta_sincronizacao_payloads (organization_id, channel_session_id, campo, payload, payload_hash)
         values ('${ORG_A}', '${SESSAO_A}', 'history', '{}'::jsonb, 'hash-historico-1');`);
     expect(r.ok).toBe(false);
-    // A chave da 0420 era (canal, campo, hash); a 0436 incluiu a janela, com
+    // A chave da 0495 era (canal, campo, hash); a 0496 incluiu a janela, com
     // `nulls not distinct` — este pedaço não tem janela e continua deduplicado.
     expect(r.ok ? "" : r.erro).toContain("meta_sincronizacao_payloads_uma_entrega_na_janela");
   });

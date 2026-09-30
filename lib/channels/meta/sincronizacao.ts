@@ -1,6 +1,6 @@
 /**
  * Sincronização do app WhatsApp Business num número em coexistência — a fase de
- * PRESERVAÇÃO (Fase 2.0, migration 0420).
+ * PRESERVAÇÃO (Fase 2.0, migration 0495).
  *
  * A Meta entrega o histórico de conversas e a agenda de contatos do aplicativo
  * só se o parceiro PEDIR (`POST /{phone}/smb_app_data`), em até 24h do
@@ -46,11 +46,11 @@ import { logger } from "@/lib/logger";
 
 type Admin = SupabaseClient;
 
-/** Vocabulário do CHECK `meta_sincronizacoes.tipo` (0420). */
+/** Vocabulário do CHECK `meta_sincronizacoes.tipo` (0495). */
 export const TIPOS_DE_SINCRONIZACAO = ["contatos", "historico"] as const;
 export type TipoDeSincronizacao = (typeof TIPOS_DE_SINCRONIZACAO)[number];
 
-/** Vocabulário do CHECK `meta_sincronizacoes.status` (0420). */
+/** Vocabulário do CHECK `meta_sincronizacoes.status` (0495). */
 export const ESTADOS_DA_SINCRONIZACAO = [
   "pendente",
   "solicitando",
@@ -61,7 +61,7 @@ export const ESTADOS_DA_SINCRONIZACAO = [
 ] as const;
 export type EstadoDaSincronizacao = (typeof ESTADOS_DA_SINCRONIZACAO)[number];
 
-/** Vocabulário do CHECK `meta_sincronizacao_payloads.campo` (0420) — o `field` do webhook. */
+/** Vocabulário do CHECK `meta_sincronizacao_payloads.campo` (0495) — o `field` do webhook. */
 export const CAMPOS_DE_SINCRONIZACAO = ["history", "smb_app_state_sync"] as const;
 export type CampoDeSincronizacao = (typeof CAMPOS_DE_SINCRONIZACAO)[number];
 
@@ -147,7 +147,7 @@ export type SituacaoDaSincronizacao =
       contatos: LinhaDaSincronizacao | null;
       historico: LinhaDaSincronizacao | null;
       /**
-       * Os ecos do app anteriores a ESTE onboarding (0436), por estado: em espera,
+       * Os ecos do app anteriores a ESTE onboarding (0496), por estado: em espera,
        * classificados como mídia do histórico, promovidos como eco tardio.
        * Opcional para quem monta a situação à mão (telas e testes antigos).
        */
@@ -423,7 +423,7 @@ export async function guardarPayloadDeSincronizacao(
 
   // O onboarding ATUAL do canal: o que chega agora responde ao pedido desta
   // janela, nunca ao de uma conexão anterior. Lido ANTES de guardar, porque o
-  // payload leva a janela junto (0436) — é por ela que a correlação dos ecos não
+  // payload leva a janela junto (0496) — é por ela que a correlação dos ecos não
   // mistura reconexões.
   //
   // Sem conseguir ler, LANÇA antes de gravar: um pedaço guardado sem janela nunca
@@ -524,7 +524,7 @@ export async function guardarPayloadDeSincronizacao(
   }
 
   // Um pedaço novo de history pode ser o que faltava para decidir um eco em
-  // espera desta janela (0436). Só ACORDA o resolvedor: nada é processado aqui.
+  // espera desta janela (0496). Só ACORDA o resolvedor: nada é processado aqui.
   if (e.campo === "history") {
     await emitirChunkGuardado(
       admin,

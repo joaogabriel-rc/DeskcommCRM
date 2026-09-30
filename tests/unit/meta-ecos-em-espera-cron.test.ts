@@ -1,6 +1,6 @@
 /**
  * O cron `meta-ecos-em-espera` lê a quarentena INTEIRA para achar as janelas com
- * trabalho (0436, B4 da auditoria).
+ * trabalho (0496, B4 da auditoria).
  *
  * O PostgREST corta toda resposta em `max_rows` (1000 em supabase/config.toml).
  * A versão anterior lia `limit(2000)` sem ordem: numa quarentena com mais de 1000

@@ -1,5 +1,5 @@
 /**
- * Ecos do app em espera (migration 0436) — a mídia histórica que a Meta entrega
+ * Ecos do app em espera (migration 0496) — a mídia histórica que a Meta entrega
  * por `smb_message_echoes` não vira mensagem nova.
  *
  * O que cada bloco tranca:
@@ -78,7 +78,7 @@ const AGORA = new Date("2026-09-27T03:20:00.000Z");
 type Linha = Record<string, unknown>;
 const UNICOS: Record<string, string[]> = {
   messages: ["organization_id", "external_id"],
-  // As chaves da 0436: a JANELA faz parte da identidade (e `null === null`, como o
+  // As chaves da 0496: a JANELA faz parte da identidade (e `null === null`, como o
   // `nulls not distinct` do payload).
   meta_ecos_em_espera: ["organization_id", "channel_session_id", "onboarding_em", "external_id"],
   meta_sincronizacao_payloads: ["channel_session_id", "onboarding_em", "campo", "payload_hash"],
@@ -368,7 +368,7 @@ describe("a) eco AO VIVO — o caminho de sempre", () => {
     expect(b.t.meta_ecos_em_espera).toHaveLength(0);
   });
 
-  it("canal sem onboarding (Cloud API dedicada): até eco antigo segue ao vivo, como antes da 0436", async () => {
+  it("canal sem onboarding (Cloud API dedicada): até eco antigo segue ao vivo, como antes da 0496", async () => {
     const b = banco({ channel_sessions: [{ id: SESSAO, organization_id: ORG, meta_phone_number_id: NUM, meta_onboarding_em: null, archived_at: null }] });
     const r = await ingestMetaEcho(b.admin, eco("wamid.SEM_ONB", ANTES), { organizationId: ORG }, { agora: AGORA });
     expect(r.status).toBe("ingested");

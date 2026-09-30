@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { beforeAll, describe, expect, it } from "vitest";
 
 /**
- * ECOS DO APP EM ESPERA (0436) — medidos NO BANCO, com a função e os triggers reais.
+ * ECOS DO APP EM ESPERA (0496) — medidos NO BANCO, com a função e os triggers reais.
  *
  *   - a quarentena é só do servidor (nem o admin da própria organização lê pela
  *     anon/authenticated), com RLS de organização + admin, FK composta com o canal,
@@ -87,25 +87,25 @@ const correlacionar = (onboarding: string) =>
 
 beforeAll(() => {
   sql(`
-    insert into auth.users (id, email) values ('${ADMIN_A}', 'ecos-0436-a@invariant.test') on conflict (id) do nothing;
+    insert into auth.users (id, email) values ('${ADMIN_A}', 'ecos-0496-a@invariant.test') on conflict (id) do nothing;
     insert into public.organizations (id, slug, legal_name, display_name) values
-      ('${ORG_A}', 'ecos-0436-a', 'Ecos 0436 A', 'Ecos A'),
-      ('${ORG_B}', 'ecos-0436-b', 'Ecos 0436 B', 'Ecos B')
+      ('${ORG_A}', 'ecos-0496-a', 'Ecos 0496 A', 'Ecos A'),
+      ('${ORG_B}', 'ecos-0496-b', 'Ecos 0496 B', 'Ecos B')
       on conflict (id) do nothing;
     insert into public.user_organizations (user_id, organization_id, role, accepted_at)
       values ('${ADMIN_A}', '${ORG_A}', 'admin', now()) on conflict do nothing;
     do $seed$ begin
       insert into public.channel_sessions (id, organization_id, waha_session_name, webhook_secret_encrypted)
-        values ('${SESSAO_A}', '${ORG_A}', 'ecos-0436-a', '\\x00'::bytea);
+        values ('${SESSAO_A}', '${ORG_A}', 'ecos-0496-a', '\\x00'::bytea);
     exception when unique_violation then null; end $seed$;
     do $seed$ begin
       insert into public.channel_sessions (id, organization_id, waha_session_name, webhook_secret_encrypted)
-        values ('${SESSAO_B}', '${ORG_B}', 'ecos-0436-b', '\\x00'::bytea);
+        values ('${SESSAO_B}', '${ORG_B}', 'ecos-0496-b', '\\x00'::bytea);
     exception when unique_violation then null; end $seed$;
   `);
 });
 
-describe("ecos do app em espera (0436) — a correlação no banco", () => {
+describe("ecos do app em espera (0496) — a correlação no banco", () => {
   it("classifica SÓ o placeholder `from_me` da MESMA janela; nada fora da quarentena muda", () => {
     sql(`
       insert into public.meta_sincronizacao_payloads (organization_id, channel_session_id, campo, payload, payload_hash, onboarding_em) values
@@ -169,7 +169,7 @@ describe("ecos do app em espera (0436) — a correlação no banco", () => {
   });
 });
 
-describe("ecos do app em espera (0436) — a tabela", () => {
+describe("ecos do app em espera (0496) — a tabela", () => {
   it("um eco por wamid POR JANELA: repetir na mesma janela é recusado", () => {
     const r = tentar(eco(ORG_A, SESSAO_A, O1, "wamid.SIM"));
     expect(r.ok).toBe(false);
@@ -225,14 +225,14 @@ describe("ecos do app em espera (0436) — a tabela", () => {
     const temp = "dddddddd-2222-4000-8000-0000000436cc";
     sql(`
       insert into public.channel_sessions (id, organization_id, waha_session_name, webhook_secret_encrypted)
-        values ('${temp}', '${ORG_B}', 'ecos-0436-temp', '\\x00'::bytea);
+        values ('${temp}', '${ORG_B}', 'ecos-0496-temp', '\\x00'::bytea);
       ${eco(ORG_B, temp, O1, "wamid.TEMP")}
       delete from public.channel_sessions where id = '${temp}';`);
     expect(ultimaLinha(sql(`select count(*) from public.meta_ecos_em_espera where channel_session_id = '${temp}';`))).toBe("0");
   });
 });
 
-describe("ecos do app em espera (0436) — a identidade inclui a janela (O1 × O2)", () => {
+describe("ecos do app em espera (0496) — a identidade inclui a janela (O1 × O2)", () => {
   /** A correlação na organização B, que nenhum outro bloco deste arquivo usa. */
   const correlacionarB = (onboarding: string) =>
     `set role service_role; select string_agg(wamid, ',' order by wamid) from public.fn_meta_ecos_correlacionar('${ORG_B}', '${SESSAO_B}', '${onboarding}');`;
@@ -290,11 +290,11 @@ describe("ecos do app em espera (0436) — a identidade inclui a janela (O1 × O
   });
 });
 
-describe("ecos do app em espera (0436) — a janela de cada payload (backfill)", () => {
+describe("ecos do app em espera (0496) — a janela de cada payload (backfill)", () => {
   /** O bloco de backfill, extraído da própria migration — mede o que o clone roda. */
   const backfill = (() => {
     const mig = readFileSync(
-      join(__dirname, "..", "..", "supabase", "migrations", "20260927033747_0436_ecos_do_app_em_espera.sql"),
+      join(__dirname, "..", "..", "supabase", "migrations", "20260927033747_0496_ecos_do_app_em_espera.sql"),
       "utf8",
     );
     const i = mig.indexOf("with janelas as (");

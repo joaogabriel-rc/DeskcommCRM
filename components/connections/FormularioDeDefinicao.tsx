@@ -27,6 +27,23 @@ export interface RascunhoDaDefinicao {
 }
 
 /**
+ * Os valores com que o formulário ABRE — para editar uma definição que já
+ * existe (ver `paraFormulario` em lib/channels/template-conteudo.ts). Lido só
+ * na montagem: para trocar de definição, quem usa troca a `key`.
+ */
+export interface ValoresDaDefinicao {
+  nome: string;
+  idioma: string;
+  categoria: string;
+  cabecalho: string;
+  midiaUrl: string;
+  corpo: string;
+  rodape: string;
+  exemplos: string[];
+  botoes: BotaoDaDefinicao[];
+}
+
+/**
  * O formulário de CRIAR uma definição aprovada, com a prévia ao lado.
  *
  * Um só para todos os canais que criam modelo — os parceiros e o oficial. Quem
@@ -36,6 +53,11 @@ export interface RascunhoDaDefinicao {
  * próprios de um canal — a conexão, no oficial — entram por `children`, no topo.
  *
  * Para recomeçar em branco depois de enviar, quem usa troca a `key`.
+ *
+ * EDITAR reusa este mesmo formulário, aberto com `inicial` e com `editando`:
+ * nome, idioma e categoria ficam travados, porque a plataforma não deixa
+ * mudá-los depois de criado — oferecer o campo seria prometer uma edição que
+ * ela recusa.
  */
 export function FormularioDeDefinicao({
   onEnviar,
@@ -44,6 +66,8 @@ export function FormularioDeDefinicao({
   idiomaInicial = "es",
   permiteMidia = true,
   rotaDaMidia = "/api/v1/channels/partner/templates/media",
+  inicial,
+  editando = false,
   children,
 }: {
   onEnviar: (rascunho: RascunhoDaDefinicao) => void;
@@ -53,18 +77,22 @@ export function FormularioDeDefinicao({
   idiomaInicial?: string;
   permiteMidia?: boolean;
   rotaDaMidia?: string;
+  /** Valores de abertura (edição). Ausente = formulário em branco. */
+  inicial?: ValoresDaDefinicao;
+  /** Edição de uma definição existente: trava nome, idioma e categoria. */
+  editando?: boolean;
   children?: ReactNode;
 }) {
   const t = useT();
-  const [nome, setNome] = useState("");
-  const [idioma, setIdioma] = useState(idiomaInicial);
-  const [categoria, setCategoria] = useState("UTILITY");
-  const [corpo, setCorpo] = useState("");
-  const [rodape, setRodape] = useState("");
-  const [exemplos, setExemplos] = useState<string[]>([]);
-  const [cabecalho, setCabecalho] = useState("");
-  const [midiaUrl, setMidiaUrl] = useState("");
-  const [botoes, setBotoes] = useState<BotaoDaDefinicao[]>([]);
+  const [nome, setNome] = useState(inicial?.nome ?? "");
+  const [idioma, setIdioma] = useState(inicial?.idioma ?? idiomaInicial);
+  const [categoria, setCategoria] = useState(inicial?.categoria ?? "UTILITY");
+  const [corpo, setCorpo] = useState(inicial?.corpo ?? "");
+  const [rodape, setRodape] = useState(inicial?.rodape ?? "");
+  const [exemplos, setExemplos] = useState<string[]>(inicial?.exemplos ?? []);
+  const [cabecalho, setCabecalho] = useState(inicial?.cabecalho ?? "");
+  const [midiaUrl, setMidiaUrl] = useState(inicial?.midiaUrl ?? "");
+  const [botoes, setBotoes] = useState<BotaoDaDefinicao[]>(inicial?.botoes ?? []);
   const [subindo, setSubindo] = useState(false);
 
   // Quantas amostras a revisão vai exigir. Recalculado enquanto se digita: o
@@ -82,7 +110,8 @@ export function FormularioDeDefinicao({
           onChange={(e) => setNome(e.target.value)}
           placeholder="nome_do_modelo"
           aria-label={t("Nome do modelo")}
-          className="h-9 flex-1 rounded-md border border-input bg-background px-2 text-sm"
+          disabled={editando}
+          className="h-9 flex-1 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-60"
         />
         {/* LISTA, e não campo livre. O contrato descreve o formato e não
             enumera os valores; digitar é onde o erro nasce — `esp`, `ES`,
@@ -92,7 +121,8 @@ export function FormularioDeDefinicao({
           value={idioma}
           onChange={(e) => setIdioma(e.target.value)}
           aria-label={t("Idioma")}
-          className="h-9 w-56 rounded-md border border-input bg-background px-2 text-sm"
+          disabled={editando}
+          className="h-9 w-56 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-60"
         >
           {IDIOMAS_DA_DEFINICAO.map((i) => (
             <option key={i.codigo} value={i.codigo}>
@@ -110,7 +140,8 @@ export function FormularioDeDefinicao({
         value={categoria}
         onChange={(e) => setCategoria(e.target.value)}
         aria-label={t("Categoria")}
-        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        disabled={editando}
+        className="h-9 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-60"
       >
         <option value="UTILITY">
           {t("Utilidade — aviso de pedido, agendamento, cobrança")}
@@ -332,9 +363,13 @@ export function FormularioDeDefinicao({
           recusa dela chega inteira ao operador. Repetir a regra aqui a faria
           envelhecer separado da fonte. */}
       <p className="text-[11px] text-muted-foreground">
-        {t(
-          "A plataforma revisa antes de aprovar — o modelo nasce pendente e some da lista de envio até ela decidir.",
-        )}
+        {editando
+          ? t(
+              "Ao salvar, a plataforma revisa o modelo de novo. A Meta limita quantas vezes um modelo aprovado pode ser editado; se passar do limite, a resposta dela aparece aqui.",
+            )
+          : t(
+              "A plataforma revisa antes de aprovar — o modelo nasce pendente e some da lista de envio até ela decidir.",
+            )}
       </p>
       <div className="flex sm:justify-end">
         <Button
@@ -357,7 +392,7 @@ export function FormularioDeDefinicao({
           }
           className="w-full sm:w-auto"
         >
-          {t("Enviar para revisão")}
+          {editando ? t("Salvar e enviar para revisão") : t("Enviar para revisão")}
         </Button>
       </div>
       </div>

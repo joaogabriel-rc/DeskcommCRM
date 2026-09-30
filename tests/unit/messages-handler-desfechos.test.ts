@@ -20,6 +20,8 @@ import { sendMessageHandler } from '@/app/api/v1/messages/_handler';
 import type { HandlerCtx } from '@/lib/api/handlers/types';
 import { deriveActor } from '@/lib/mcp/auth';
 import type { SendMessageInput } from '@/lib/schemas';
+import { criarDubleDoHandler } from '@/tests/helpers/duble-do-handler';
+import { env } from '@/lib/env';
 
 import { criarBanco } from '../helpers/banco-em-memoria';
 
@@ -29,6 +31,8 @@ const CONTACT = '33333333-3333-4333-8333-333333333333';
 const SESSION = '44444444-4444-4444-8444-444444444444';
 const USER = '55555555-5555-4555-8555-555555555555';
 const WAHA_BASE = 'http://localhost:3030';
+// A URL que o envio da proposta passa: assinada pelo Storage DESTA instalação.
+const URL_ASSINADA_DO_PROPRIO_STORAGE = `${env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/sign/propostas/org/a.pdf?token=t`;
 
 // A URL assinada do Storage é montada com o admin client; ele valida env no
 // import, e o desfecho de mídia precisa controlar sucesso E falha da assinatura.
@@ -83,19 +87,30 @@ function conversationRow(shape: ConversationShape = {}): Row {
 }
 
 /**
- * Fake de `SupabaseClient` com o mínimo que o handler encadeia:
- *   conversations: select().eq().maybeSingle() · update().eq()
- *   messages:      insert().select().single() · update().eq().select().maybeSingle()
- *   rpc('emit_event')
- * O update é merge raso — igual ao que o Postgres faz com um SET de colunas.
+ * O dublê é o COMPARTILHADO (`tests/helpers/duble-do-handler.ts`): tabela a
+ * tabela, encadeável sem limite, registrando patch, filtro e insert. O que este
+ * arquivo injeta POR CASO — a linha da conversa, o espelho do template, o
+ * metadata do canal e o banco sem a migration 0106 — vira opção do helper, não
+ * um sexto fake de `supabase.from()`.
  */
-function makeSupabase(
+function dubleDo(
   conversation: Row,
   templateRow: Row | null = null,
-  /** `semColunaArquivada`: banco em que a migration 0106 ainda não rodou. */
   opts: { semColunaArquivada?: boolean; channelMetadata?: Row } = {},
 ) {
-  const state: { message: Row | null } = { message: null };
+  const doHelper = criarDubleDoHandler({
+    conversation,
+    templateRow,
+    channelMetadata: opts.channelMetadata,
+    semColunaArquivada: opts.semColunaArquivada,
+  }).supabase;
+
+  // A conexão e o espelho do template, num banco que APLICA os filtros: o
+  // pré-voo e o envio resolvem o modelo pelo catálogo central (organização →
+  // conexão → conta → nome e idioma). O helper devolve a mesma linha a qualquer
+  // consulta dessas duas tabelas, então só elas vêm daqui. `templateRow` é
+  // injetado por caso, no formato do sync oficial (por CONTA, sem conexão
+  // gravada); null simula template que não existe.
   const sessao = (conversation.channel_sessions as Row | null) ?? {};
   const catalogo = criarBanco({
     channel_sessions: [
@@ -126,88 +141,13 @@ function makeSupabase(
       : [],
   }).client as unknown as SupabaseClient;
 
-  const client = {
-    from(table: string) {
-      if (table === "channel_sessions" || table === "meta_templates") {
-        // A conexão e o espelho do template, num banco que APLICA os filtros:
-        // o pré-voo e o envio resolvem o modelo pelo catálogo central
-        // (organização → conexão → conta → nome e idioma). `templateRow` é
-        // injetado por caso, no formato do sync oficial (por CONTA, sem
-        // conexão gravada); null simula template que não existe.
-        return catalogo.from(table);
-      }
-      if (table === 'conversations') {
-        return {
-          select: (cols?: string) => {
-            // Encadeável SEM LIMITE de propósito: a consulta da conversa filtra
-            // por id E por `organization_id` (este handler também roda com o
-            // client de service role, que bypassa RLS). Um dublê que fixa a
-            // quantidade de `eq` quebra quando a consulta ganha o filtro que
-            // fecha o vazamento entre organizações — com um erro que não fala do
-            // comportamento sob teste.
-            const cadeia: Record<string, unknown> = {
-              eq: () => cadeia,
-              maybeSingle: async () =>
-                opts.semColunaArquivada === true && (cols ?? '').includes('archived_at')
-                  ? {
-                      data: null,
-                      error: {
-                        code: '42703',
-                        message: 'column channel_sessions_1.archived_at does not exist',
-                      },
-                    }
-                  : { data: conversation, error: null },
-            };
-            return cadeia;
-          },
-          update: () => ({ eq: async () => ({ error: null }) }),
-        };
-      }
-      if (table === 'messages') {
-        return {
-          insert: (row: Row) => {
-            state.message = {
-              id: 'msg-1',
-              external_id: null,
-              ack: null,
-              error_code: null,
-              error_message: null,
-              ...row,
-            };
-            return { select: () => ({ single: async () => ({ data: { ...state.message }, error: null }) }) };
-          },
-          update: (patch: Row) => {
-            state.message = { ...state.message, ...patch };
-            const query = {
-              eq: () => query,
-              select: () => query,
-              maybeSingle: async () => ({ data: { ...state.message }, error: null }),
-              single: async () => ({ data: { ...state.message }, error: null }),
-            };
-            return query;
-          },
-        };
-      }
-      if (table === "contacts") {
-        // O envio carimba `contacts.last_activity_at` (migration 0162). O dublê
-        // é encadeável SEM LIMITE de propósito: a consulta filtra por id E por
-        // organização (este handler também roda com o client de service role,
-        // que bypassa RLS), e um dublê que fixa a quantidade de `eq` quebra
-        // quando a consulta ganha um filtro novo — com um erro que não fala do
-        // comportamento sob teste.
-        const cadeiaContacts: Record<string, unknown> = {
-          eq: () => cadeiaContacts,
-          then: (resolve: (v: { error: null }) => unknown) =>
-            Promise.resolve({ error: null }).then(resolve),
-        };
-        return { update: () => cadeiaContacts };
-      }
-      throw new Error(`fake_supabase: tabela inesperada '${table}'`);
-    },
-    rpc: async () => ({ error: null }),
-  };
-
-  return client as unknown as SupabaseClient;
+  return {
+    ...doHelper,
+    from: (table: string) =>
+      table === 'channel_sessions' || table === 'meta_templates'
+        ? catalogo.from(table)
+        : doHelper.from(table),
+  } as unknown as SupabaseClient;
 }
 
 const ctx: HandlerCtx = { organization_id: ORG, actor: { type: 'user', id: USER }, requestId: 'req-1' };
@@ -233,7 +173,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     for (const actor of [{ type: "ai_agent", id: USER, role: "agent" }, { type: "webhook_source", id: USER }] as const) {
-      const message = await sendMessageHandler(makeSupabase(conversationRow(), null, {
+      const message = await sendMessageHandler(dubleDo(conversationRow(), null, {
         channelMetadata: { ai_gate: "allowlist", ai_gate_mode: "pre_go_live", ai_test_phone_numbers: [] },
       }), { ...ctx, actor }, textInput());
       expect(message).toMatchObject({ status: "failed", error_code: "pre_go_live" });
@@ -243,10 +183,10 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
   it("número autorizado passa pelo gate; resposta humana não depende da lista", async () => {
     wahaConfigured(false);
     const channelMetadata = { ai_gate: "allowlist", ai_gate_mode: "pre_go_live", ai_test_phone_numbers: ["+5531999998888"] };
-    const tester = await sendMessageHandler(makeSupabase(conversationRow(), null, { channelMetadata }),
+    const tester = await sendMessageHandler(dubleDo(conversationRow(), null, { channelMetadata }),
       { ...ctx, actor: { type: "ai_agent", id: USER, role: "agent" } }, textInput());
     expect(tester.status).toBe("queued");
-    const human = await sendMessageHandler(makeSupabase(conversationRow(), null, {
+    const human = await sendMessageHandler(dubleDo(conversationRow(), null, {
       channelMetadata: { ...channelMetadata, ai_test_phone_numbers: [] },
     }), ctx, textInput());
     expect(human.status).toBe("queued");
@@ -256,7 +196,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const msg = await sendMessageHandler(makeSupabase(conversationRow()), ctx, textInput());
+    const msg = await sendMessageHandler(dubleDo(conversationRow()), ctx, textInput());
 
     expect(msg.status).toBe('queued');
     expect((msg.metadata as Record<string, unknown>).queued_reason).toBe('waha_not_configured');
@@ -271,7 +211,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow({ phoneNumber: null, waIdentity: null })),
+      dubleDo(conversationRow({ phoneNumber: null, waIdentity: null })),
       ctx,
       textInput(),
     );
@@ -288,7 +228,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow({ sessionStatus: 'SCAN_QR_CODE' })),
+      dubleDo(conversationRow({ sessionStatus: 'SCAN_QR_CODE' })),
       ctx,
       textInput(),
     );
@@ -309,7 +249,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow()),
+      dubleDo(conversationRow()),
       ctx,
       textInput({ type: 'image', body: undefined, media_storage_path: `${ORG}/${CONV}/a.jpg`, media_mime: 'image/jpeg' }),
     );
@@ -323,12 +263,60 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     );
   });
 
+  // Achado ao investigar "proposta manda PDF e o cliente não recebe nada
+  // anexado": `input.media_url` — o caminho que a proposta usa para despachar o
+  // PDF já assinado no bucket — nunca foi ligado ao dispatcher. Antes deste
+  // teste, um envio com `media_url` (sem `media_storage_path`) caía no branch de
+  // texto puro e ia para `/api/sendText` com corpo vazio — sem nenhum arquivo.
+  // Testa exatamente esse input, contra o texto puro logo abaixo, para os dois
+  // nunca convergirem de novo por acidente.
+  it('4b. com media_url (sem media_storage_path): sent + external_id, pelo endpoint de arquivo', async () => {
+    wahaConfigured(true);
+    const fetchMock = vi.fn(async (..._args: unknown[]) => Response.json({ id: { _serialized: 'FILE1' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const msg = await sendMessageHandler(
+      dubleDo(conversationRow()),
+      ctx,
+      textInput({ type: 'document', body: undefined, media_url: URL_ASSINADA_DO_PROPRIO_STORAGE, media_mime: 'application/pdf' }),
+    );
+
+    expect(msg.status).toBe('sent');
+    expect(msg.external_id).toBe('FILE1');
+    expect(msg.ack).toBe(0);
+    expect(msg.error_code).toBeNull();
+    const sendFile = fetchMock.mock.calls.find(([url]) => String(url) === `${WAHA_BASE}/api/sendFile`);
+    expect(sendFile, 'sendFile não foi chamado').toBeTruthy();
+    const body = JSON.parse(String((sendFile![1] as RequestInit).body)) as { file?: { url?: string } };
+    expect(body.file?.url).toBe(URL_ASSINADA_DO_PROPRIO_STORAGE);
+  });
+
+  // SSRF: quem baixa a `media_url` é o gateway, de dentro da rede do servidor,
+  // e ela chega também pela API pública e pelo MCP. Endereço interno é recusado
+  // ANTES de a linha existir — nenhuma mensagem gravada, nada sai pela rede.
+  it.each([
+    ['metadata da nuvem', 'http://169.254.169.254/latest/meta-data/'],
+    ['serviço do compose por IP', 'http://172.18.0.5:6379/'],
+    ['loopback', 'http://localhost:3000/api/v1/health'],
+  ])('4c. media_url para %s: 422 unsafe_media_url, nada gravado, nada enviado', async (_nome, url) => {
+    wahaConfigured(true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const duble = criarDubleDoHandler({ conversation: conversationRow() });
+
+    await expect(
+      sendMessageHandler(duble.supabase, ctx, textInput({ type: 'document', body: undefined, media_url: url })),
+    ).rejects.toMatchObject({ status: 422, code: 'unsafe_media_url' });
+    expect(duble.capturas.inserts.messages).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('5. texto puro: sent + external_id + ack 0, pelo endpoint de texto', async () => {
     wahaConfigured(true);
     const fetchMock = vi.fn(async (..._args: unknown[]) => Response.json({ key: { id: 'TEXT1' } }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const msg = await sendMessageHandler(makeSupabase(conversationRow()), ctx, textInput());
+    const msg = await sendMessageHandler(dubleDo(conversationRow()), ctx, textInput());
 
     expect(msg.status).toBe('sent');
     expect(msg.external_id).toBe('TEXT1');
@@ -350,7 +338,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     wahaConfigured(true);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })));
 
-    const msg = await sendMessageHandler(makeSupabase(conversationRow()), ctx, textInput());
+    const msg = await sendMessageHandler(dubleDo(conversationRow()), ctx, textInput());
 
     expect(msg.status).toBe('failed');
     expect(msg.error_code).toBe('waha_error');
@@ -370,7 +358,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
       }),
     );
 
-    const msg = await sendMessageHandler(makeSupabase(conversationRow()), ctx, textInput());
+    const msg = await sendMessageHandler(dubleDo(conversationRow()), ctx, textInput());
 
     expect(msg.status).toBe('failed');
     expect(msg.error_code).toBe('waha_error');
@@ -394,7 +382,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
 
     await expect(
       sendMessageHandler(
-        makeSupabase(conversationRow({ provider: 'canal_inexistente' })),
+        dubleDo(conversationRow({ provider: 'canal_inexistente' })),
         ctx,
         textInput(),
       ),
@@ -417,7 +405,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow({ provider: 'meta_cloud' })),
+      dubleDo(conversationRow({ provider: 'meta_cloud' })),
       ctx,
       textInput(),
     );
@@ -432,7 +420,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow()),
+      dubleDo(conversationRow()),
       ctx,
       textInput({ type: 'image', body: undefined, media_storage_path: `${ORG}/${CONV}/a.jpg`, media_mime: 'image/jpeg' }),
     );
@@ -451,7 +439,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     vi.stubGlobal('fetch', vi.fn());
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow({ phoneNumber: null, waIdentity: null })),
+      dubleDo(conversationRow({ phoneNumber: null, waIdentity: null })),
       ctx,
       textInput(),
     );
@@ -475,7 +463,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow({ provider: 'meta_cloud' }), {
+      dubleDo(conversationRow({ provider: 'meta_cloud' }), {
         name: 'pedido_confirmado',
         language: 'pt_BR',
         status: 'APPROVED',
@@ -508,7 +496,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow({ provider: 'meta_cloud' }), null),
+      dubleDo(conversationRow({ provider: 'meta_cloud' }), null),
       ctx,
       {
         conversation_id: 'conv-1',
@@ -537,7 +525,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow({ archivedAt: '2026-08-05T10:00:00.000Z' })),
+      dubleDo(conversationRow({ archivedAt: '2026-08-05T10:00:00.000Z' })),
       ctx,
       textInput(),
     );
@@ -560,7 +548,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow(), null, { semColunaArquivada: true }),
+      dubleDo(conversationRow(), null, { semColunaArquivada: true }),
       ctx,
       textInput(),
     );
@@ -597,7 +585,7 @@ describe('sendMessageHandler — token de servidor (api_token) no ponto de uso',
     vi.stubGlobal('fetch', vi.fn());
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow()),
+      dubleDo(conversationRow()),
       { ...ctx, actor: tokenDeServidor },
       textInput(),
     );
@@ -615,7 +603,7 @@ describe('sendMessageHandler — token de servidor (api_token) no ponto de uso',
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow(), null, {
+      dubleDo(conversationRow(), null, {
         channelMetadata: { ai_gate: 'allowlist', ai_gate_mode: 'pre_go_live', ai_test_phone_numbers: [] },
       }),
       { ...ctx, actor: tokenDeServidor },
@@ -643,7 +631,7 @@ describe('sendMessageHandler — token de servidor (api_token) no ponto de uso',
     vi.stubGlobal('fetch', vi.fn());
 
     const msg = await sendMessageHandler(
-      makeSupabase(conversationRow()),
+      dubleDo(conversationRow()),
       { ...ctx, actor: tokenDeServidor },
       textInput(),
     );

@@ -59,7 +59,12 @@ export function InserirVariavel({ onInserir }: { onInserir: (variavel: string) =
         <div className="max-h-80 overflow-y-auto">
           <Grupo titulo={t("Do contato")}>
             {FIXAS.map((v) => (
-              <ItemDeVariavel key={v.variavel} {...v} onInserir={onInserir} />
+              <ItemDeVariavel
+                key={v.variavel}
+                label={t(v.label)}
+                variavel={v.variavel}
+                onInserir={onInserir}
+              />
             ))}
           </Grupo>
           <Grupo titulo={t("Campos do usuário")}>
@@ -93,6 +98,11 @@ function Grupo({ titulo, children }: { titulo: string; children: React.ReactNode
   );
 }
 
+/**
+ * `label` chega PRONTO para a tela: o rótulo fixo vem traduzido de quem chama,
+ * e o nome de um campo do usuário é dado do operador — passá-lo pelo
+ * dicionário mudaria o que ele escreveu.
+ */
 function ItemDeVariavel({
   label,
   variavel,
@@ -102,14 +112,13 @@ function ItemDeVariavel({
   variavel: string;
   onInserir: (v: string) => void;
 }) {
-  const t = useT();
   return (
     <button
       type="button"
       onClick={() => onInserir(variavel)}
       className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left hover:bg-muted"
     >
-      <span className="text-sm">{t(label)}</span>
+      <span className="text-sm">{label}</span>
       <code className="text-xs text-text-muted">{variavel}</code>
     </button>
   );

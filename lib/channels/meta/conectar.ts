@@ -18,7 +18,7 @@
  *    instante do registro e procura a sessão pelo `webhook_path_token`.
  *
  * O MODO do número (Cloud API dedicada ou coexistência com o app WhatsApp
- * Business, migration 0417) é perguntado à Meta aqui, nos dois caminhos — é a
+ * Business, migration 0494) é perguntado à Meta aqui, nos dois caminhos — é a
  * resposta dela que vale, nunca o evento que o navegador repassou. A pergunta é
  * acessória: sem resposta, a conexão segue e o modo fica como estava.
  */
@@ -218,7 +218,7 @@ async function perguntarModo(
 
 /**
  * Update PRÓPRIO, pela mesma razão de `gravarValidadeDoToken`: num banco sem a
- * migration 0417 as colunas não existem, e levá-las junto recusaria a escrita
+ * migration 0494 as colunas não existem, e levá-las junto recusaria a escrita
  * inteira. Modo sem resposta NÃO é gravado: numa reconexão, apagaria o modo que
  * a Meta confirmou antes.
  */

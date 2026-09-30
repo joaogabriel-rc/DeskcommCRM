@@ -75,7 +75,7 @@ describe("0087 · o canal da sessão chega ao clone", () => {
     // desfecho do registro do webhook do número ao conectar o canal oficial. E
     // `meta_token_expires_at` (migration 0398) é a validade do token que o Cadastro
     // Incorporado da Meta informa. `meta_modo` e `meta_onboarding_em` (migration
-    // 0417) dizem se o número está em coexistência com o app WhatsApp Business e
+    // 0494) dizem se o número está em coexistência com o app WhatsApp Business e
     // quando passou pelo onboarding. A cerca continua valendo — ela existe para
     // pegar coluna que entrou SEM querer.
     expect(cols).toEqual([

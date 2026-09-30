@@ -179,8 +179,10 @@ export function ConversationListItem({
     assigned_to_user_name: conversation.assigned_to_user_name ?? null,
     assignee_kind: conversation.assignee_kind ?? null,
     bot_silenced_until: conversation.bot_silenced_until ?? null,
+    last_handoff_reason: conversation.last_handoff_reason ?? null,
     force_human: c?.force_human ?? null,
     is_blocked: c?.is_blocked ?? null,
+    is_group: conversation.is_group ?? false,
     automaticoDaOrg,
   });
   const isAi = comando.quem === "automatico";
@@ -256,14 +258,29 @@ export function ConversationListItem({
           </div>
         )}
         <div className="flex items-baseline justify-between gap-2">
-          <span
-            className={cn(
-              "truncate text-sm",
-              unread > 0 ? "font-semibold text-text" : "font-medium text-text",
-              c?.is_anonymized && "font-normal italic text-text-muted",
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span
+              className={cn(
+                "truncate text-sm",
+                unread > 0 ? "font-semibold text-text" : "font-medium text-text",
+                c?.is_anonymized && "font-normal italic text-text-muted",
+              )}
+            >
+              {displayName}
+            </span>
+            {/*
+              A ETIQUETA "GRUPO", ao lado do nome.
+              `conversations.is_group` já chega no SELECT do handler (schema
+              original) — sem este selo, a lista não distingue um grupo de uma
+              conversa individual até abrir a conversa e ver vários remetentes
+              na mesma linha do tempo (ver `MessageBubble`, que mostra QUEM
+              mandou cada mensagem dentro do grupo).
+            */}
+            {conversation.is_group && (
+              <Badge variant="secondary" className="h-4 shrink-0 px-1.5 text-[10px]">
+                {t("Grupo")}
+              </Badge>
             )}
-          >
-            {displayName}
           </span>
           <span
             className="shrink-0 text-[11px] tabular-nums text-text-subtle"

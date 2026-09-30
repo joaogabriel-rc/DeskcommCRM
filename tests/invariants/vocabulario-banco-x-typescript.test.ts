@@ -49,6 +49,12 @@ const PARES: Array<{
   simbolo: string;
 }> = [
   {
+    tabela: "ad_platform_connections",
+    coluna: "google_api",
+    arquivo: "lib/plataformas-de-anuncio/types.ts",
+    simbolo: "ApiDeConversaoGoogle",
+  },
+  {
     tabela: "extension_operations",
     coluna: "kind",
     // O recibo das extensões (0271). Quatro cópias no TypeScript viraram uma; um kind
@@ -186,13 +192,13 @@ const PARES: Array<{
   {
     tabela: "channel_sessions",
     coluna: "meta_modo",
-    // O modo do canal oficial (0417): Cloud API dedicada ou coexistência com o
+    // O modo do canal oficial (0494): Cloud API dedicada ou coexistência com o
     // app WhatsApp Business. Quem grava é `conectarCanalOficial`, a partir da
     // resposta da Meta (`is_on_biz_app`).
     arquivo: "lib/channels/meta/modo-do-canal.ts",
     simbolo: "MODOS_DO_CANAL_OFICIAL",
   },
-  // Sincronização do app WhatsApp Business (0420) — preservação.
+  // Sincronização do app WhatsApp Business (0495) — preservação.
   {
     tabela: "meta_sincronizacoes",
     coluna: "tipo",
@@ -211,7 +217,7 @@ const PARES: Array<{
     arquivo: "lib/channels/meta/sincronizacao.ts",
     simbolo: "CAMPOS_DE_SINCRONIZACAO",
   },
-  // Ecos do app em espera (0436) — a quarentena do eco anterior ao onboarding.
+  // Ecos do app em espera (0496) — a quarentena do eco anterior ao onboarding.
   {
     tabela: "meta_ecos_em_espera",
     coluna: "estado",
@@ -364,6 +370,15 @@ const PARES: Array<{
     // seria a pergunta sumir em vez de a resposta falhar.
     arquivo: "lib/ai/conversa-do-caso/vocabulario.ts",
     simbolo: "CASE_CHAT_AUTHOR_KINDS",
+  },
+  {
+    tabela: "knowledge_searches",
+    coluna: "author_kind",
+    // lib/ai/knowledge/busca.ts → KNOWLEDGE_SEARCH_AUTHOR_KINDS (tupla `as const`).
+    // Nasce com a migration 0484 (#1877): a rota da caixa "Acervo" grava
+    // `'human'` e a Evolução separa as séries por esta coluna.
+    arquivo: "lib/ai/knowledge/busca.ts",
+    simbolo: "KNOWLEDGE_SEARCH_AUTHOR_KINDS",
   },
   {
     tabela: "passagens_de_atendimento",

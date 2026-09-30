@@ -329,7 +329,18 @@ export function ecoDoItem(
   const id = str(raw.id);
   const to = str(raw.to);
   if (!id || !to) return null; // payload capenga não vira linha meia-boca
+  // `revoke` e `edit` também chegam por `smb_message_echoes` e não são mensagem
+  // nova — são alteração de uma que talvez nem tenhamos gravado. Viravam uma
+  // linha com um `type` que o CHECK de `messages.type` recusa. (Regra trazida
+  // da leitura de eco da upstream, que saiu da árvore no merge.)
+  const tipoCru = str(raw.type);
+  if (tipoCru === "revoke" || tipoCru === "edit") return null;
   const corpo = corpoDaMensagem(raw);
+  // Mídia mandada pelo app: o texto do balão é a legenda, quando houver.
+  const legenda =
+    corpo.text === null && tipoCru
+      ? str(((raw[tipoCru] ?? {}) as Record<string, unknown>).caption)
+      : null;
   return {
     kind: "echo_message",
     wabaId: origem.wabaId,
@@ -338,7 +349,7 @@ export function ecoDoItem(
     to,
     sentAt: instanteDaMeta(raw.timestamp),
     type: corpo.type,
-    text: corpo.text,
+    text: corpo.text ?? legenda,
     ...(corpo.sharedContact ? { sharedContact: corpo.sharedContact } : {}),
     media: corpo.media,
     bruto: raw,

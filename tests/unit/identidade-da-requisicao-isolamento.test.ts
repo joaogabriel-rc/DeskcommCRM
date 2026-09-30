@@ -105,7 +105,14 @@ vi.mock("next/headers", () => ({
 }));
 vi.mock("next/navigation", () => ({ redirect: () => { throw new Error("redirect"); } }));
 vi.mock("@/lib/env", () => ({
-  env: { SUPABASE_SERVICE_ROLE_KEY: SEGREDO, NEXT_PUBLIC_APP_URL: "https://crm.test" },
+  // `NEXT_PUBLIC_SUPABASE_URL`: o `proxy.ts` passa a URL pública ao
+  // `fetchDoServidor` (#1082), que a normaliza — sem ela no dublê, o proxy
+  // quebra antes de chegar à identidade que este arquivo mede.
+  env: {
+    SUPABASE_SERVICE_ROLE_KEY: SEGREDO,
+    NEXT_PUBLIC_APP_URL: "https://crm.test",
+    NEXT_PUBLIC_SUPABASE_URL: "https://supabase.test",
+  },
 }));
 
 /** Quantas vezes o GoTrue foi perguntado, e por quem (qual sessão estava no cookie). */

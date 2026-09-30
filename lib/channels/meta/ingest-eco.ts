@@ -24,7 +24,7 @@
  * nunca do corpo; o número continua no filtro porque uma organização pode ter mais
  * de um número oficial.
  *
- * ─── Eco anterior ao onboarding (0436) ──────────────────────────────────────
+ * ─── Eco anterior ao onboarding (0496) ──────────────────────────────────────
  * Parte da mídia HISTÓRICA da sincronização do app chega por este mesmo campo.
  * Antes de qualquer efeito, `classificarEco` separa o eco com `timestamp`
  * anterior ao onboarding do canal: ele vai BRUTO para `meta_ecos_em_espera` e não
@@ -134,14 +134,27 @@ async function ecoNaoEhMaisVelhoQueAConversa(
 export async function ingestMetaEcho(
   admin: Admin,
   e: EchoMessageEvent,
-  dono: ChannelTenantScope,
+  dono: ChannelTenantScope & {
+    /**
+     * Sessão JÁ resolvida por quem chama — o canal parceiro Graph-compatível
+     * (`lib/channels/inbound.ts`), que acha a sessão pelo token do webhook e não
+     * tem o `phone_number_id` oficial em `meta_phone_number_id`. Sem ela, a
+     * busca pelo número devolveria "sem sessão" e o eco do parceiro se perderia.
+     * A organização continua sendo a do chamador (`dono.organizationId`).
+     */
+    channelSessionId?: string;
+  },
   opcoes: { agora?: Date } = {},
 ): Promise<DesfechoDoEco> {
   let sessao: { id: string; organization_id: string } | null;
-  try {
-    sessao = await sessionByPhoneNumberId(admin, dono.organizationId, e.phoneNumberId);
-  } catch (err) {
-    return { status: "failed", reason: err instanceof Error ? err.message : "sessao_do_numero" };
+  if (dono.channelSessionId) {
+    sessao = { id: dono.channelSessionId, organization_id: dono.organizationId };
+  } else {
+    try {
+      sessao = await sessionByPhoneNumberId(admin, dono.organizationId, e.phoneNumberId);
+    } catch (err) {
+      return { status: "failed", reason: err instanceof Error ? err.message : "sessao_do_numero" };
+    }
   }
   if (!sessao) return { status: "no_session" };
 
