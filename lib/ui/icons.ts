@@ -122,6 +122,8 @@ export {
   CaretDoubleLeft,
   CaretDoubleRight,
   CaretLeft,
+  // ordem da lista da Inbox (Mais recentes / Esperando há mais tempo)
+  ArrowsDownUp,
   CaretRight,
   ArrowRight,
   SignOut,

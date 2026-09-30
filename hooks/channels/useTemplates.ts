@@ -58,11 +58,13 @@ export interface SyncCounts {
   disabled: number;
 }
 
-export function useTemplates() {
+export function useTemplates(opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["channel-templates"],
     queryFn: async () => apiClient.get<{ data: TemplatesPayload }>("/api/v1/channels/templates"),
     staleTime: 30_000,
+    // A rota é de `admin`: quem não é não precisa pedir para ouvir 403.
+    enabled: opts?.enabled ?? true,
   });
 }
 

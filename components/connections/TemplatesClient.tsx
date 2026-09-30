@@ -70,7 +70,7 @@ function Preview({ preview }: { preview: TemplatePreview }) {
  * parceiros, sem o cabeçalho de mídia (ver `lib/channels/meta/templates.ts`).
  * O modelo volta PENDENTE e fica visível na lista abaixo com esse estado.
  */
-function CriarModeloOficial({ conexoes, aoCriar }: { conexoes: ConexaoOficial[]; aoCriar: () => void }) {
+export function CriarModeloOficial({ conexoes, aoCriar }: { conexoes: ConexaoOficial[]; aoCriar: () => void }) {
   const t = useT();
   const criar = useCriarModelo();
   const [conexao, setConexao] = useState(conexoes.length === 1 ? conexoes[0]!.id : "");

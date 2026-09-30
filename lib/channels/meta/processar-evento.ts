@@ -13,7 +13,17 @@ import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { ingestMetaEcho } from "@/lib/channels/meta/ingest-eco";
 import { guardarPayloadDeSincronizacao } from "@/lib/channels/meta/sincronizacao";
 import type { MetaWebhookSession } from "@/lib/channels/meta/session";
-import { parseMetaWebhook, verifyMetaSignature, type MetaWebhookEvent } from "@/lib/channels/meta/webhook";
+import {
+  EVENTO_DE_RECONEXAO_DA_CONTA,
+  ehDesconexaoDaConta,
+  parseMetaWebhook,
+  verifyMetaSignature,
+  type AccountUpdateEvent,
+  type MetaWebhookEvent,
+} from "@/lib/channels/meta/webhook";
+import { nomeDoCanal } from "@/lib/channels/estado";
+import { PREFIXO_DESCONECTADO_NO_PROVEDOR, sincronizarSaudeDaConexao } from "@/lib/channels/health";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { logger } from "@/lib/logger";
 import type { createAdminClient } from "@/lib/supabase/admin";
 
@@ -148,6 +158,8 @@ export async function processarEventoDaMeta(
     return guardarPayloadDeSincronizacao(admin, e, { organizationId: sessao.organizationId });
   }
 
+  if (e.kind === "account_update") return aplicarMudancaDaConta(admin, e, sessao, agora);
+
   if (e.kind === "template_status") {
     await admin
       .from("meta_templates")
@@ -165,4 +177,70 @@ export async function processarEventoDaMeta(
     .eq("organization_id", sessao.organizationId)
     .eq("external_id", e.externalId);
   return null;
+}
+
+/**
+ * A conta se desconectou (ou voltou) — o estado da CONEXÃO passa a refletir o
+ * que a Meta disse.
+ *
+ * Desconexão: `status = STOPPED` e aviso crítico na Central, marcado como
+ * EMPURRÃO para a varredura não fechá-lo (nem pôr "Conectado" de volta — ver o
+ * cron `channel-health`) enquanto o número segue fora. A linha NÃO é apagada
+ * nem arquivada: histórico, conversas e modelos continuam presos a ela, e
+ * reconectar o mesmo número a reaproveita.
+ *
+ * Reconexão: fecha o aviso. O `status` volta a `WORKING` pela varredura, que
+ * pergunta ao número — a reconexão da conta sozinha não prova que o número
+ * voltou a responder.
+ */
+async function aplicarMudancaDaConta(
+  admin: Admin,
+  e: AccountUpdateEvent,
+  sessao: MetaWebhookSession,
+  agora: string,
+): Promise<string | null> {
+  const desconectou = ehDesconexaoDaConta(e.event);
+  const reconectou = e.event === EVENTO_DE_RECONEXAO_DA_CONTA;
+  if (!desconectou && !reconectou) return null;
+
+  const { data: linha } = await admin
+    .from("channel_sessions")
+    .select("display_name, phone_number")
+    .eq("organization_id", sessao.organizationId)
+    .eq("id", sessao.id)
+    .maybeSingle();
+  const apelido = nomeDoCanal((linha as { display_name?: string | null; phone_number?: string | null } | null) ?? {});
+
+  if (desconectou) {
+    await admin
+      .from("channel_sessions")
+      .update({ status: "STOPPED", last_status_change_at: agora })
+      .eq("organization_id", sessao.organizationId)
+      .eq("id", sessao.id);
+    const motivo = [e.event, e.reason, e.initiatedBy].filter(Boolean).join(" · ");
+    await sincronizarSaudeDaConexao(
+      admin as unknown as SupabaseClient,
+      { id: sessao.id, organization_id: sessao.organizationId, status: "STOPPED" },
+      { reachable: true, status: "STOPPED", detail: `${PREFIXO_DESCONECTADO_NO_PROVEDOR}${motivo}` },
+      apelido,
+      "empurrao",
+    );
+    logger.warn("[meta.webhook] conta desconectada da API pela Meta", {
+      organization_id: sessao.organizationId,
+      channel_session_id: sessao.id,
+      event: e.event,
+      reason: e.reason,
+      initiated_by: e.initiatedBy,
+    });
+    return "conta_desconectada";
+  }
+
+  await sincronizarSaudeDaConexao(
+    admin as unknown as SupabaseClient,
+    { id: sessao.id, organization_id: sessao.organizationId, status: "WORKING" },
+    { reachable: true, status: "WORKING", detail: null },
+    apelido,
+    "empurrao",
+  );
+  return "conta_reconectada";
 }

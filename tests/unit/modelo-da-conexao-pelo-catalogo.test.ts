@@ -117,11 +117,23 @@ describe("a definição do modelo para uma conexão (resolvedor central)", () =>
       channel_sessions: sessoes,
       meta_templates: [
         modelo({ status: "PAUSED", synced_at: "2026-09-23" }),
-        modelo({ channel_session_id: OFICIAL, waba_id: "777", status: "APPROVED", synced_at: "2026-09-01" }),
+        modelo({ channel_session_id: OFICIAL, status: "APPROVED", synced_at: "2026-09-01" }),
       ],
     });
     const r = await buscar(db, OFICIAL);
     expect(r?.channelSessionId).toBe(OFICIAL);
     expect(r?.status).toBe("APPROVED");
+  });
+
+  it("a linha com o id da conexão OFICIAL, mas de OUTRA conta, não responde por ela", async () => {
+    // O canal oficial reaproveita a mesma sessão ao trocar de número/conta
+    // (`lib/channels/meta/conectar.ts`). A linha criada pelo CRM na conta
+    // ANTERIOR carrega o id da sessão — e era por ela que o modelo do número
+    // de teste seguia aparecendo depois da troca. O modelo oficial é da CONTA.
+    const db = banco({
+      channel_sessions: sessoes,
+      meta_templates: [modelo({ channel_session_id: OFICIAL, waba_id: "777", status: "APPROVED" })],
+    });
+    expect(await buscar(db, OFICIAL)).toBeNull();
   });
 });

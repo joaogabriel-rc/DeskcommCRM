@@ -1,7 +1,7 @@
 "use client";
 import { useT } from "@/hooks/i18n/useT";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CaretLeft, CaretRight, MagnifyingGlass } from "@/lib/ui/icons";
+import { ArrowsDownUp, CaretLeft, CaretRight, MagnifyingGlass } from "@/lib/ui/icons";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,7 @@ import { useContactTagVocabulary } from "@/hooks/contacts/useContactTagVocabular
 import { useConversationTagVocabulary } from "@/hooks/inbox/useConversationTags";
 import { useConversationCounts } from "@/hooks/inbox/useConversationCounts";
 import type { Role, VisibilityMode } from "@/lib/auth/types";
+import type { OrdemDaInbox } from "@/lib/inbox/comando-da-conversa";
 
 export type InboxTab = "unassigned" | "mine" | "all" | "closed" | "archived" | "ai";
 
@@ -84,6 +85,11 @@ export interface InboxFiltersValue {
   tagMode?: ModoDeEtiqueta;
   /** A aba "Grupos" (Task 10): manda `is_group=true` na listagem. */
   onlyGroups?: boolean;
+  /**
+   * A ordem da lista. Não é filtro — não esconde conversa nenhuma — e por isso
+   * "Limpar filtros" não a desfaz. `espera` só se oferece na aba Fila.
+   */
+  ordem?: OrdemDaInbox;
 }
 
 interface Props {
@@ -398,6 +404,30 @@ export function InboxFilters({ value, onChange }: Props) {
           >
             {t("Grupos")}
           </button>
+        </div>
+
+        {/* A ORDEM DA LISTA. "Mais recentes" é a do WhatsApp: a conversa com a
+            mensagem mais nova no topo. "Esperando há mais tempo" é a régua da
+            Fila (#990) e só faz sentido nela — fora da Fila não há espera. */}
+        <div className="flex items-center gap-2">
+          <ArrowsDownUp size={13} className="shrink-0 text-text-subtle" aria-hidden />
+          <Select
+            value={value.tab === "unassigned" && value.ordem === "espera" ? "espera" : "recentes"}
+            onValueChange={(v) => onChange({ ...value, ordem: v as OrdemDaInbox })}
+          >
+            <SelectTrigger
+              className="h-7 w-auto min-w-0 gap-1 border-transparent bg-transparent px-1 text-xs text-text-muted shadow-none hover:text-text"
+              aria-label={t("Ordenar conversas")}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="recentes">{t("Mais recentes primeiro")}</SelectItem>
+              {value.tab === "unassigned" && (
+                <SelectItem value="espera">{t("Esperando há mais tempo")}</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
         </div>
 
         {(showChannelSwitch || mostrarSeletorDeTag) && (

@@ -10,7 +10,7 @@ import {
   marcadoresEscolhidos,
 } from "@/lib/inbox/marcador-da-conversa";
 import type { Conversation } from "@/lib/types/messaging";
-import type { ComandoDoBanco } from "@/lib/inbox/comando-da-conversa";
+import type { ComandoDoBanco, OrdemDaInbox } from "@/lib/inbox/comando-da-conversa";
 
 export interface ContactSummary {
   id: string;
@@ -110,6 +110,11 @@ export interface ConversationsFilters {
   tagMode?: ModoDeEtiqueta;
   /** A aba "Grupos" do inbox (Task 10). Ausente = sem filtro, mostra tudo. */
   is_group?: boolean;
+  /**
+   * A ordem escolhida na tela. Ausente = a ordem histórica da rota (Fila por
+   * espera); a Inbox manda sempre, e o padrão dela é `recentes`.
+   */
+  ordem?: OrdemDaInbox;
 }
 
 interface ListResponse {
@@ -156,6 +161,7 @@ export function useConversationsRealtime(
       // `&modo=e` colado num link de hoje mudaria a URL sem mudar o sentido.
       if (filters.tagMode === "ou") qs.set("modo", "ou");
       if (filters.is_group !== undefined) qs.set("is_group", filters.is_group ? "true" : "false");
+      if (filters.ordem) qs.set("ordem", filters.ordem);
       if (pageParam) qs.set("cursor", pageParam);
       qs.set("limit", "50");
       try {

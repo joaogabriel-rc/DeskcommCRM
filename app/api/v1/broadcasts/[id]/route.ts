@@ -39,6 +39,7 @@ import {
   prontidaoDoFluxo,
   problemasDaMensagemGuiada,
 } from "@/lib/disparos/fluxo-do-disparo";
+import { horarioJaPassou } from "@/lib/disparos/agendamento";
 import { listarPublico, resumoDoSegmento } from "@/lib/disparos/segmento";
 import type { MessageNodeConfig } from "@/lib/flows/types";
 import {
@@ -284,6 +285,16 @@ export async function PATCH(
   /* ── agendar: o gesto de AUTORIZAÇÃO ────────────────────────────────────── */
   if (disparo.status !== "draft" && disparo.status !== "paused") {
     return fail("conflict", "Este disparo já foi agendado.", 409, { requestId });
+  }
+
+  // Agendar para um horário que JÁ PASSOU seria "enviar agora" disfarçado — e
+  // quem escolheu 14h e clicou às 15h queria 14h de outro dia. A tela confere
+  // antes; esta é a porta do servidor, que vale para qualquer cliente. Só no
+  // RASCUNHO: retomar um pausado é continuar, e o horário antigo é histórico.
+  if (disparo.status === "draft" && disparo.scheduled_at && horarioJaPassou(disparo.scheduled_at)) {
+    return fail("validation_failed", "O horário do agendamento já passou. Escolha um horário futuro.", 422, {
+      requestId,
+    });
   }
 
   const segmento = segmentoSchema.parse(disparo.segment ?? {});

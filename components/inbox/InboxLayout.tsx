@@ -33,7 +33,7 @@ import { CaretLeft, ChatCircle, IdentificationCard, MagnifyingGlass, X } from "@
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
-import { comandosDaFila } from "@/lib/inbox/comando-da-conversa";
+import { comandosDaFila, type OrdemDaInbox } from "@/lib/inbox/comando-da-conversa";
 import type { AvisoDeRascunho } from "@/lib/inbox/rascunho-sugerido";
 import { buscaValeConsulta } from "@/lib/inbox/termo-de-busca";
 import { useAutomaticoAtivo } from "@/hooks/ai/useAutomaticoAtivo";
@@ -112,6 +112,14 @@ export function tabToFilter(
   }
 }
 
+/**
+ * Lê ?ordem=. Padrão "recentes" — a ordem do WhatsApp, a conversa com a
+ * mensagem mais nova no topo. "espera" é a régua da Fila (#990).
+ */
+function parseOrdemParam(v: string | null): OrdemDaInbox {
+  return v === "espera" ? "espera" : "recentes";
+}
+
 const FILTER_TABS: InboxTab[] = ["unassigned", "mine", "all", "closed", "archived", "ai"];
 
 /**
@@ -138,33 +146,39 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tab = parseFilterParam(searchParams.get("filter"));
+  const ordem = parseOrdemParam(searchParams.get("ordem"));
   const idNaUrl = searchParams.get("id");
 
-  // tab vive na URL (?filter=); os demais filtros são estado local de sessão.
-  const [aux, setAux] = useState<Omit<InboxFiltersValue, "tab">>({
+  // tab e ordem vivem na URL (?filter=, ?ordem=): sobrevivem ao F5 e o servidor
+  // desenha o mesmo seletor que o navegador. Os demais filtros são estado local.
+  const [aux, setAux] = useState<Omit<InboxFiltersValue, "tab" | "ordem">>({
     search: "",
     onlyUnread: false,
     onlyGroups: false,
   });
-  const filterValue: InboxFiltersValue = { tab, ...aux };
+  const filterValue: InboxFiltersValue = { tab, ordem, ...aux };
   const setFilterValue = useCallback(
     (next: InboxFiltersValue) => {
-      if (next.tab !== tab) {
+      const proximaOrdem = next.ordem ?? "recentes";
+      if (next.tab !== tab || proximaOrdem !== ordem) {
         const params = new URLSearchParams(searchParams);
         params.set("filter", next.tab);
+        // "recentes" é o padrão: não polui a URL.
+        if (proximaOrdem === "recentes") params.delete("ordem");
+        else params.set("ordem", proximaOrdem);
         router.replace(`${pathname}?${params.toString()}`, { scroll: false });
       }
-      const { tab: _t, ...rest } = next;
+      const { tab: _t, ordem: _o, ...rest } = next;
       setAux(rest);
     },
-    [tab, searchParams, router, pathname],
+    [tab, ordem, searchParams, router, pathname],
   );
 
-  // Desliga só os AUXILIARES e mantém a aba: a aba é onde a pessoa está, e
-  // limpá-la junto a tiraria do lugar sem ela ter pedido.
+  // Desliga só os AUXILIARES e mantém a aba e a ordem: é onde a pessoa está, e
+  // limpá-las junto a tiraria do lugar sem ela ter pedido.
   const limparFiltrosAuxiliares = useCallback(() => {
-    setFilterValue({ tab, search: "", onlyUnread: false, onlyGroups: false });
-  }, [tab, setFilterValue]);
+    setFilterValue({ tab, ordem, search: "", onlyUnread: false, onlyGroups: false });
+  }, [tab, ordem, setFilterValue]);
 
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? idNaUrl);
   const ultimoIdNaUrl = useRef(idNaUrl);
@@ -237,6 +251,9 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
       tagMode: filterValue.tagMode,
       unread: filterValue.onlyUnread || undefined,
       is_group: filterValue.onlyGroups || undefined,
+      // Sempre explícita: sem ela a rota volta à ordem histórica (Fila por
+      // espera) e a tela mostraria outra ordem que a do seletor.
+      ordem: filterValue.ordem ?? "recentes",
     }),
     [
       filterValue.tab,
@@ -247,6 +264,7 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
       filterValue.tagMode,
       filterValue.onlyUnread,
       filterValue.onlyGroups,
+      filterValue.ordem,
     ],
   );
 

@@ -48,14 +48,42 @@ export const NEGACAO_DO_OPERADOR: Record<OperadorDeCampo, OperadorDeCampo> = {
  * direto no Postgres. Como a chave é imutável (0389), ela é tão estável quanto
  * o id para este fim.
  */
-export const criterioDeCampoSchema = z.object({
-  // A chave vira NOME DE COLUNA na query (`custom_fields->>key`) — por isso a
-  // mesma regra do registro de campos, e nunca texto livre: é o que impede uma
-  // chave de alterar a expressão do filtro.
-  key: z.string().trim().regex(CHAVE_DE_CAMPO, "chave de campo inválida"),
-  op: z.enum(OPERADORES_DE_CAMPO).default("eq"),
-  value: z.string().trim().max(200).default(""),
-});
+/**
+ * Os CAMPOS DO SISTEMA que o público aceita — colunas do próprio contato, e não
+ * `custom_fields`. Lista FECHADA: a chave vira nome de coluna na query, e só o
+ * que está aqui pode virar coluna (o resto é recusado pelo schema).
+ */
+export const CAMPOS_DO_SISTEMA_DO_PUBLICO = {
+  name: "Nome",
+  email: "E-mail",
+  phone_number: "Telefone",
+} as const;
+export type CampoDoSistemaDoPublico = keyof typeof CAMPOS_DO_SISTEMA_DO_PUBLICO;
+export const ORIGENS_DO_CRITERIO = ["personalizado", "sistema"] as const;
+export type OrigemDoCriterio = (typeof ORIGENS_DO_CRITERIO)[number];
+
+export function ehCampoDoSistema(key: string): key is CampoDoSistemaDoPublico {
+  return Object.prototype.hasOwnProperty.call(CAMPOS_DO_SISTEMA_DO_PUBLICO, key);
+}
+
+export const criterioDeCampoSchema = z
+  .object({
+    // A chave vira NOME DE COLUNA na query (`custom_fields->>key`) — por isso a
+    // mesma regra do registro de campos, e nunca texto livre: é o que impede uma
+    // chave de alterar a expressão do filtro.
+    key: z.string().trim().regex(CHAVE_DE_CAMPO, "chave de campo inválida"),
+    op: z.enum(OPERADORES_DE_CAMPO).default("eq"),
+    value: z.string().trim().max(200).default(""),
+    /**
+     * De onde o campo vem. Ausente = `personalizado`, que é como todo segmento
+     * gravado antes desta opção existir continua sendo lido — sem migração.
+     */
+    origem: z.enum(ORIGENS_DO_CRITERIO).optional(),
+  })
+  .refine((c) => c.origem !== "sistema" || ehCampoDoSistema(c.key), {
+    message: "campo do sistema inválido",
+    path: ["key"],
+  });
 export type CriterioDeCampo = z.infer<typeof criterioDeCampoSchema>;
 
 /**

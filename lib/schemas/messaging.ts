@@ -6,7 +6,11 @@
  * (quando o payload entra na pipeline pós-verificação HMAC).
  */
 import { z } from "zod";
-import { COMANDOS_DO_BANCO, type ComandoDoBanco } from "@/lib/inbox/comando-da-conversa";
+import {
+  COMANDOS_DO_BANCO,
+  ORDENS_DA_INBOX,
+  type ComandoDoBanco,
+} from "@/lib/inbox/comando-da-conversa";
 import {
   MAXIMO_DE_ETIQUETAS_NO_FILTRO,
   MODOS_DE_ETIQUETA,
@@ -403,6 +407,17 @@ export const listConversationsQuerySchema = z.object({
       message: `A busca precisa de pelo menos ${PISO_DA_BUSCA} caracteres.`,
     })
     .optional(),
+  /**
+   * A ORDEM que a pessoa escolheu na tela: `recentes` (atividade mais recente
+   * primeiro, como o WhatsApp) ou `espera` (quem espera há mais tempo primeiro).
+   *
+   * Ausente = a ordem histórica da rota: a Fila por espera, o resto por
+   * atividade. É o que mantém MCP e integrações antigas vendo a mesma lista; a
+   * tela da Inbox manda o valor sempre. A regra inteira mora em
+   * `ordenaPelaEspera` (`lib/inbox/comando-da-conversa.ts`), a mesma que a lista
+   * usa para decidir se numera "1º, 2º…".
+   */
+  ordem: z.enum(ORDENS_DA_INBOX).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });

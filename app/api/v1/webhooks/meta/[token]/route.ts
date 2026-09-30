@@ -38,6 +38,7 @@ import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { ingestMetaEcho } from "@/lib/channels/meta/ingest-eco";
 import { guardarPayloadDeSincronizacao } from "@/lib/channels/meta/sincronizacao";
 import { metaSessionByWebhookToken } from "@/lib/channels/meta/session";
+import { processarEventoDaMeta } from "@/lib/channels/meta/processar-evento";
 import { logger } from "@/lib/logger";
 import {
   emitirFalhaDeEntrega,
@@ -221,6 +222,14 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       // Sincronização do app (coexistência): só guarda o payload bruto, na
       // organização do TOKEN. Falha do banco LANÇA — a Meta reentrega.
       desfechos.push(await guardarPayloadDeSincronizacao(admin, e, { organizationId: session.organizationId }));
+      continue;
+    }
+
+    if (e.kind === "account_update") {
+      // A conta desconectou (ou voltou) da API: o estado da conexão segue a
+      // Meta. Mesma regra da rota universal — mora em `processar-evento.ts`.
+      const d = await processarEventoDaMeta(admin, e, session, now);
+      if (d) desfechos.push(d);
       continue;
     }
 

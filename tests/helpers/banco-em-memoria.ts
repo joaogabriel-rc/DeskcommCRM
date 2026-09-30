@@ -8,7 +8,7 @@
  * verdade, então "a organização A não vê o modelo da B" é medido, não suposto.
  *
  * Cobre o subconjunto do builder que as rotas de fluxos e o catálogo usam:
- * select/insert/update/upsert (com `onConflict`)/delete, eq/is/in/or/order/limit/range,
+ * select/insert/update/upsert (com `onConflict`)/delete, eq/is/in/or (com lt/gt)/order/limit/range,
  * maybeSingle/single/then, e `rpc` por função registrada. `or` entende a forma
  * que `escopoDaConexao` monta: `col.eq.v,and(col.is.null,col.eq.v)`.
  */
@@ -139,6 +139,17 @@ function filtroDeTermo(termo: string): Filtro {
     return (l) => typeof valorDe(l, col!) === "string" && rx.test(valorDe(l, col!) as string);
   }
   if (op === "eq") return (l) => iguais(valorDe(l, col!), valor);
+  // Comparação de ordem — o cursor de paginação (`col.lt.v,and(col.eq.v,id.lt.x)`).
+  // Como texto: os valores comparados aqui são ISO-8601 e uuids, que ordenam
+  // como texto do mesmo jeito que o Postgres os ordena.
+  if (op === "lt" || op === "gt" || op === "lte" || op === "gte") {
+    return (l) => {
+      const v = valorDe(l, col!);
+      if (v === null || v === undefined) return false;
+      const c = String(v).localeCompare(valor);
+      return op === "lt" ? c < 0 : op === "gt" ? c > 0 : op === "lte" ? c <= 0 : c >= 0;
+    };
+  }
   if (op === "neq") return (l) => valorDe(l, col!) !== null && !iguais(valorDe(l, col!), valor);
   if (op === "is" && valor === "null") return (l) => valorDe(l, col!) === null || valorDe(l, col!) === undefined;
   if (op === "ilike") {

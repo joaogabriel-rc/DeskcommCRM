@@ -414,6 +414,33 @@ export function ehAFila(f: {
   return f.comando?.includes("aguardando") ?? f.assigned_to === "unassigned";
 }
 
+/**
+ * As duas ordens que a Inbox oferece. `recentes` é a do WhatsApp: a conversa com
+ * a mensagem mais nova sobe para o topo. `espera` é a régua da Fila (#990).
+ */
+export const ORDENS_DA_INBOX = ["recentes", "espera"] as const;
+export type OrdemDaInbox = (typeof ORDENS_DA_INBOX)[number];
+
+/**
+ * "Esta lista ordena pela espera?" — a pergunta que decide a COLUNA pedida ao
+ * banco (rota) e a numeração "1º, 2º…" (lista). As duas leem daqui pelo mesmo
+ * motivo do `ehAFila`: numerar por uma ordem e ordenar por outra não fica
+ * vermelho em lugar nenhum.
+ *
+ * Sem `ordem` explícita vale a ordem histórica (Fila por espera, resto por
+ * atividade), que é o contrato de quem chama a rota sem a tela. Com `ordem`,
+ * vale a escolha — e `espera` só existe dentro da Fila: fora dela não há
+ * espera a medir.
+ */
+export function ordenaPelaEspera(f: {
+  comando?: readonly string[] | null;
+  assigned_to?: string | null;
+  ordem?: OrdemDaInbox | null;
+}): boolean {
+  if (!ehAFila(f)) return false;
+  return f.ordem !== "recentes";
+}
+
 export const ORDEM_DA_ESPERA = {
   coluna: "awaiting_since",
   opcoes: { ascending: true, nullsFirst: false },

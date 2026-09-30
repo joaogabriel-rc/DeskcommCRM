@@ -153,10 +153,15 @@ describe("o recorte por organização e por conexão", () => {
   });
 
   it("o id da conta só entra no filtro se for número — é texto interpolado numa expressão", () => {
+    // A conta ATUAL é condição sempre: o canal oficial reaproveita a mesma linha
+    // de sessão ao trocar de número, e sem a conta no filtro os modelos criados
+    // pelo CRM na conta anterior (com o id da sessão) seguiam aparecendo.
     expect(escopoDaConexao({ id: "s1", provider: "meta_cloud", meta_waba_id: "123" })).toBe(
-      "channel_session_id.eq.s1,and(channel_session_id.is.null,waba_id.eq.123)",
+      "and(waba_id.eq.123,or(channel_session_id.eq.s1,channel_session_id.is.null))",
     );
-    expect(escopoDaConexao({ id: "s1", provider: "meta_cloud", meta_waba_id: "1),or(organization_id.neq.x" })).toBe("channel_session_id.eq.s1");
+    // Conta que não é número não entra na expressão — e sem conta não há recorte
+    // seguro: nenhuma linha, nunca "tudo da sessão".
+    expect(escopoDaConexao({ id: "s1", provider: "meta_cloud", meta_waba_id: "1),or(organization_id.neq.x" })).toBe("id.is.null");
   });
 
   it("só a conexão OFICIAL alcança a linha da conta — parceiro fica com a própria, mesmo com conta numérica", () => {
@@ -232,7 +237,7 @@ describe("a escolha no nó grava referência + retrato", () => {
 
   it("no catálogo carregado: acha pelo id, e o nó antigo pelo par da mesma conta", () => {
     const catalogo = {
-      conexoes: [{ id: SESSAO_A, rotulo: "Loja", wabaId: WABA_A }],
+      conexoes: [{ id: SESSAO_A, rotulo: "Loja", wabaId: WABA_A, provider: "meta_cloud" }],
       modelos: [modelo],
     };
     expect(acharModeloNoCatalogo(catalogo, { template_id: "a-aprovado" })?.id).toBe("a-aprovado");

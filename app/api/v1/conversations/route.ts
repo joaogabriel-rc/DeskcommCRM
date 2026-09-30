@@ -72,6 +72,8 @@ export async function GET(req: NextRequest): Promise<Response> {
     // cobra a chave.
     is_group: url.searchParams.get("is_group") ?? undefined,
     search: url.searchParams.get("search") ?? undefined,
+    // A ordem escolhida na tela (recentes | espera).
+    ordem: url.searchParams.get("ordem") ?? undefined,
     cursor: url.searchParams.get("cursor") ?? undefined,
     limit: url.searchParams.get("limit") ?? undefined,
   });
