@@ -11,6 +11,7 @@ import { useT } from "@/lib/i18n/IdiomaProvider";
 import { CaretDown, CaretUp, Trash, Plus, X } from "@/lib/ui/icons";
 import { InserirVariavel } from "@/components/catalogo/InserirVariavel";
 import { SeletorDeCampo, SeletorDeTags } from "@/components/catalogo/SeletorDeCampo";
+import { useCamposDoContato } from "@/hooks/catalogo/useCatalogo";
 import type { RuleCondition } from "@/lib/automation/conditions";
 import { ACOES_DO_FLOW, acaoPorTipo, acoesDoNo, type CampoDeAcao } from "@/lib/flows/acoes";
 import { FLOW_TRIGGERS, type FlowTriggerId } from "@/lib/flows/triggers";
@@ -315,6 +316,7 @@ export function ModeloDaMensagem({
   const t = useT();
   const [seletorAberto, setSeletorAberto] = useState(false);
   const catalogo = useCatalogoDeModelos({ todos: true });
+  const { data: camposDoUsuario = [] } = useCamposDoContato();
   const modelo = acharModeloNoCatalogo(catalogo.data, config);
   const valores = config.template_values ?? {};
   const temRetrato = !!config.template_name?.trim() && !!config.template_language?.trim();
@@ -328,7 +330,7 @@ export function ModeloDaMensagem({
       onOpenChange={setSeletorAberto}
       conexaoAtual={config.channel_session_id}
       modeloAtual={config.template_id}
-      onEscolher={(m, conexaoId) => patch(configDoModeloEscolhido(m, conexaoId, valores))}
+      onEscolher={(m, conexaoId) => patch(configDoModeloEscolhido(m, conexaoId, valores, camposDoUsuario))}
     />
   );
 
@@ -418,7 +420,9 @@ export function ModeloDaMensagem({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => patch(configDoModeloEscolhido(modelo, config.channel_session_id ?? null, valores))}
+              onClick={() =>
+                patch(configDoModeloEscolhido(modelo, config.channel_session_id ?? null, valores, camposDoUsuario))
+              }
             >
               {t("Vincular a este modelo")}
             </Button>

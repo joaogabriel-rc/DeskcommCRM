@@ -2,6 +2,7 @@
 import Image from "next/image";
 
 import { contarVariaveis, type BotaoDaDefinicao } from "@/lib/channels/template-conteudo";
+import { lerVariaveis } from "@/lib/channels/template-variaveis";
 import { ArrowBendUpLeft, ArrowSquareOut, Checks, Phone } from "@/lib/ui/icons";
 import { useT } from "@/hooks/i18n/useT";
 
@@ -30,18 +31,25 @@ export function PreviaDaDefinicao({
   corpo,
   rodape,
   botoes,
+  exemplos = {},
+  exemploCabecalho = "",
 }: {
   cabecalho: string;
   midiaUrl: string;
   corpo: string;
   rodape: string;
   botoes: BotaoDaDefinicao[];
+  /** Amostras por nome — viram a dica de cada variável destacada. */
+  exemplos?: Record<string, string>;
+  exemploCabecalho?: string;
 }) {
   const t = useT();
   const vazia = !cabecalho && !midiaUrl && !corpo && !rodape && botoes.length === 0;
-  const buracos = corpo ? contarVariaveis(corpo) : 0;
   // `{{3}}` sem `{{1}}` é recusado — a numeração é posicional e a lista de
-  // valores não pode ter buraco. Avisar aqui poupa o ciclo de revisão.
+  // valores não pode ter buraco. Avisar aqui poupa o ciclo de revisão. Só vale
+  // para o formato POSICIONAL: nomes (`{{primeiro_nome}}`) não têm ordem.
+  const soPosicional = lerVariaveis(corpo).variaveis.every((v) => v.posicional);
+  const buracos = corpo && soPosicional ? contarVariaveis(corpo) : 0;
   const faltando = Array.from({ length: buracos }, (_, i) => i + 1).filter(
     (n) => !new RegExp(`\\{\\{\\s*${n}\\s*\\}\\}`).test(corpo),
   );
@@ -73,8 +81,16 @@ export function PreviaDaDefinicao({
                   className="mb-2 h-auto w-full rounded-md"
                 />
               )}
-              {cabecalho && <p className="mb-1 text-sm font-semibold">{cabecalho}</p>}
-              {corpo && <p className="whitespace-pre-wrap text-sm leading-snug">{corpo}</p>}
+              {cabecalho && (
+                <p className="mb-1 text-sm font-semibold">
+                  <ComVariaveis texto={cabecalho} exemplos={{}} exemploUnico={exemploCabecalho} />
+                </p>
+              )}
+              {corpo && (
+                <p className="whitespace-pre-wrap text-sm leading-snug">
+                  <ComVariaveis texto={corpo} exemplos={exemplos} />
+                </p>
+              )}
               {rodape && <p className="mt-1 text-[11px] text-muted-foreground">{rodape}</p>}
               <p className="mt-1 flex items-center justify-end gap-0.5 text-[10px] text-muted-foreground">
                 12:00 <Checks size={12} aria-hidden />
@@ -110,5 +126,46 @@ export function PreviaDaDefinicao({
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * O texto com cada variável DESTACADA (o buraco continua visível — é ele que o
+ * operador confere) e o exemplo na dica, para ver o que a revisão vai ler.
+ */
+function ComVariaveis({
+  texto,
+  exemplos,
+  exemploUnico,
+}: {
+  texto: string;
+  exemplos: Record<string, string>;
+  exemploUnico?: string;
+}) {
+  const partes: Array<string | { nome: string }> = [];
+  let ultimo = 0;
+  for (const m of texto.matchAll(/\{\{\s*([a-z][a-z0-9_]*|\d+)\s*\}\}/g)) {
+    const at = m.index ?? 0;
+    if (at > ultimo) partes.push(texto.slice(ultimo, at));
+    partes.push({ nome: m[1]! });
+    ultimo = at + m[0].length;
+  }
+  if (ultimo < texto.length) partes.push(texto.slice(ultimo));
+  return (
+    <>
+      {partes.map((p, i) =>
+        typeof p === "string" ? (
+          <span key={i}>{p}</span>
+        ) : (
+          <span
+            key={i}
+            title={(exemploUnico ?? exemplos[p.nome]) || undefined}
+            className="rounded bg-accent-500/15 px-0.5 font-mono text-[12px] text-accent-700 dark:text-accent-300"
+          >
+            {`{{${p.nome}}}`}
+          </span>
+        ),
+      )}
+    </>
   );
 }

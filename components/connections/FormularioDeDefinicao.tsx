@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { useCamposDoContato } from "@/hooks/catalogo/useCatalogo";
 import { useT } from "@/hooks/i18n/useT";
 import {
-  contarVariaveis,
   IDIOMAS_DA_DEFINICAO,
   LIMITE_BOTOES,
   LIMITE_CORPO,
@@ -14,8 +14,11 @@ import {
   montarComponents,
   type BotaoDaDefinicao,
 } from "@/lib/channels/template-conteudo";
+import { formatoDosTextos, lerVariaveis } from "@/lib/channels/template-variaveis";
 import { cn } from "@/lib/utils";
+import { CAMPOS_DO_SISTEMA } from "@/lib/variaveis/campos-do-sistema";
 
+import { EditorComVariaveis, variaveisParaExemplo, type CategoriaDoSeletor } from "./EditorComVariaveis";
 import { PreviaDaDefinicao } from "./PreviaDaDefinicao";
 
 /** O que o formulário entrega: o rascunho pronto para a plataforma revisar. */
@@ -39,8 +42,24 @@ export interface ValoresDaDefinicao {
   midiaUrl: string;
   corpo: string;
   rodape: string;
+  /** Por posição (forma antiga) — usado quando `exemplosPorNome` não vem. */
   exemplos: string[];
+  /** Amostra de cada variável do corpo, pelo nome (`"1"` ou `"primeiro_nome"`). */
+  exemplosPorNome?: Record<string, string>;
+  /** Amostra da variável do cabeçalho de texto. */
+  exemploCabecalho?: string;
   botoes: BotaoDaDefinicao[];
+}
+
+/** Os exemplos de abertura, por nome — da forma nova ou da antiga (por posição). */
+function exemplosIniciais(inicial?: ValoresDaDefinicao): Record<string, string> {
+  if (!inicial) return {};
+  if (inicial.exemplosPorNome && Object.keys(inicial.exemplosPorNome).length > 0) return { ...inicial.exemplosPorNome };
+  const out: Record<string, string> = {};
+  lerVariaveis(inicial.corpo).variaveis.forEach((v, i) => {
+    out[v.nome] = inicial.exemplos[i] ?? "";
+  });
+  return out;
 }
 
 /**
@@ -89,16 +108,57 @@ export function FormularioDeDefinicao({
   const [categoria, setCategoria] = useState(inicial?.categoria ?? "UTILITY");
   const [corpo, setCorpo] = useState(inicial?.corpo ?? "");
   const [rodape, setRodape] = useState(inicial?.rodape ?? "");
-  const [exemplos, setExemplos] = useState<string[]>(inicial?.exemplos ?? []);
+  const [exemplos, setExemplos] = useState<Record<string, string>>(() => exemplosIniciais(inicial));
+  const [exemploCabecalho, setExemploCabecalho] = useState(inicial?.exemploCabecalho ?? "");
   const [cabecalho, setCabecalho] = useState(inicial?.cabecalho ?? "");
   const [midiaUrl, setMidiaUrl] = useState(inicial?.midiaUrl ?? "");
   const [botoes, setBotoes] = useState<BotaoDaDefinicao[]>(inicial?.botoes ?? []);
   const [subindo, setSubindo] = useState(false);
 
-  // Quantas amostras a revisão vai exigir. Recalculado enquanto se digita: o
-  // operador vê o campo aparecer no instante em que escreve `{{1}}`, e não
-  // descobre a exigência numa recusa que chega horas depois.
-  const nVariaveis = contarVariaveis(corpo);
+  // As categorias do seletor de variáveis. "Campos do sistema" é a lista única
+  // (`lib/variaveis/campos-do-sistema.ts`); "Campos do usuário" é o registro da
+  // organização, pela chave — que já nasce no formato que a Meta aceita.
+  const { data: camposDoUsuario = [] } = useCamposDoContato();
+  const categorias = useMemo<CategoriaDoSeletor[]>(
+    () => [
+      {
+        id: "sistema",
+        rotulo: t("Campos do sistema"),
+        campos: CAMPOS_DO_SISTEMA.map((c) => ({ chave: c.chave, rotulo: t(c.rotulo), icone: c.icone })),
+      },
+      {
+        id: "usuario",
+        rotulo: t("Campos personalizados do usuário"),
+        campos: camposDoUsuario.map((c) => ({
+          chave: c.key,
+          rotulo: c.label,
+          icone: c.type === "number" ? ("numero" as const) : c.type === "email" ? ("email" as const) : ("texto" as const),
+        })),
+        vazio: t("Nenhum campo cadastrado. Crie em Configurações › Campos do Usuário."),
+      },
+    ],
+    [camposDoUsuario, t],
+  );
+
+  // As variáveis, recalculadas enquanto se digita: o campo de exemplo aparece
+  // no instante em que a variável entra e some quando ela sai — e a ordem é a
+  // do texto. A régua é a única do produto (`template-variaveis.ts`).
+  const doCorpo = variaveisParaExemplo(corpo, categorias);
+  const doCabecalho = midiaUrl ? [] : variaveisParaExemplo(cabecalho, categorias);
+  const invalidas = [...lerVariaveis(cabecalho).invalidas, ...lerVariaveis(corpo).invalidas];
+  const formato = formatoDosTextos([corpo, midiaUrl ? null : cabecalho]);
+  const faltaExemplo =
+    doCorpo.some((v) => !exemplos[v.nome]?.trim()) || (doCabecalho.length > 0 && !exemploCabecalho.trim());
+  const problema =
+    invalidas.length > 0
+      ? `${invalidas[0]} ${t("não é uma variável válida. Use {{1}}, {{2}}… ou um nome com letras minúsculas, números e _ (ex.: {{primeiro_nome}}).")}`
+      : formato === "MISTO"
+        ? t("Use só valores numerados ({{1}}, {{2}}…) ou só nomes ({{primeiro_nome}}) — a Meta não aceita os dois no mesmo modelo.")
+        : doCabecalho.length > 1
+          ? t("O cabeçalho aceita no máximo uma variável.")
+          : lerVariaveis(rodape).variaveis.length > 0
+            ? t("O rodapé não aceita variáveis.")
+            : null;
 
   return (
     <div className="grid gap-4 rounded-md border border-border p-3 lg:grid-cols-[1fr_20rem]">
@@ -153,17 +213,21 @@ export function FormularioDeDefinicao({
       {/* CABEÇALHO opcional: texto OU mídia, nunca os dois — a plataforma
           aceita um formato por definição, e mandar ambos é recusa. */}
       <div className="flex flex-wrap gap-2">
-        <input
-          value={cabecalho}
-          onChange={(e) => {
-            setCabecalho(e.target.value);
-            if (e.target.value) setMidiaUrl("");
-          }}
-          placeholder={t("Cabeçalho de texto (opcional)")}
-          aria-label={t("Cabeçalho de texto")}
-          disabled={!!midiaUrl}
-          className="h-9 flex-1 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50"
-        />
+        <div className={cn("min-w-0 flex-1", midiaUrl && "pointer-events-none opacity-50")}>
+          <EditorComVariaveis
+            valor={cabecalho}
+            aoMudar={(v) => {
+              setCabecalho(v);
+              if (v) setMidiaUrl("");
+            }}
+            categorias={categorias}
+            umaLinha
+            limite={60}
+            placeholder={t("Cabeçalho de texto (opcional)")}
+            rotuloAcessivel={t("Cabeçalho de texto")}
+            testId="modelo-cabecalho"
+          />
+        </div>
         {permiteMidia && (
           <>
             {/* SUBIR, e não colar URL. Colar exigia que o operador já tivesse a
@@ -218,12 +282,15 @@ export function FormularioDeDefinicao({
       </div>
 
       <div className="flex flex-col gap-1">
-        <textarea
-          value={corpo}
-          onChange={(e) => setCorpo(e.target.value.slice(0, LIMITE_CORPO))}
-          placeholder={t("Texto da mensagem. Use {{1}}, {{2}} para os valores que mudam.")}
-          aria-label={t("Conteúdo")}
-          className="min-h-20 rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+        <EditorComVariaveis
+          valor={corpo}
+          aoMudar={setCorpo}
+          categorias={categorias}
+          limite={LIMITE_CORPO}
+          invalido={!!problema || faltaExemplo}
+          placeholder={t("Texto da mensagem. Digite {{ para inserir uma variável.")}
+          rotuloAcessivel={t("Conteúdo")}
+          testId="modelo-corpo"
         />
         {/* O contador existe porque passar do limite é RECUSA, e a recusa
             chega horas depois sem dizer que o problema era o tamanho. */}
@@ -328,33 +395,44 @@ export function FormularioDeDefinicao({
         )}
       </div>
 
-      {nVariaveis > 0 && (
-        /* ESTE É O CAMPO QUE FALTAVA, e a causa das recusas.
-           A revisão exige uma AMOSTRA de cada `{{n}}` — sem ela a definição
-           é recusada, e a recusa chega horas depois sem ninguém ligar uma
-           coisa à outra. O formulário deixava digitar `{{1}}` e nunca
-           pedia o exemplo. */
-        <div className="flex flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50/50 p-2 dark:border-amber-800/60 dark:bg-amber-950/20">
-          <p className="text-[11px] text-amber-900 dark:text-amber-200">
-            {t("A revisão exige um exemplo de cada valor. Sem eles o modelo é recusado.")}
+      {problema && (
+        <p className="text-[11px] text-destructive" role="alert" data-testid="modelo-problema">
+          {problema}
+        </p>
+      )}
+
+      {(doCorpo.length > 0 || doCabecalho.length > 0) && (
+        /* AS AMOSTRAS — uma por variável, na ordem do texto.
+           A revisão exige um exemplo de cada variável; sem ele o modelo é
+           recusado horas depois. O exemplo é SÓ para a revisão: o valor que o
+           contato recebe é definido no fluxo ou no disparo. */
+        <div
+          className="flex flex-col gap-1.5 rounded-md border border-sky-300 bg-sky-50/60 p-2 dark:border-sky-800/60 dark:bg-sky-950/20"
+          data-testid="modelo-amostras"
+        >
+          <p className="text-xs font-medium text-sky-950 dark:text-sky-100">{t("Forneça amostras de suas variáveis")}</p>
+          <p className="text-[11px] text-sky-900 dark:text-sky-200">
+            {t(
+              "A Meta usa estes exemplos só para aprovar o modelo (ex.: Nome → João). O valor que cada contato recebe é definido depois, no fluxo ou no disparo.",
+            )}
           </p>
-          {Array.from({ length: nVariaveis }, (_, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <span className="w-12 shrink-0 font-mono text-xs text-muted-foreground">
-                {`{{${i + 1}}}`}
-              </span>
-              <input
-                value={exemplos[i] ?? ""}
-                onChange={(e) => {
-                  const proximo = [...exemplos];
-                  proximo[i] = e.target.value;
-                  setExemplos(proximo);
-                }}
-                placeholder={t("ex.: María")}
-                aria-label={`${t("Exemplo do valor")} ${i + 1}`}
-                className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm"
-              />
-            </div>
+          {doCabecalho.map((v) => (
+            <LinhaDeAmostra
+              key={`cab-${v.nome}`}
+              rotulo={`${v.rotulo} · ${t("cabeçalho")}`}
+              valor={exemploCabecalho}
+              aoMudar={setExemploCabecalho}
+              rotuloAcessivel={`${t("Exemplo da variável")} ${v.nome} (${t("cabeçalho")})`}
+            />
+          ))}
+          {doCorpo.map((v) => (
+            <LinhaDeAmostra
+              key={v.nome}
+              rotulo={v.rotulo}
+              valor={exemplos[v.nome] ?? ""}
+              aoMudar={(valor) => setExemplos((e) => ({ ...e, [v.nome]: valor }))}
+              rotuloAcessivel={`${t("Exemplo da variável")} ${v.nome}`}
+            />
           ))}
         </div>
       )}
@@ -375,7 +453,8 @@ export function FormularioDeDefinicao({
         <Button
           type="button"
           size="sm"
-          disabled={!nome.trim() || !corpo.trim() || enviando || !podeEnviar}
+          disabled={!nome.trim() || !corpo.trim() || enviando || !podeEnviar || !!problema || faltaExemplo}
+          title={faltaExemplo ? t("Preencha o exemplo de cada variável.") : undefined}
           onClick={() =>
             onEnviar({
               name: nome.trim(),
@@ -385,6 +464,7 @@ export function FormularioDeDefinicao({
                 body: corpo,
                 footer: rodape,
                 exemplos,
+                exemploCabecalho,
                 cabecalho: { texto: cabecalho, midiaUrl },
                 botoes,
               }),
@@ -406,8 +486,47 @@ export function FormularioDeDefinicao({
           corpo={corpo}
           rodape={rodape}
           botoes={botoes}
+          exemplos={exemplos}
+          exemploCabecalho={exemploCabecalho}
         />
       </div>
+    </div>
+  );
+}
+
+/** Uma variável → o exemplo dela. Vazio fica marcado: sem ele, a Meta recusa. */
+function LinhaDeAmostra({
+  rotulo,
+  valor,
+  aoMudar,
+  rotuloAcessivel,
+}: {
+  rotulo: string;
+  valor: string;
+  aoMudar: (v: string) => void;
+  rotuloAcessivel: string;
+}) {
+  const t = useT();
+  const vazio = !valor.trim();
+  return (
+    <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+      <span className="flex h-8 min-w-0 flex-1 items-center truncate rounded-md border border-input bg-muted/60 px-2 text-sm sm:max-w-[45%]">
+        {rotulo}
+      </span>
+      <span aria-hidden className="text-muted-foreground">
+        →
+      </span>
+      <input
+        value={valor}
+        onChange={(e) => aoMudar(e.target.value)}
+        placeholder={t("ex.: João")}
+        aria-label={rotuloAcessivel}
+        aria-invalid={vazio || undefined}
+        className={cn(
+          "h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm",
+          vazio ? "border-destructive" : "border-input",
+        )}
+      />
     </div>
   );
 }

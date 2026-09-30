@@ -129,9 +129,11 @@ const criar = (o: Partial<{ org: string; sessao: string; draft: ChannelTemplateD
 const linhas = () => banco.tabelas.meta_templates ?? [];
 
 describe("criar pela Meta: o pedido", () => {
-  it("sai para a conta DA CONEXÃO, com o token dela, e com nome, idioma, categoria e componentes", async () => {
+  it("sai para a conta DA CONEXÃO, com o token dela, e com nome, idioma, categoria, componentes e o FORMATO declarado", async () => {
     await criar();
-    expect(rede).toHaveBeenCalledTimes(1);
+    // Duas chamadas: criar, e RELER a definição pelo id devolvido — é da Meta
+    // o `parameter_format` que o envio vai precisar.
+    expect(rede).toHaveBeenCalledTimes(2);
     const [url, init] = rede.mock.calls[0] as [string, RequestInit & { headers: Record<string, string> }];
     expect(url).toMatch(/^https:\/\/graph\.facebook\.com\/v[\d.]+\/111\/message_templates$/);
     expect(init.method).toBe("POST");
@@ -141,7 +143,12 @@ describe("criar pela Meta: o pedido", () => {
       language: "pt_BR",
       category: "UTILITY",
       components: COMPONENTES,
+      parameter_format: "POSITIONAL",
     });
+    const [urlRelida, initRelida] = rede.mock.calls[1] as [string, RequestInit & { headers: Record<string, string> }];
+    expect(urlRelida).toMatch(/\/987654321\?fields=.*parameter_format/);
+    expect(initRelida.method ?? "GET").toBe("GET");
+    expect(initRelida.headers.Authorization).toBe("Bearer tok-da-A");
   });
 
   it("os valores levam o exemplo que a revisão exige, no formato da Meta", () => {
@@ -354,7 +361,10 @@ describe("criar pela Meta: validação local, antes de qualquer rede", () => {
     ["sem corpo", com({ components: [{ type: "FOOTER", text: "x" }] }), /texto de mensagem/],
     ["botão de link sem https", com({ components: montarComponents({ body: "Oi", exemplos: [], botoes: [{ tipo: "url", texto: "Ver", url: "http://x.test" }] }) }), /https/],
     ["rodapé com valor", com({ components: [{ type: "BODY", text: "Oi" }, { type: "FOOTER", text: "{{1}}" }] }), /rodapé não aceita/],
-    ["valores nomeados", com({ parameterFormat: "NAMED" }), /numerados/],
+    ["numerado e nomeado no mesmo modelo", com({ components: [{ type: "BODY", text: "Oi {{1}} {{nome}}" }] }), /não aceita os dois/],
+    ["variável em maiúscula ({{VAR1}}) — o marcador que passava mudo", com({ components: [{ type: "BODY", text: "Oi {{VAR1}}" }] }), /não é uma variável válida/],
+    ["variável nomeada sem exemplo", com({ components: [{ type: "BODY", text: "Oi {{var1}}" }] }), /falta o de \{\{var1\}\}/],
+    ["formato declarado diferente do texto", com({ parameterFormat: "NAMED" }), /não bate/],
   ])("%s", async (_nome, draft, motivo) => {
     expect(validarRascunhoOficial(draft)).toMatch(motivo);
     await expect(criar({ draft })).rejects.toThrow(/^meta_template_validacao:/);
@@ -419,5 +429,59 @@ describe("a rota POST /api/v1/channels/templates", () => {
     expect(syncTemplates).toHaveBeenCalledTimes(1);
     expect(rede).not.toHaveBeenCalled();
     expect(linhas()).toEqual([]);
+  });
+});
+
+describe("criar pela Meta: modelo NOMEADO — o caso var1_teste", () => {
+  const NOMEADO = montarComponents({
+    body: "{{var1}}\n{{var2}}",
+    exemplos: { var1: "mensagem teste", var2: "pedido saiu para entrega" },
+  });
+  const rascunhoNomeado: ChannelTemplateDraft = { name: "var1_teste", language: "pt_BR", category: "UTILITY", components: NOMEADO };
+
+  it("o formulário monta os exemplos POR NOME, na ordem do texto", () => {
+    const corpo = (NOMEADO as Array<Record<string, unknown>>).find((c) => c.type === "BODY")!;
+    expect(corpo.example).toEqual({
+      body_text_named_params: [
+        { param_name: "var1", example: "mensagem teste" },
+        { param_name: "var2", example: "pedido saiu para entrega" },
+      ],
+    });
+    expect(validarRascunhoOficial(rascunhoNomeado)).toBeNull();
+  });
+
+  it("declara NAMED à Meta e o espelho grava NAMED — nunca POSITIONAL presumido", async () => {
+    await criar({ draft: rascunhoNomeado });
+    const enviado = JSON.parse(String((rede.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(enviado.parameter_format).toBe("NAMED");
+    expect(linhas()[0]).toMatchObject({
+      name: "var1_teste",
+      parameter_format: "NAMED",
+      contract_hash: hashContract(NOMEADO, "NAMED"),
+    });
+  });
+
+  it("o que a Meta DEVOLVE na releitura é o que vale no espelho", async () => {
+    rede.mockImplementation(async (url: string) =>
+      String(url).includes("/message_templates")
+        ? new Response(JSON.stringify({ id: "777", status: "PENDING", category: "UTILITY" }), { status: 200 })
+        : new Response(
+            JSON.stringify({ id: "777", status: "APPROVED", category: "MARKETING", parameter_format: "NAMED", components: NOMEADO }),
+            { status: 200 },
+          ),
+    );
+    const r = await criar({ draft: rascunhoNomeado });
+    expect(linhas()[0]).toMatchObject({ parameter_format: "NAMED", status: "APPROVED", category: "MARKETING" });
+    expect(r.modelo.status).toBe("APPROVED");
+  });
+
+  it("releitura que falha não vira POSITIONAL: o formato sai dos tokens", async () => {
+    rede.mockImplementation(async (url: string) =>
+      String(url).includes("/message_templates")
+        ? new Response(JSON.stringify({ id: "778", status: "PENDING" }), { status: 200 })
+        : new Response("{}", { status: 500 }),
+    );
+    await criar({ draft: rascunhoNomeado });
+    expect(linhas()[0]!.parameter_format).toBe("NAMED");
   });
 });

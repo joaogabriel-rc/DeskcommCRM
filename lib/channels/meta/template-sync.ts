@@ -15,6 +15,8 @@
  */
 import { createAdminClient } from "@/lib/supabase/admin";
 
+import { formatoEfetivo } from "../template-variaveis";
+
 import { hashContract } from "./contract-hash";
 import { graphBaseUrl } from "./graph-base";
 import { normalizeRejectedReason as rejectedReason } from "./webhook";
@@ -144,8 +146,13 @@ export function templatesToRows(
     // POSITIONAL quando ausente: é o que a Meta assume, e o campo só vem quando
     // pedido explicitamente nos `fields` (medido). NAMED lido como POSITIONAL
     // montaria o payload de envio sem `parameter_name` — o 132012 pela porta dos fundos.
-    const parameterFormat = raw.parameter_format === "NAMED" ? "NAMED" : "POSITIONAL";
     const components = raw.components ?? [];
+    // E se a Graph omitir o campo num modelo com `{{nome}}`, o formato vem dos
+    // tokens: POSITIONAL presumido ali é o 132000 que a criação produzia.
+    const parameterFormat = formatoEfetivo(
+      typeof raw.parameter_format === "string" ? raw.parameter_format : null,
+      components,
+    );
 
     return {
       organization_id: organizationId,

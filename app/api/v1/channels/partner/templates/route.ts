@@ -48,6 +48,7 @@ import {
   type ChannelSessionRef,
 } from "@/lib/channels";
 import { findPartnerSession } from "@/lib/channels/connect";
+import { formatoEfetivo } from "@/lib/channels/template-variaveis";
 import { traduzir } from "@/lib/i18n/dicionario";
 import type { Idioma } from "@/lib/i18n/idiomas";
 import { logger } from "@/lib/logger";
@@ -278,7 +279,7 @@ export async function POST(req: NextRequest): Promise<Response> {
           rejected_reason: t.rejectedReason ?? null,
           components: t.components,
           contract_hash: "",
-          parameter_format: t.parameterFormat ?? "POSITIONAL",
+          parameter_format: formatoEfetivo(t.parameterFormat, t.components),
           synced_at: agora,
           updated_at: agora,
         },
