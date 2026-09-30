@@ -3314,3 +3314,32 @@ Testing Library), e a prova pela tela fica pendente, com prioridade.
 | J41.4 | Trocar a conta do número oficial esconde os modelos da conta anterior (inclusive os criados pelo CRM), sem apagar; reconectar a mesma conta não duplica | `tests/unit/modelos-isolados-pela-conta-da-conexao.test.ts` | unidade — **tela pendente** |
 | J41.5 | Ficha do contato: tags como chips, "+ Adicionar tag" com busca soma sem substituir, remover uma a uma; todos os campos com valor ou "Não definido", preencher e limpar | `tests/unit/ficha-do-contato-tags-e-campos.test.tsx` + `contato-ficha-persistencia.test.ts` | componente + handler — **tela pendente** |
 | J41.6 | Disparo em seções; "+ Condição" abre cheio com o registro de tags vazio; campos do sistema contam; horário passado é recusado; ida e volta ao construtor sem duplicar o fluxo | `tests/unit/disparo-menu-de-condicao.test.tsx` + `disparo-publico-e-agendamento.test.ts` | componente + rotas — **tela pendente** |
+
+## J42 — Variáveis dos modelos, status real do disparo e mensagem em blocos `[P0]` (2026-09-30)
+
+Três frentes de uma rodada (migrations 0501 e 0502). Spec:
+`tests/e2e/modelo-variaveis-e-mensagem-em-blocos.spec.ts` (admin para Templates,
+manager para os construtores; cenário semeado e removido pela própria spec),
+rodada com `next build` + `next start` contra o Supabase local atualizado pelo
+`baseline.sql` em modo UPDATE (o caminho do `update.sh`). Evidência em
+`evidence/mensagem-em-blocos/`.
+
+| Caso | O que prova | Estado |
+|---|---|---|
+| J42.1 | Templates da Meta: `{{` abre o seletor em duas colunas (Campos do sistema / Campos personalizados do usuário), filtra pelo que se digita, e o campo escolhido vira etiqueta não editável — medido por `getBoundingClientRect`/`isContentEditable` (`01-chaves-abrem-o-seletor.png`) | **MEDIDO EM TELA** |
+| J42.2 | `{{var1}}` digitado inteiro vira etiqueta; uma amostra por variável, na ordem do texto; "Enviar para revisão" travado até todas preenchidas; apagar a variável tira a amostra dela (`02-etiquetas-e-amostras.png`) | **MEDIDO EM TELA** |
+| J42.3 | `{{VAR1}}` é apontado como variável inválida e trava o envio (`03-variavel-invalida-apontada.png`) | **MEDIDO EM TELA** |
+| J42.4 | Automações: o nó antigo (texto + botão) abre como bloco; atraso, texto, imagem (upload real para `whatsapp-media/<org>/flows/<fluxo>/`) e botão de LINK no mesmo nó; o botão de link não vira saída (`04-blocos-no-mesmo-no.png`) | **MEDIDO EM TELA** + banco |
+| J42.5 | O card tem a saída do botão E o "Próximo passo"; ligar o Próximo passo e salvar grava `config.blocks` e as duas arestas (`button:0` e a padrão), mantendo o id do botão antigo (`05-proximo-passo-e-botao-ligados.png`) | **MEDIDO EM TELA** + banco |
+| J42.6 | Disparo em modo fluxo: o MESMO editor de blocos no construtor do disparo (`06-disparo-mesmo-editor.png`) | **MEDIDO EM TELA** + banco |
+| J42.7 | Execução: blocos em ordem, atraso durável com cursor, retomada sem reenvio, botão ≠ Próximo passo, clique tardio desvia a mesma execução (e reabre a concluída), formato antigo espera o clique | `tests/unit/fluxo-mensagem-em-blocos.test.ts` (motor, worker e handler de verdade) + `tests/invariants/fluxo-mensagem-em-blocos.test.ts` |
+| J42.8 | Disparo: recusa da Meta = `failed`, `sent` só com mensagem aceita, `in_flow` enquanto não há desfecho, recusa que chega depois pelo webhook corrige o disparo | `tests/unit/disparo-status-real-do-envio.test.ts` + `tests/invariants/disparo-status-real-do-envio.test.ts` (funções e gatilhos SQL reais) |
+| J42.9 | `var1_teste`: criação declara NAMED e relê na Meta; contrato gravado POSITIONAL com `{{var1}}` envia com `parameter_name` | `tests/unit/modelo-variaveis-nomeadas.test.ts` + `meta-criar-modelo-oficial.test.ts` |
+
+**NÃO MEDIDO:** a criação e a aprovação na Meta de verdade (rig sem credencial;
+a rede para `graph.facebook.com` sai do servidor); o envio real pelo WhatsApp e o
+clique de um contato de verdade; o atraso curto pelo tique do `agent-worker`
+(provado pelo `runFlowWorkerTick`, que é a mesma função, mas o processo do worker
+não foi subido). `disparo-guiado-e-com-fluxo.spec.ts` está desatualizada desde o
+`ba11dc269` (tela de disparo em seções: o selo "Modo guiado" virou "Mensagem" e o
+botão `modo-fluxo` saiu) — falha igual na base, antes desta rodada.
