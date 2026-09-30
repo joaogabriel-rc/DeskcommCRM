@@ -90,6 +90,11 @@ export interface FlowNodeCtx {
    * derivar uma do evento — um disparo não nasce de evento.
    */
   servicoAutorizado?: ServiceBoundary | null;
+  /**
+   * O destinatário do disparo dono desta execução (0399), repassado ao envio
+   * para ligar cada mensagem a ele (`messages.broadcast_recipient_id`, 0501).
+   */
+  broadcastRecipientId?: string | null;
 }
 
 export type NodeOutcome =

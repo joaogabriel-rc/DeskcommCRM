@@ -332,8 +332,13 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
           </div>
           <div className="flex flex-wrap gap-4 text-xs text-text-muted">
             <span>
-              {disparo.sent_count} {modo === "fluxo" ? t("entraram no fluxo") : t("enviados")}
+              {disparo.sent_count} {t("enviados")}
             </span>
+            {(disparo.in_flow_count ?? 0) > 0 && (
+              <span>
+                {disparo.in_flow_count} {modo === "fluxo" ? t("em andamento no fluxo") : t("aguardando o canal")}
+              </span>
+            )}
             <span>
               {disparo.failed_count} {t("falharam")}
             </span>

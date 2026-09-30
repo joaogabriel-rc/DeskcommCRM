@@ -721,6 +721,9 @@ export async function sendMessageHandler(
     // A PESSOA, não o token (#1613). Só chega aqui pelo ctx validado na rota
     // — ver a recusa acima —, e fica na coluna para consulta e auditoria.
     sent_on_behalf_of_user_id: ctx.onBehalfOf?.userId ?? null,
+    // Só quando o disparo originou o envio: a coluna existe desde a 0501, e a
+    // chave ausente mantém o insert igual para todo outro chamador.
+    ...(ctx.broadcastRecipientId ? { broadcast_recipient_id: ctx.broadcastRecipientId } : {}),
     sent_at: now,
     metadata: {
       ...(input.metadata ?? {}),

@@ -211,6 +211,8 @@ export interface DisparoRow {
   sent_count: number;
   failed_count: number;
   skipped_count: number;
+  /** Processados e ainda sem desfecho de envio (migration 0501). */
+  in_flow_count?: number;
   last_error: string | null;
   next_run_at: string | null;
   created_at: string;

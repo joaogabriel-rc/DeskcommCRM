@@ -56,6 +56,7 @@ import { checarGuardasDeContato } from "@/lib/automation/guarda-do-contato";
 import { motivoDoErro } from "@/lib/flows/erro";
 import { renderFlowTemplate } from "@/lib/flows/template";
 import type { FlowNodeCtx, MessageNodeConfig, NodeOutcome } from "@/lib/flows/types";
+import { desfechoDoEnvio, erroDoDesfecho } from "@/lib/messaging/desfecho-do-envio";
 
 /** FlowNodeCtx é estruturalmente um ActionCtx (mesmos campos) — só o nome do arquivo muda. */
 function asActionCtx(ctx: FlowNodeCtx): ActionCtx {
@@ -193,7 +194,7 @@ export async function executeMessageNode(ctx: FlowNodeCtx, config: MessageNodeCo
     const envio = entradaDeEnvio(config, boundary.conversation_id, ctx.context);
     if (!envio.ok) return { kind: "failed", error: envio.error };
 
-    await sendMessageHandler(
+    const enviada = await sendMessageHandler(
       ctx.admin,
       {
         organization_id: ctx.organizationId,
@@ -201,9 +202,15 @@ export async function executeMessageNode(ctx: FlowNodeCtx, config: MessageNodeCo
         proactiveContext: { organizationId: ctx.organizationId, contactId: guarda.contact.id },
         actor: { type: "webhook_source", id: ctx.ruleId },
         requestId: ctx.requestId,
+        ...(ctx.broadcastRecipientId ? { broadcastRecipientId: ctx.broadcastRecipientId } : {}),
       },
       envio.input as Parameters<typeof sendMessageHandler>[2],
     );
+
+    // O handler NÃO lança quando o canal recusa: devolve a linha `failed`.
+    // Ignorar o retorno fazia a recusa virar avanço — e o disparo, sucesso.
+    const desfecho = desfechoDoEnvio(enviada);
+    if (desfecho.kind === "recusado") return { kind: "failed", error: erroDoDesfecho(desfecho) };
 
     // Com botões, o nó é uma PERGUNTA: a execução para aqui até a resposta chegar.
     return (config.buttons ?? []).length > 0 ? { kind: "wait_button" } : { kind: "advance" };

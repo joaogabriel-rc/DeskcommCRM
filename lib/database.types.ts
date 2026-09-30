@@ -3478,6 +3478,7 @@ export type Database = {
           failed_count: number
           finished_at: string | null
           id: string
+          in_flow_count: number
           last_error: string | null
           message: Json
           name: string
@@ -3499,6 +3500,7 @@ export type Database = {
           failed_count?: number
           finished_at?: string | null
           id?: string
+          in_flow_count?: number
           last_error?: string | null
           message?: Json
           name: string
@@ -3520,6 +3522,7 @@ export type Database = {
           failed_count?: number
           finished_at?: string | null
           id?: string
+          in_flow_count?: number
           last_error?: string | null
           message?: Json
           name?: string
@@ -8024,6 +8027,7 @@ export type Database = {
           ack: number | null
           activity_id: string | null
           body: string | null
+          broadcast_recipient_id: string | null
           channel_session_id: string
           contact_id: string
           conversation_id: string
@@ -8063,6 +8067,7 @@ export type Database = {
           ack?: number | null
           activity_id?: string | null
           body?: string | null
+          broadcast_recipient_id?: string | null
           channel_session_id: string
           contact_id: string
           conversation_id: string
@@ -8102,6 +8107,7 @@ export type Database = {
           ack?: number | null
           activity_id?: string | null
           body?: string | null
+          broadcast_recipient_id?: string | null
           channel_session_id?: string
           contact_id?: string
           conversation_id?: string
@@ -10764,6 +10770,14 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      fn_broadcast_recipient_reconcile: {
+        Args: { p_recipient: string }
+        Returns: string
+      }
+      fn_broadcast_recount: {
+        Args: { p_broadcast: string }
+        Returns: Json
       }
       fn_claim_due_broadcasts: {
         Args: { p_lease_seconds: number; p_limit: number }

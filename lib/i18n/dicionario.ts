@@ -13597,6 +13597,33 @@ export const DICIONARIO: Traducoes = {
   "Uma mensagem para o público: escolha o modelo aqui mesmo.": { es: "Un mensaje para el público: elija la plantilla aquí mismo." },
   "Ver fluxo": { es: "Ver flujo" },
   "entraram no fluxo": { es: "entraron en el flujo" },
+  "em andamento no fluxo": { es: "en curso en el flujo" },
+  "aguardando o canal": { es: "esperando el canal" },
+  "em andamento": { es: "en curso" },
+  // ─── Editor de variáveis dos modelos (Templates da Meta) ───
+  "Variáveis": { es: "Variables" },
+  "Criar variável": { es: "Crear variable" },
+  "Primeiro nome": { es: "Primer nombre" },
+  "Sobrenome": { es: "Apellido" },
+  "Celular": { es: "Celular" },
+  "não é uma variável válida. Use {{1}}, {{2}}… ou um nome com letras minúsculas, números e _ (ex.: {{primeiro_nome}}).": {
+    es: "no es una variable válida. Usa {{1}}, {{2}}… o un nombre con letras minúsculas, números y _ (ej.: {{primer_nombre}}).",
+  },
+  "Use só valores numerados ({{1}}, {{2}}…) ou só nomes ({{primeiro_nome}}) — a Meta não aceita os dois no mesmo modelo.": {
+    es: "Usa solo valores numerados ({{1}}, {{2}}…) o solo nombres ({{primer_nombre}}): Meta no acepta los dos en la misma plantilla.",
+  },
+  "O cabeçalho aceita no máximo uma variável.": { es: "El encabezado acepta como máximo una variable." },
+  "O rodapé não aceita variáveis.": { es: "El pie de página no acepta variables." },
+  "Texto da mensagem. Digite {{ para inserir uma variável.": {
+    es: "Texto del mensaje. Escribe {{ para insertar una variable.",
+  },
+  "Forneça amostras de suas variáveis": { es: "Proporciona ejemplos de tus variables" },
+  "A Meta usa estes exemplos só para aprovar o modelo (ex.: Nome → João). O valor que cada contato recebe é definido depois, no fluxo ou no disparo.": {
+    es: "Meta usa estos ejemplos solo para aprobar la plantilla (ej.: Nombre → Juan). El valor que recibe cada contacto se define después, en el flujo o en el envío masivo.",
+  },
+  "Exemplo da variável": { es: "Ejemplo de la variable" },
+  "Preencha o exemplo de cada variável.": { es: "Completa el ejemplo de cada variable." },
+  "ex.: João": { es: "ej.: Juan" },
   "O disparo alcança o contato": { es: "El envío alcanza al contacto" },
   "Cada contato do público do disparo entra no fluxo quando o disparo chega a ele, no ritmo do disparo.": { es: "Cada contacto del público del envío entra en el flujo cuando el envío llega a él, al ritmo del envío." },
   "não contém": { es: "no contiene" },

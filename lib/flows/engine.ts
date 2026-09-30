@@ -97,6 +97,7 @@ function buildNodeCtx(
     // relida a cada retomada (delay, botão), e por isso a mensagem que sai
     // depois de uma espera usa a MESMA permissão que o disparo materializou.
     servicoAutorizado: parseServiceBoundary(execution.service_boundary ?? null),
+    broadcastRecipientId: execution.broadcast_recipient_id ?? null,
   };
 }
 
