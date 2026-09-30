@@ -160,7 +160,7 @@ function ComVariaveis({
           <span
             key={i}
             title={(exemploUnico ?? exemplos[p.nome]) || undefined}
-            className="rounded bg-accent-500/15 px-0.5 font-mono text-[12px] text-accent-700 dark:text-accent-300"
+            className="rounded-sm bg-accent-500/15 px-0.5 font-mono text-[12px] text-accent-700 dark:text-accent-300"
           >
             {`{{${p.nome}}}`}
           </span>

@@ -3227,7 +3227,10 @@ export type Database = {
           flow_id: string
           id: string
           last_error: string | null
+          listening_node_id: string | null
+          listening_until: string | null
           next_execution_at: string | null
+          node_cursor: number | null
           organization_id: string
           started_at: string
           status: string
@@ -3247,7 +3250,10 @@ export type Database = {
           flow_id: string
           id?: string
           last_error?: string | null
+          listening_node_id?: string | null
+          listening_until?: string | null
           next_execution_at?: string | null
+          node_cursor?: number | null
           organization_id: string
           started_at?: string
           status?: string
@@ -3267,7 +3273,10 @@ export type Database = {
           flow_id?: string
           id?: string
           last_error?: string | null
+          listening_node_id?: string | null
+          listening_until?: string | null
           next_execution_at?: string | null
+          node_cursor?: number | null
           organization_id?: string
           started_at?: string
           status?: string

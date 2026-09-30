@@ -309,6 +309,8 @@ export const AUDIT_ACTIONS = [
   "flows.updated",
   "flows.deleted",
   "flows.graph_saved",
+  // A imagem de um bloco do nó de mensagem (0502) subiu para a pasta do fluxo.
+  "flows.media_uploaded",
   "flows.worker_run",
   // Registro de tags e de campos do contato (migration 0389). São mutações de
   // CONFIGURAÇÃO da organização: mudam o vocabulário que toda automação usa.

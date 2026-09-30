@@ -278,6 +278,24 @@ export function criarBanco(
         filtros.push((l) => vs.some((v) => iguais(l[col], v)));
         return q;
       },
+      // Comparações: número com número, texto com texto (ISO-8601 ordena
+      // como o instante). Nulo nunca passa, como no Postgres.
+      gt: (col: string, v: unknown) => {
+        filtros.push((l) => valorDe(l, col) != null && (valorDe(l, col) as never) > (v as never));
+        return q;
+      },
+      gte: (col: string, v: unknown) => {
+        filtros.push((l) => valorDe(l, col) != null && (valorDe(l, col) as never) >= (v as never));
+        return q;
+      },
+      lt: (col: string, v: unknown) => {
+        filtros.push((l) => valorDe(l, col) != null && (valorDe(l, col) as never) < (v as never));
+        return q;
+      },
+      lte: (col: string, v: unknown) => {
+        filtros.push((l) => valorDe(l, col) != null && (valorDe(l, col) as never) <= (v as never));
+        return q;
+      },
       or: (expr: string) => {
         const f = filtroDeTermo(`or(${expr})`);
         filtros.push(f);

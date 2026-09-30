@@ -63,7 +63,7 @@ function criarPilula(nome: string, rotulo: string): HTMLSpanElement {
   s.dataset.var = nome;
   s.contentEditable = "false";
   s.className =
-    "mx-0.5 inline-flex select-none items-center rounded bg-accent-600 px-1.5 py-px align-baseline text-xs font-medium text-white";
+    "mx-0.5 inline-flex select-none items-center rounded-sm bg-accent-600 px-1.5 py-px align-baseline text-xs font-medium text-white";
   s.textContent = rotulo;
   return s;
 }
@@ -344,7 +344,7 @@ export function EditorComVariaveis({
           document.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
         }}
         className={cn(
-          "whitespace-pre-wrap break-words rounded-md border bg-background px-2 py-1.5 pr-9 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "whitespace-pre-wrap break-words rounded-md border bg-background px-2 py-1.5 pr-9 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
           umaLinha ? "min-h-9 leading-6" : "min-h-24",
           invalido ? "border-destructive" : "border-input",
         )}
@@ -366,7 +366,7 @@ export function EditorComVariaveis({
           setMenu(menu ? null : { consulta: "", ...posicaoDoCursor(), pelaTecla: false });
           setIndice(0);
         }}
-        className="absolute right-1.5 top-1.5 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="absolute right-1.5 top-1.5 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
       >
         <BracketsCurly size={16} aria-hidden />
       </button>
@@ -390,7 +390,7 @@ export function EditorComVariaveis({
                   setIndice(0);
                 }}
                 className={cn(
-                  "rounded px-2 py-1.5 text-left text-xs leading-snug",
+                  "rounded-sm px-2 py-1.5 text-left text-xs leading-snug",
                   c.id === categoriaMostrada?.id ? "bg-muted font-medium" : "hover:bg-muted/60",
                 )}
               >
@@ -417,7 +417,7 @@ export function EditorComVariaveis({
                   inserir(f.chave);
                 }}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left",
+                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left",
                   i === indice ? "bg-muted" : "hover:bg-muted/60",
                 )}
               >
@@ -435,7 +435,7 @@ export function EditorComVariaveis({
                   inserir(consulta);
                 }}
                 className={cn(
-                  "mt-0.5 flex w-full items-center gap-2 rounded border-t border-border px-2 py-1.5 text-left",
+                  "mt-0.5 flex w-full items-center gap-2 rounded-sm border-t border-border px-2 py-1.5 text-left",
                   indice === filtrados.length ? "bg-muted" : "hover:bg-muted/60",
                 )}
               >

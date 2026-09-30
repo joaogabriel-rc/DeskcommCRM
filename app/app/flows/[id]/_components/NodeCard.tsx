@@ -22,6 +22,11 @@ interface Props {
   showSource?: boolean;
   /** Uma linha por saída nomeada (botões da mensagem, sim/não da condição). */
   handles?: NodeCardHandle[];
+  /**
+   * A saída PADRÃO rotulada "Próximo passo", ao lado das saídas nomeadas — o
+   * nó de mensagem a tem SEMPRE, com ou sem botão (0502): botão ≠ próximo passo.
+   */
+  proximoPasso?: string;
   /** Conteúdo abaixo do título — a prévia do modelo, o "+ Novo gatilho". */
   children?: React.ReactNode;
 }
@@ -42,6 +47,7 @@ export function NodeCard({
   showTarget = true,
   showSource = true,
   handles,
+  proximoPasso,
   children,
 }: Props) {
   const Icon = visual.icon;
@@ -50,6 +56,7 @@ export function NodeCard({
   // que a aresta nasça com `sourceHandle = 'button:0'`, senão o motor procura
   // essa saída e não acha — a bolinha anônima do rodapé gravaria `null`.
   const rows = handles && handles.length > 0 ? handles : null;
+  const comProximoPasso = showSource && !!proximoPasso;
 
   return (
     <div
@@ -99,7 +106,17 @@ export function NodeCard({
           ))}
         </ul>
       )}
-      {rows === null && showSource && <Handle type="source" position={Position.Bottom} />}
+      {comProximoPasso && (
+        <div
+          className="relative flex items-center justify-end gap-1.5 border-t border-border px-3 py-1.5 text-xs text-text-muted"
+          data-testid={`proximo-passo-${id}`}
+        >
+          {proximoPasso}
+          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-text-muted" />
+          <Handle type="source" position={Position.Right} style={{ top: "50%" }} />
+        </div>
+      )}
+      {rows === null && showSource && !comProximoPasso && <Handle type="source" position={Position.Bottom} />}
     </div>
   );
 }

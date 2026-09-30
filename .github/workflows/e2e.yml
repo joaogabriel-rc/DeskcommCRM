@@ -1108,6 +1108,7 @@ jobs:
         fluxo-construtor-e-modelo-aprovado.spec.ts
         disparo-guiado-e-com-fluxo.spec.ts
         modelo-oficial-criado-pelo-crm.spec.ts
+        modelo-variaveis-e-mensagem-em-blocos.spec.ts
         jev-decisoes-rapidas.spec.ts
         jev-roteador.spec.ts
         buffer-ssr-caixa-orfa.spec.ts

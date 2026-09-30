@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 
 import { Play, ChatCircle, GitBranch, CheckCircle, Clock, WebhooksLogo, Flag } from "@/lib/ui/icons";
+import { resumoDosBlocos } from "@/lib/flows/blocos";
 import { acaoPorTipo, acoesDoNo } from "@/lib/flows/acoes";
 import type { ActionNodeConfig } from "@/lib/flows/types";
 import { resumoDoGatilho } from "@/lib/flows/triggers";
@@ -113,7 +114,8 @@ export function describeNodeConfig(type: FlowNodeType, config: Record<string, un
           ? `Modelo: ${cfg.template_name}${cfg.template_language ? ` (${cfg.template_language})` : ""}`
           : "Fora da janela — escolha o modelo";
       }
-      return cfg.body?.trim() ? cfg.body : "Sem texto ainda";
+      const resumo = resumoDosBlocos(cfg);
+      return resumo || "Sem texto ainda";
     }
     case "CONDITION": {
       const checks = Array.isArray(config.checks) ? config.checks : [];

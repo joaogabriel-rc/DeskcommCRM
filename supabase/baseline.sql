@@ -45363,6 +45363,39 @@ create trigger trg_flow_executions_broadcast_recipient
   when (new.broadcast_recipient_id is not null and old.status is distinct from new.status)
   execute function public.fn_trg_broadcast_recipient_from_execution();
 
+-- ---- o nó de mensagem em blocos e o Próximo passo (migration 0502) ----
+--
+-- Racional no cabeçalho da migration. Corpo IDÊNTICO ao da migration; não cria
+-- função — fica junto do bloco da 0501 por ser a mesma entrega.
+
+alter table public.flow_executions add column if not exists node_cursor int;
+alter table public.flow_executions add column if not exists listening_node_id uuid;
+alter table public.flow_executions add column if not exists listening_until timestamptz;
+
+do $$ begin
+  alter table public.flow_executions
+    add constraint flow_executions_listening_node_fk
+    foreign key (listening_node_id) references public.flow_nodes(id) on delete set null;
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table public.flow_executions
+    add constraint flow_executions_node_cursor_check
+    check (node_cursor is null or node_cursor >= 0);
+exception when duplicate_object then null; end $$;
+
+-- O handler de resposta procura "algum botão deste contato ainda clicável".
+create index if not exists idx_flow_executions_listening
+  on public.flow_executions (organization_id, contact_id, listening_until)
+  where listening_node_id is not null;
+
+comment on column public.flow_executions.node_cursor is
+  'Próximo bloco a executar dentro do nó de mensagem em blocos (0502). Nulo fora de um nó em andamento.';
+comment on column public.flow_executions.listening_node_id is
+  'Nó de mensagem cujos botões de fluxo seguem clicáveis depois do Próximo passo (0502). Clique desvia esta execução.';
+comment on column public.flow_executions.listening_until is
+  'Até quando o clique tardio num botão de fluxo ainda desvia a execução (0502).';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria

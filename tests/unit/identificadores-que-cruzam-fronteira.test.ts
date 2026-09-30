@@ -172,6 +172,9 @@ const SITES: { arquivo: string; fronteira: string; papel?: "gerador" | "validado
   // O anexo da nota interna (#1863, F3): MESMO molde de chave da rota irmã
   // (`{org}/{conversa}/note-{uuid}.{ext}`), bucket próprio `internal-media`.
   { arquivo: "app/api/v1/conversations/[id]/notes/media/route.ts", fronteira: "storage.chave-de-objeto" },
+  // A imagem de um bloco do nó de mensagem (0502): `{org}/flows/{fluxo}/{uuid}.{ext}`,
+  // organização da sessão e fluxo conferido contra ela — nada do corpo entra na chave.
+  { arquivo: "app/api/v1/flows/[id]/media/route.ts", fronteira: "storage.chave-de-objeto" },
   { arquivo: "app/api/v1/ai/knowledge/sources/upload/route.ts", fronteira: "storage.chave-de-objeto" },
   { arquivo: "app/api/v1/ai/knowledge/sources/route.ts", fronteira: "storage.chave-de-objeto" },
   // O PDF da proposta comercial (#1832): `<org>/<proposta>.pdf`, dois uuids.

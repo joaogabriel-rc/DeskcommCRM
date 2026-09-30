@@ -172,7 +172,8 @@ test.describe("modelos do canal intermediado pela tela", () => {
     await expect(form).toBeVisible();
     await expect(form.getByLabel("Nome do modelo")).toBeDisabled();
     const corpo = form.getByLabel("Conteúdo");
-    await expect(corpo).toHaveValue(TEXTO_APROVADO);
+    // O corpo é o editor de variáveis (um campo editável, não um textarea).
+    await expect(corpo).toHaveText(TEXTO_APROVADO);
     await corpo.fill(TEXTO_NOVO);
     await expect(form.locator("[data-previa-do-modelo]")).toContainText("₲150.000");
     await page.screenshot({ path: path.join(EVIDENCIA, "02-editando.png"), fullPage: true });

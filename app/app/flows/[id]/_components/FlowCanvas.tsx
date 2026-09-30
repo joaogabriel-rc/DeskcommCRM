@@ -257,6 +257,7 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
             <div className="flex-1 overflow-y-auto p-4 pt-0 lg:pt-4">
               <NodeConfigPanel
                 key={selectedNode.id}
+                flowId={flowId}
                 node={selectedNode}
                 onChange={(patch) => updateNodeData(selectedNode.id, patch)}
                 onDelete={() => deleteNode(selectedNode.id)}

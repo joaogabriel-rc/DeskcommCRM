@@ -132,7 +132,8 @@ test("B · nome que a Meta recusaria é barrado antes dela, com a frase limpa na
 
   await page.getByLabel("Nome do modelo").fill("Pedido Invalido");
   await page.getByLabel("Conteúdo").fill("Olá {{1}}, seu pedido saiu.");
-  await page.getByLabel("Exemplo do valor 1").fill("Ana");
+  // O editor de variáveis (0502) nomeia o exemplo pela variável: `{{1}}` → "1".
+  await page.getByLabel("Exemplo da variável 1").fill("Ana");
 
   const resposta = page.waitForResponse(
     (r) => r.url().endsWith("/api/v1/channels/templates") && r.request().method() === "POST",

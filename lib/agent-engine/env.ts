@@ -84,6 +84,11 @@ const envSchema = z.object({
   // que o operador escolheu para economizar de governar também o caminho ocupado.
   QUEUE_CLAIM_RETRY_INTERVAL_MS: z.coerce.number().int().positive().default(250),
   QUEUE_REAPER_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  // Relógio dos ATRASOS CURTOS dos fluxos (0502): "aguardar 3 segundos" dentro
+  // de um nó de mensagem não pode esperar o cron de 1 minuto. O estado mora no
+  // banco (`flow_executions.next_execution_at` + cursor), então o tique é só
+  // quem acorda cedo — o cron `flow-worker` segue de reserva. `0` desliga.
+  FLOW_DELAY_TICK_MS: z.coerce.number().int().nonnegative().default(2_000),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().positive().default(30_000),
   // Watchdog de sessão (Fase 4A-2) — o ÚNICO ponto do engine que fala com o
   // WAHA direto (admin-plane, regra dura nº 4): reconcilia o espelho
