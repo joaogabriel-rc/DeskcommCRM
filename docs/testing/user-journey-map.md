@@ -3191,6 +3191,29 @@ semeado e removido pela própria spec). Evidência em `evidence/modelos-g1/`.
 não tem credencial real) e a aprovação chegando depois — o status automático é a
 etapa seguinte (H).
 
+## J41 — Apagar só a ligação entre dois passos no construtor de Fluxos `[P1]` (2026-10-01)
+
+Clicar numa linha do construtor a seleciona e mostra a lixeira "Apagar conexão";
+a lixeira ou Delete/Backspace apagam só a ligação, os dois passos ficam e a saída
+fica livre. Spec: `tests/e2e/fluxo-apagar-aresta.spec.ts` (login como `manager`,
+fluxo rascunho semeado e removido pela própria spec). Medido no CI, run
+36906131108, parte 5, commit `6d60d7be9`. Evidência em `evidence/fluxo-apagar-aresta/`.
+
+| Caso | O que prova | Estado |
+|---|---|---|
+| J41.1 | A saída única de A, que levava a M, religada em Fim B: a ligação antiga sai (uma saída, um destino) e o banco grava só `A>B` (`evidence/fluxo-apagar-aresta/01-saida-religada-em-B.png`) | **MEDIDO EM TELA** + banco |
+| J41.2 | Clicar na linha A→B a seleciona: ela fica destacada e mostra a lixeira no meio (`evidence/fluxo-apagar-aresta/02-linha-selecionada-com-lixeira.png`) | **MEDIDO EM TELA** |
+| J41.3 | A lixeira apaga só a linha: os cinco passos continuam no desenho (`evidence/fluxo-apagar-aresta/03-linha-apagada-passos-ficam.png`) | **MEDIDO EM TELA** |
+| J41.4 | A mesma saída ligada em Fim C e salva; o banco tem `A>C` e não tem `A>B` (`evidence/fluxo-apagar-aresta/04-religado-em-C-e-salvo.png`) | **MEDIDO EM TELA** + banco |
+| J41.5 | Recarregada a página, só A→C existe; salvar de novo sem mexer não ressuscita A→B (`evidence/fluxo-apagar-aresta/05-depois-do-reload-so-A-C.png`) | **MEDIDO EM TELA** + banco |
+| J41.6 | A saída do botão "Sim" de M (`button:0`) apagada pela tecla Delete; o card continua com "Sim" e "Não" (`evidence/fluxo-apagar-aresta/06-saida-do-botao-apagada.png`) | **MEDIDO EM TELA** + banco |
+| J41.7 | Recarregada a página, a ligação do botão não volta e `config.buttons` continua com os dois botões (`evidence/fluxo-apagar-aresta/07-reload-botao-intacto-sem-aresta.png`) | **MEDIDO EM TELA** + banco |
+
+**NÃO MEDIDO pela tela:** o "+" não ligar o passo novo quando a saída padrão da
+origem já está ocupada; isso só é coberto pelo unitário de `saidaLivre`
+(`tests/unit/fluxo-excluir-aresta.test.ts`). A substituição das arestas no banco
+é provada pelo invariante `tests/invariants/flow-aresta-apagada-nao-volta.test.ts`.
+
 ## Conversões de anúncios — reprocessamento
 
 [P1] `tests/e2e/conversoes-reprocessamento.spec.ts`: administrador abre Conversões sem credenciais opcionais, vê o que falta, identifica origem de uma venda pendente e agenda reprocessamento pela tela. A spec confere o evento exclusivo e captura screenshot; integra o CI. O teste não prova aceite/atribuição por contas reais de anúncios.
