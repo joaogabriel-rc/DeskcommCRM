@@ -5733,6 +5733,7 @@ export const DICIONARIO: Traducoes = {
   "URL do botão": { es: "URL del botón" },
   "Telefone do botão": { es: "Teléfono del botón" },
   "Remover botão": { es: "Eliminar botón" },
+  "Apagar conexão": { es: "Eliminar conexión" },
   remover: { es: "eliminar" },
   "Adicionar botão": { es: "Agregar botón" },
   "A revisão exige um exemplo de cada valor. Sem eles o modelo é recusado.": {

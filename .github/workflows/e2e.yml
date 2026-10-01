@@ -36,6 +36,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Rodada manual sobre a branch escolhida em "Run workflow". Fora de
+  # pull_request o `e2e-alcance` responde `sim`: as seis partes rodam.
+  workflow_dispatch:
 
 # O GITHUB_TOKEN deste job serve a `actions/checkout` (clone) e a
 # `actions/setup-node` (manifest de `actions/node-versions`, repo público).
@@ -1106,6 +1109,7 @@ jobs:
         suporte-temporario.spec.ts
         olhar-telas-do-epico.spec.ts
         fluxo-construtor-e-modelo-aprovado.spec.ts
+        fluxo-apagar-aresta.spec.ts
         disparo-guiado-e-com-fluxo.spec.ts
         modelo-oficial-criado-pelo-crm.spec.ts
         jev-decisoes-rapidas.spec.ts
@@ -2017,6 +2021,16 @@ jobs:
           path: |
             playwright-report/
             test-results/
+          retention-days: 7
+
+      # As capturas de `fluxo-apagar-aresta.spec.ts` (parte 5), passe ou falhe.
+      # Nas outras partes a pasta não existe e o passo não publica nada.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: evidencia-fluxo-apagar-aresta-parte-${{ matrix.parte }}
+          path: evidence/fluxo-apagar-aresta/
+          if-no-files-found: ignore
           retention-days: 7
 
       # ── ONDE A MEDIÇÃO FICA ───────────────────────────────────────────────
