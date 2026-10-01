@@ -210,7 +210,7 @@ test("a saída de um BOTÃO se apaga pela tecla Delete sem apagar o botão nem o
   await page.waitForTimeout(300);
 
   await ligar(page, card(page, M).locator('[data-handleid="button:0"]'), B);
-  await expect(linha(page, A, B)).toHaveCount(1);
+  await expect(linha(page, M, B)).toHaveCount(1);
   await salvar(page);
   expect(await arestasNoBanco()).toEqual(["A>C:proximo", "M>B:button:0", "T>A:proximo"]);
 
