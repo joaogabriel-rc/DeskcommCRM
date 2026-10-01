@@ -39,11 +39,20 @@ const flowNodeSchema = z.object({
   position_y: z.number().finite(),
 });
 
+/**
+ * As saídas que um nó tem: `null` (a saída padrão), `true`/`false` (condição)
+ * e `button:<id>` — o índice no formato antigo (`button:0`) ou o id do botão
+ * na mensagem em blocos, que o editor cria com `randomId()` (UUID): 43
+ * caracteres. O antigo `max(40)` recusava essa saída e o "Salvar" do fluxo
+ * respondia "Dados inválidos".
+ */
+export const FLOW_SOURCE_HANDLE_RE = /^(true|false|button:[A-Za-z0-9_-]{1,64})$/;
+
 const flowEdgeSchema = z.object({
   id: z.string().uuid(),
   source_node_id: z.string().uuid(),
   target_node_id: z.string().uuid(),
-  source_handle: z.string().max(40).nullable().optional(),
+  source_handle: z.string().regex(FLOW_SOURCE_HANDLE_RE).nullable().optional(),
 });
 
 export const replaceFlowGraphSchema = z.object({

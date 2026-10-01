@@ -9,7 +9,11 @@
  *   4. liga a mesma saída em OUTRO passo (C) e salva;
  *   5. recarrega: só A→C existe — na tela e no banco;
  *   6. a saída de um BOTÃO também se apaga (pela tecla Delete) sem apagar o
- *      botão nem o nó, e o botão de link (URL) não tem saída nenhuma.
+ *      botão nem o nó, e o botão de link (URL) não tem saída nenhuma;
+ *   7. um botão CRIADO PELA TELA (id = UUID, saída `button:<uuid>` de 43
+ *      caracteres) tem a saída ligada e o "Salvar" é aceito — o schema antigo
+ *      (`max(40)`) respondia "Dados inválidos" aqui, e os casos acima não
+ *      pegavam porque semeiam ids curtos (`b1`).
  *
  * O fluxo é semeado aqui, como RASCUNHO (fluxo ativo é só leitura no canvas),
  * por service role com sufixo único — e removido no fim. Nada envia WhatsApp.
@@ -240,4 +244,48 @@ test("a saída de um BOTÃO se apaga pela tecla Delete sem apagar o botão nem o
   const { data } = await admin.from("flow_nodes").select("config").eq("id", A).single();
   expect((data!.config as { blocks: Array<{ botoes: unknown[] }> }).blocks[0]!.botoes).toHaveLength(2);
   await foto(page, "07-reload-botao-intacto-sem-aresta");
+});
+
+test("um botão criado pela tela tem a saída button:<uuid> ligada e o Salvar é aceito", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page);
+  await page.goto(`${APP_URL}/app/flows/${fluxoId}`);
+  await expect(card(page, A)).toBeVisible({ timeout: 30_000 });
+
+  // O botão nasce pelo editor de blocos, como o operador faz: o id é um UUID.
+  await card(page, A).click();
+  const editor = page.getByTestId("node-config-sheet").getByTestId("editor-de-blocos");
+  await expect(editor).toBeVisible();
+  await editor.getByTestId("adicionar-botao").click();
+  const saidaNova = card(page, A).locator('[data-handleid^="button:"]:not([data-handleid="button:b1"])');
+  await expect(saidaNova).toHaveCount(1);
+  const handle = (await saidaNova.getAttribute("data-handleid"))!;
+  expect(handle).toMatch(/^button:[0-9a-f-]{36}$/);
+  expect(handle).toHaveLength(43);
+
+  // Em 1440px o painel é uma coluna ao lado do canvas (não o cobre): reenquadra com ele aberto.
+  await page.locator(".react-flow__controls-fitview").click();
+  await page.waitForTimeout(300);
+  await ligar(page, saidaNova, B);
+  await expect(linha(page, A, B)).toHaveCount(1);
+
+  // `salvar` exige 200 e "Flow salvo." — era aqui que o 400 "Dados inválidos" aparecia.
+  await salvar(page);
+  await foto(page, "08-botao-criado-pela-tela-ligado-e-salvo");
+
+  const { data: arestas, error } = await admin
+    .from("flow_edges")
+    .select("source_node_id, target_node_id, source_handle")
+    .eq("flow_id", fluxoId)
+    .eq("source_handle", handle);
+  if (error) throw new Error(error.message);
+  expect(arestas).toEqual([{ source_node_id: A, target_node_id: B, source_handle: handle }]);
+  const { data: no } = await admin.from("flow_nodes").select("config").eq("id", A).single();
+  const botoes = (no!.config as { blocks: Array<{ botoes: Array<{ id: string }> }> }).blocks[0]!.botoes;
+  expect(botoes.map((b) => b.id)).toContain(handle.slice("button:".length));
+
+  // e a ligação sobrevive ao reabrir
+  await page.reload();
+  await expect(card(page, A)).toBeVisible({ timeout: 30_000 });
+  await expect(linha(page, A, B)).toHaveCount(1);
 });
