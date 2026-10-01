@@ -1,17 +1,17 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
   Controls,
   ConnectionLineType,
-  addEdge,
   useNodesState,
   useEdgesState,
   useReactFlow,
   type Connection,
+  type EdgeTypes,
   type NodeMouseHandler,
   type NodeTypes,
 } from "@xyflow/react";
@@ -21,10 +21,12 @@ import { Button } from "@/components/ui/button";
 import { randomId } from "@/lib/random-id";
 import { Plus, X } from "@/lib/ui/icons";
 import { acaoPorTipo } from "@/lib/flows/acoes";
+import { conectarSaida, podarArestasDeBotaoOrfas, saidaLivre } from "@/lib/flows/arestas";
 import type { FlowNodeType } from "@/lib/flows/types";
 import { fromReactFlow, toReactFlow, type RFEdge, type RFNode } from "@/lib/flows/ui-mappers";
 import { useFlow, useSaveFlowGraph } from "@/hooks/flows/useFlow";
 import type { FlowDetailRow } from "@/hooks/flows/useFlow";
+import { ArestaRemovivel } from "./ArestaRemovivel";
 import { GenericFlowNode } from "./GenericFlowNode";
 import { NodeConfigPanel } from "./NodeConfigPanel";
 import { NODE_VISUALS } from "./nodeVisuals";
@@ -41,6 +43,10 @@ const nodeTypes: NodeTypes = {
   END: GenericFlowNode,
 };
 
+/** Toda linha do canvas é selecionável e apagável (ver `ArestaRemovivel`). */
+const TIPO_DA_ARESTA = "removivel";
+const edgeTypes: EdgeTypes = { [TIPO_DA_ARESTA]: ArestaRemovivel };
+
 interface Props {
   flowId: string;
   initialData: FlowDetailRow;
@@ -55,7 +61,9 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
     [],
   );
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>(initial.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>(initial.edges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>(
+    initial.edges.map((e) => ({ ...e, type: TIPO_DA_ARESTA })),
+  );
   const { screenToFlowPosition } = useReactFlow();
   // Rascunho recém-criado abre com o "Quando…" SELECIONADO: o painel dele
   // aparece com o seletor de gatilho aberto, que é a primeira decisão do fluxo.
@@ -79,6 +87,13 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
 
+  // Botão removido ou trocado para "Abrir site" deixa de ser saída: a aresta
+  // dele sai do ESTADO (não só do desenho), para não ser gravada invisível nem
+  // reaparecer quando o botão voltar a ser de fluxo.
+  useEffect(() => {
+    setEdges((eds) => podarArestasDeBotaoOrfas(nodes, eds));
+  }, [nodes, setEdges]);
+
   const onConnect = useCallback(
     (connection: Connection) => {
       const newEdge: RFEdge = {
@@ -87,8 +102,10 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
         target: connection.target,
         sourceHandle: connection.sourceHandle,
         targetHandle: connection.targetHandle,
+        type: TIPO_DA_ARESTA,
       };
-      setEdges((eds) => addEdge(newEdge, eds));
+      // Uma saída, um destino: ligar numa saída ocupada troca o destino.
+      setEdges((eds) => conectarSaida(eds, newEdge));
     },
     [setEdges],
   );
@@ -129,9 +146,20 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
           (origem.type === "MESSAGE" &&
             Array.isArray((origem.data.config as { buttons?: unknown[] }).buttons) &&
             ((origem.data.config as { buttons?: unknown[] }).buttons?.length ?? 0) > 0));
+      // E só liga numa saída LIVRE: se o operador já ligou (ou desligou de
+      // propósito e religou) a saída padrão, o "+" não passa por cima.
       if (origem && !saidasNomeadas && origem.type !== "END") {
         setEdges((eds) =>
-          addEdge({ id: randomId(), source: origem.id, target: id, sourceHandle: null, targetHandle: null }, eds),
+          saidaLivre(eds, origem.id, null)
+            ? eds.concat({
+                id: randomId(),
+                source: origem.id,
+                target: id,
+                sourceHandle: null,
+                targetHandle: null,
+                type: TIPO_DA_ARESTA,
+              })
+            : eds,
         );
       }
       setSelectedNodeId(id);
@@ -208,6 +236,7 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             onNodesChange={isReadOnly ? undefined : onNodesChange}
             onEdgesChange={isReadOnly ? undefined : onEdgesChange}
             onConnect={isReadOnly ? undefined : onConnect}
@@ -216,7 +245,8 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
             nodesDraggable={!isReadOnly}
             nodesConnectable={!isReadOnly}
             elementsSelectable
-            defaultEdgeOptions={{ type: "smoothstep" }}
+            deleteKeyCode={isReadOnly ? null : ["Backspace", "Delete"]}
+            defaultEdgeOptions={{ type: TIPO_DA_ARESTA }}
             connectionLineType={ConnectionLineType.SmoothStep}
             fitView
           >
