@@ -201,6 +201,13 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
   }
 
   async function irParaConstrutor() {
+    // Fora de rascunho/pausa o botão é "Ver fluxo": só abre. Salvar aqui batia
+    // no 409 "Pause o disparo antes de editar" do PATCH, e a navegação nunca
+    // acontecia — o fluxo de um disparo concluído ficava inalcançável.
+    if (!editavel) {
+      if (disparo.fluxo?.id) router.push(`/app/flows/${disparo.fluxo.id}`);
+      return;
+    }
     // Salva ANTES de sair (nome, público, envio) e, se ainda é mensagem, troca o
     // modo — a rota cria o fluxo do disparo uma vez só e devolve o id dele.
     const r =
