@@ -11259,6 +11259,14 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      fn_broadcast_duplicar: {
+        Args: { p_broadcast: string; p_organization_id: string }
+        Returns: Json
+      }
+      fn_flow_estado_de_edicao: {
+        Args: { p_flow: string }
+        Returns: Json
+      }
       fn_flow_replace_graph: {
         Args: {
           p_edges: Json
