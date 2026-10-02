@@ -10,7 +10,8 @@
  * A jornada, pela tela, como um gestor faria:
  *   1. disparo concluído → "Ver fluxo" abre o construtor;
  *   2. o construtor diz que é a definição histórica: selo, aviso, sem Salvar;
- *      arrastar um passo NÃO move (medido com getBoundingClientRect); o painel
+ *      arrastar um passo NÃO move (medido pela posição do nó no canvas, não na
+ *      tela: ali o arrasto vira pan); o painel
  *      do passo mostra a configuração com os campos desabilitados;
  *   3. a REST direta, com a sessão do próprio gestor, também é recusada (PT409)
  *      — a trava é do banco, não da tela;
@@ -60,7 +61,21 @@ async function ok<T>(p: PromiseLike<{ data: T; error: { message: string } | null
   return data as NonNullable<T>;
 }
 
-/** Centro do nó na tela (o nó do React Flow é `.react-flow__node[data-id]`). */
+/**
+ * Posição do nó NO CANVAS (coordenadas do fluxo): o `transform` que o React Flow
+ * põe em `.react-flow__node`. Pan e zoom vão no `.react-flow__viewport` pai, então
+ * ela só muda quando o PASSO se move — e é a que vai para `position_x/y`. A caixa
+ * na TELA (`caixaDoNo`) muda também com pan: no construtor somente leitura o
+ * gesto de arrastar faz pan, e a tela mede um movimento que o passo não fez.
+ */
+async function posicaoDoNo(page: Page, id: string) {
+  const t = await page.locator(`.react-flow__node[data-id="${id}"]`).evaluate((el) => (el as HTMLElement).style.transform);
+  const m = /translate\(\s*(-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(t);
+  if (!m) throw new Error(`posição do nó ${id} ilegível: "${t}"`);
+  return { x: Number(m[1]), y: Number(m[2]) };
+}
+
+/** Caixa do nó na tela — para o mouse saber onde pegar, não para medir movimento. */
 async function caixaDoNo(page: Page, id: string) {
   const r = await page.locator(`.react-flow__node[data-id="${id}"]`).evaluate((el) => {
     const b = el.getBoundingClientRect();
@@ -177,11 +192,10 @@ test("disparo concluído: o fluxo abre como histórico, nada o altera, e a cópi
   await expect(page.getByTestId("flow-add-step")).toHaveCount(0);
   await expect(page.locator(`.react-flow__node[data-id="${ids.mensagem}"]`)).toBeVisible();
 
-  const antes = await caixaDoNo(page, ids.mensagem);
+  // O passo está onde o banco diz, e o arrasto não o tira de lá (vira pan da tela).
+  expect(await posicaoDoNo(page, ids.mensagem)).toEqual({ x: 420, y: 80 });
   await arrastar(page, ids.mensagem, 160, 120);
-  const depois = await caixaDoNo(page, ids.mensagem);
-  expect(Math.round(depois.x)).toBe(Math.round(antes.x));
-  expect(Math.round(depois.y)).toBe(Math.round(antes.y));
+  expect(await posicaoDoNo(page, ids.mensagem)).toEqual({ x: 420, y: 80 });
 
   // A configuração continua visível — é o histórico que se veio ver —, desabilitada.
   await page.locator(`.react-flow__node[data-id="${ids.mensagem}"]`).click();
@@ -235,9 +249,9 @@ test("disparo concluído: o fluxo abre como histórico, nada o altera, e a cópi
   const { count: execCopia } = await admin.from("flow_executions").select("id", { count: "exact", head: true }).eq("flow_id", fluxoCopia);
   expect(execCopia).toBe(0);
 
-  const antesCopia = await caixaDoNo(page, msgCopia.id);
+  const antesCopia = await posicaoDoNo(page, msgCopia.id);
   await arrastar(page, msgCopia.id, 160, 120);
-  const depoisCopia = await caixaDoNo(page, msgCopia.id);
+  const depoisCopia = await posicaoDoNo(page, msgCopia.id);
   expect(Math.abs(depoisCopia.x - antesCopia.x)).toBeGreaterThan(50);
 
   const salvou = page.waitForResponse((r) => r.url().endsWith(`/api/v1/flows/${fluxoCopia}/graph`) && r.request().method() === "PUT");
