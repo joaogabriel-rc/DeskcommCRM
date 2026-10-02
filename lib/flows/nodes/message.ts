@@ -58,6 +58,7 @@ import type { ServiceBoundary } from "@/lib/atendimento/fronteira";
 import { assertServiceBoundarySupabase } from "@/lib/atendimento/origem";
 import { serviceForAutomation } from "@/lib/atendimento/origem-automacao";
 import { checarGuardasDeContato } from "@/lib/automation/guarda-do-contato";
+import { caminhoDeMidiaDoFluxo } from "@/lib/flows/caminho-de-midia";
 import { motivoDoErro } from "@/lib/flows/erro";
 import { createHash } from "node:crypto";
 
@@ -216,6 +217,9 @@ async function entradaDaImagem(
   if (!origem) return { ok: false, error: "imagem_sem_arquivo" };
   // O arquivo é DESTA organização — nunca um caminho de outra, vindo do config.
   if (!origem.startsWith(`${ctx.organizationId}/flows/`)) return { ok: false, error: "imagem_fora_da_organizacao" };
+  // E é DESTE fluxo, no formato exato `<org>/flows/<fluxo>/<arquivo>` — sem
+  // `..`, segmento a mais ou pasta de outro fluxo (`lib/flows/caminho-de-midia.ts`).
+  if (!caminhoDeMidiaDoFluxo(origem, ctx.organizationId, ctx.flowId)) return { ok: false, error: "imagem_fora_do_fluxo" };
   const ext = /\.([a-z0-9]{2,5})$/i.exec(origem)?.[1]?.toLowerCase() ?? "jpg";
   const marca = createHash("sha256").update(origem).digest("hex").slice(0, 16);
   const destino = `${ctx.organizationId}/${conversationId}/fluxo-${marca}.${ext}`;

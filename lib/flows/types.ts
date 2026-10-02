@@ -85,6 +85,8 @@ export interface FlowExecutionRow {
 export interface FlowNodeCtx {
   admin: SupabaseClient;
   organizationId: string;
+  /** O fluxo que está executando — a pasta em que as imagens dele moram. */
+  flowId: string;
   ruleId: string;
   ruleName: string;
   event: EventRow;

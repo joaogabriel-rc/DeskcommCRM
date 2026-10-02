@@ -26,6 +26,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { mfaEmDivida } from "@/lib/auth/server";
 import { requireSupportWrite } from "@/lib/impersonate/support";
 import { caminhosDeImagem } from "@/lib/disparos/duplicar";
+import { arquivoDoCaminho, caminhoDeMidiaDoFluxo } from "@/lib/flows/caminho-de-midia";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -76,14 +77,32 @@ export async function POST(
       .select("config")
       .eq("organization_id", orgId)
       .eq("flow_id", r.flow_id);
-    const pastaNova = `${orgId}/flows/${r.flow_id}/`;
     const destinos = [
       ...new Set((nos ?? []).flatMap((n) => caminhosDeImagem((n as { config: unknown }).config))),
-    ].filter((p) => p.startsWith(pastaNova));
+    ];
+    // Todo caminho tem de estar no contrato `<org>/flows/<fluxo>/<arquivo>` —
+    // o destino na pasta do fluxo NOVO e a origem na do fluxo de ORIGEM — antes
+    // de o client admin tocar no Storage. Fora dele (um `..`, outra pasta, outra
+    // organização), nada é lido nem copiado, e o disparo novo é desfeito.
+    const fora = destinos.find(
+      (d) =>
+        !caminhoDeMidiaDoFluxo(d, orgId, r.flow_id!) ||
+        !caminhoDeMidiaDoFluxo(`${orgId}/flows/${r.flow_id_origem}/${arquivoDoCaminho(d)}`, orgId, r.flow_id_origem!),
+    );
+    if (fora !== undefined) {
+      logger.warn("[broadcasts.duplicar] imagem fora do fluxo", { request_id: requestId });
+      await supabase.from("broadcasts").delete().eq("id", r.broadcast_id).eq("organization_id", orgId);
+      return fail(
+        "validation_failed",
+        "Uma imagem deste fluxo não está na pasta dele. Nada foi criado — envie a imagem de novo no fluxo de origem.",
+        422,
+        { requestId },
+      );
+    }
 
     const admin = createAdminClient();
     for (const destino of destinos) {
-      const origem = `${orgId}/flows/${r.flow_id_origem}/${destino.slice(pastaNova.length)}`;
+      const origem = `${orgId}/flows/${r.flow_id_origem}/${arquivoDoCaminho(destino)}`;
       const { error: copiaErr } = await admin.storage.from(BUCKET).copy(origem, destino);
       if (copiaErr) {
         logger.error("[broadcasts.duplicar] cópia de imagem falhou", {

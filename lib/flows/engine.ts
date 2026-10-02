@@ -88,6 +88,7 @@ function buildNodeCtx(
   return {
     admin,
     organizationId: execution.organization_id,
+    flowId: execution.flow_id,
     ruleId: execution.id,
     ruleName: `flow:${execution.flow_id}`,
     event: buildEventRow(execution),

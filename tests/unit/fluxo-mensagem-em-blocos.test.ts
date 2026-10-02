@@ -222,6 +222,21 @@ describe("vários blocos num nó só", () => {
     expect(h.copias).toHaveLength(0);
     expect(execucao()).toMatchObject({ status: "failed", last_error: "imagem_fora_da_organizacao" });
   });
+
+  // 0508: o prefixo da organização não basta — o caminho é DESTE fluxo, no
+  // formato exato (`lib/flows/caminho-de-midia.ts`), antes do client admin copiar.
+  it.each([
+    ["de OUTRO fluxo da mesma organização", `${ORG}/flows/f9/foto.png`],
+    ["com ../ saindo da pasta do fluxo", `${ORG}/flows/f1/../../org-b/conv/x.png`],
+    ["com segmento extra", `${ORG}/flows/f1/sub/foto.png`],
+    ["com traversal codificado", `${ORG}/flows/f1/%2e%2e%2ffoto.png`],
+  ])("imagem %s não sai (nem é copiada)", async (_d, caminho) => {
+    montar([mensagem("m1", [{ id: "img", tipo: "imagem", media_storage_path: caminho }])], [{ de: "t", para: "m1" }]);
+    await iniciar();
+    expect(h.envios).toHaveLength(0);
+    expect(h.copias).toHaveLength(0);
+    expect(execucao()).toMatchObject({ status: "failed", last_error: "imagem_fora_do_fluxo" });
+  });
 });
 
 describe("atraso DENTRO do nó — durável, pelo relógio do motor", () => {

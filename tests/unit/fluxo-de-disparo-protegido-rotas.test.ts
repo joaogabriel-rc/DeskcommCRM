@@ -219,6 +219,24 @@ describe("duplicar (POST /broadcasts/[id]/duplicar)", () => {
     expect(h.audit).not.toHaveBeenCalled();
   });
 
+  // 0508: o caminho da imagem é entrada (config do nó) — só passa no formato
+  // exato da pasta do fluxo; fora dele nada é lido nem copiado e a cópia é desfeita.
+  it.each([
+    ["../ para fora da pasta", `${ORG}/flows/f2/../../org-b/conv/a.jpg`],
+    ["pasta de outro fluxo", `${ORG}/flows/f7/a.jpg`],
+    ["outra organização", `org-b/flows/f2/a.jpg`],
+    ["segmento extra", `${ORG}/flows/f2/sub/a.jpg`],
+    ["traversal codificado", `${ORG}/flows/f2/%2e%2e%2fa.jpg`],
+  ])("imagem com caminho fora do contrato (%s): 422, nenhuma cópia, disparo novo desfeito", async (_d, caminho) => {
+    cenario("completed");
+    registrarDuplicacao([`${ORG}/flows/f2/ok.jpg`, caminho]);
+    const r = await duplicar(req("/api/v1/broadcasts/d1/duplicar", "POST", {}), params("d1"));
+    expect(r.status).toBe(422);
+    expect(h.copy).not.toHaveBeenCalled();
+    expect(h.banco.tabelas.broadcasts!.map((b) => b.id)).toEqual(["d1"]);
+    expect(h.audit).not.toHaveBeenCalled();
+  });
+
   it("disparo de outra organização (P0002): 404", async () => {
     trocarRpc("fn_broadcast_duplicar", { code: "P0002", message: "broadcast_not_found_in_organization" });
     expect((await duplicar(req("/api/v1/broadcasts/x/duplicar", "POST", {}), params("x"))).status).toBe(404);
