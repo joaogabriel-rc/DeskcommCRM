@@ -325,6 +325,7 @@ export const AUDIT_ACTIONS = [
   "broadcast.created",
   "broadcast.updated",
   "broadcast.deleted",
+  "broadcast.duplicated",
   "broadcast.scheduled",
   "broadcast.worker_run",
   "ai.skill_imported",

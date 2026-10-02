@@ -23,6 +23,7 @@ import type { MessageNodeConfig } from "@/lib/flows/types";
 import { updateFlowSchema } from "@/lib/schemas/flows";
 import { createClient } from "@/lib/supabase/server";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { usoDoFluxo } from "@/lib/flows/uso";
 
 export const dynamic = "force-dynamic";
 
@@ -84,7 +85,10 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
   if (nodesErr) return fail("internal_error", nodesErr.message, 500, { requestId });
   if (edgesErr) return fail("internal_error", edgesErr.message, 500, { requestId });
 
-  return ok({ ...flow, nodes: nodes ?? [], edges: edges ?? [] }, { requestId });
+  // O estado de edição (migration 0507): a tela decide somente leitura com a
+  // MESMA regra que o banco aplica ao gravar.
+  const uso = flow.broadcast_id ? await usoDoFluxo(supabase, id).catch(() => null) : null;
+  return ok({ ...flow, nodes: nodes ?? [], edges: edges ?? [], uso }, { requestId });
 }
 
 export async function PATCH(req: NextRequest, ctx: RouteCtx): Promise<Response> {

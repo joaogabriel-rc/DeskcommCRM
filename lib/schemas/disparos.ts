@@ -9,6 +9,7 @@
  * A segmentação é a mesma estrutura que `lib/disparos/segmento.ts` traduz para
  * uma query, e a mesma que a prévia de público conta antes de disparar.
  */
+import type { UsoDoFluxo } from "@/lib/flows/uso";
 import { z } from "zod";
 
 // A chave de campo do contato: a MESMA regra do registro de campos (e do CHECK
@@ -220,7 +221,7 @@ export interface DisparoRow {
   /** Derivado pela rota: `fluxo` quando existe `flows.broadcast_id = id`. */
   modo?: ModoDeDisparo;
   /** O fluxo próprio do disparo (modo fluxo). */
-  fluxo?: { id: string; status: string } | null;
+  fluxo?: { id: string; status: string; uso?: UsoDoFluxo | null } | null;
 }
 
 /**

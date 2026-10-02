@@ -15,6 +15,7 @@ import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { requireSupportWrite } from "@/lib/impersonate/support";
 import { FLOW_TRIGGERS } from "@/lib/flows/triggers";
+import { FRASE_DO_ESTADO, recusaDeProtecao, usoDoFluxo } from "@/lib/flows/uso";
 import { replaceFlowGraphSchema } from "@/lib/schemas/flows";
 import { createClient } from "@/lib/supabase/server";
 import { traduzir } from "@/lib/i18n/dicionario";
@@ -97,10 +98,26 @@ export async function PUT(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     return fail("invalid_request", t("Escolha um gatilho válido para este flow."), 422, { requestId });
   }
 
-  // Editar o grafo de um flow ATIVO em voo é perigoso (execuções em andamento
-  // apontam pra nós que podem sumir) — mesma trava que o design de automação
-  // ramificada já previu para o caso irmão.
-  if (flow.status === "active") {
+  // Fluxo de DISPARO: quem decide é a regra do banco (migration 0507) — usado
+  // uma vez, a definição vira histórico; com contato dentro, está em uso. O
+  // gatilho do banco recusa de qualquer jeito; perguntar antes dá a resposta
+  // certa sem tocar no grafo.
+  if (flow.broadcast_id) {
+    // Sem resposta do banco, não grava: na dúvida, o histórico fica intacto.
+    let uso: Awaited<ReturnType<typeof usoDoFluxo>>;
+    try {
+      uso = await usoDoFluxo(supabase, id);
+    } catch (e) {
+      return fail("internal_error", e instanceof Error ? e.message : "uso_do_fluxo", 500, { requestId });
+    }
+    if (!uso || uso.estado !== "editavel") {
+      const estado = uso?.estado === "em_uso" ? "em_uso" : "historico";
+      return fail("flow_protegido", t(FRASE_DO_ESTADO[estado]), 409, { requestId, details: { estado } });
+    }
+  } else if (flow.status === "active") {
+    // Editar o grafo de um flow ATIVO em voo é perigoso (execuções em andamento
+    // apontam pra nós que podem sumir) — mesma trava que o design de automação
+    // ramificada já previu para o caso irmão.
     return fail(
       "flow_must_pause_to_edit_graph",
       t("Pause o flow antes de editar o canvas. Ative de novo depois de salvar."),
@@ -123,6 +140,15 @@ export async function PUT(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     // resposta que receberia aqui, nunca um 500 que parece falha do sistema.
     if (rpcErr.code === "P0002") {
       return fail("not_found", t("Flow não encontrado."), 404, { requestId });
+    }
+    // A corrida entre a pergunta acima e a escrita (o disparo foi agendado no
+    // meio) é fechada pelo gatilho do banco — e a resposta é a mesma 409.
+    const recusa = recusaDeProtecao(rpcErr);
+    if (recusa?.tipo === "flow_protegido" && recusa.estado !== "editavel") {
+      return fail("flow_protegido", t(FRASE_DO_ESTADO[recusa.estado]), 409, {
+        requestId,
+        details: { estado: recusa.estado },
+      });
     }
     return fail("internal_error", rpcErr.message, 500, { requestId });
   }

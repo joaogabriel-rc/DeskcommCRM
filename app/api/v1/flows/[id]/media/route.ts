@@ -24,6 +24,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { requireSupportWrite } from "@/lib/impersonate/support";
 import { logger } from "@/lib/logger";
+import { FRASE_DO_ESTADO, usoDoFluxo } from "@/lib/flows/uso";
 import { extFromMime } from "@/lib/messaging/media/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -64,6 +65,13 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
 
   if (!(await fluxoDaOrganizacao(orgId, flowId))) {
     return fail("not_found", t("Fluxo não encontrado."), 404, { requestId });
+  }
+  // Fluxo de disparo protegido (migration 0507): o grafo não muda, então a
+  // imagem nova não teria onde entrar — viraria arquivo órfão no Storage.
+  const uso = await usoDoFluxo(await createClient(), flowId).catch(() => null);
+  if (uso?.escopo === "disparo" && uso.estado !== "editavel") {
+    const estado = uso.estado === "em_uso" ? "em_uso" : "historico";
+    return fail("flow_protegido", t(FRASE_DO_ESTADO[estado]), 409, { requestId, details: { estado } });
   }
 
   const declarado = Number(req.headers.get("content-length") ?? 0);
