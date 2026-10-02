@@ -3227,7 +3227,10 @@ export type Database = {
           flow_id: string
           id: string
           last_error: string | null
+          listening_node_id: string | null
+          listening_until: string | null
           next_execution_at: string | null
+          node_cursor: number | null
           organization_id: string
           started_at: string
           status: string
@@ -3247,7 +3250,10 @@ export type Database = {
           flow_id: string
           id?: string
           last_error?: string | null
+          listening_node_id?: string | null
+          listening_until?: string | null
           next_execution_at?: string | null
+          node_cursor?: number | null
           organization_id: string
           started_at?: string
           status?: string
@@ -3267,7 +3273,10 @@ export type Database = {
           flow_id?: string
           id?: string
           last_error?: string | null
+          listening_node_id?: string | null
+          listening_until?: string | null
           next_execution_at?: string | null
+          node_cursor?: number | null
           organization_id?: string
           started_at?: string
           status?: string
@@ -3478,6 +3487,7 @@ export type Database = {
           failed_count: number
           finished_at: string | null
           id: string
+          in_flow_count: number
           last_error: string | null
           message: Json
           name: string
@@ -3499,6 +3509,7 @@ export type Database = {
           failed_count?: number
           finished_at?: string | null
           id?: string
+          in_flow_count?: number
           last_error?: string | null
           message?: Json
           name: string
@@ -3520,6 +3531,7 @@ export type Database = {
           failed_count?: number
           finished_at?: string | null
           id?: string
+          in_flow_count?: number
           last_error?: string | null
           message?: Json
           name?: string
@@ -8024,6 +8036,7 @@ export type Database = {
           ack: number | null
           activity_id: string | null
           body: string | null
+          broadcast_recipient_id: string | null
           channel_session_id: string
           contact_id: string
           conversation_id: string
@@ -8063,6 +8076,7 @@ export type Database = {
           ack?: number | null
           activity_id?: string | null
           body?: string | null
+          broadcast_recipient_id?: string | null
           channel_session_id: string
           contact_id: string
           conversation_id: string
@@ -8102,6 +8116,7 @@ export type Database = {
           ack?: number | null
           activity_id?: string | null
           body?: string | null
+          broadcast_recipient_id?: string | null
           channel_session_id?: string
           contact_id?: string
           conversation_id?: string
@@ -10765,6 +10780,14 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      fn_broadcast_recipient_reconcile: {
+        Args: { p_recipient: string }
+        Returns: string
+      }
+      fn_broadcast_recount: {
+        Args: { p_broadcast: string }
+        Returns: Json
+      }
       fn_claim_due_broadcasts: {
         Args: { p_lease_seconds: number; p_limit: number }
         Returns: {
@@ -11235,6 +11258,14 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      fn_broadcast_duplicar: {
+        Args: { p_broadcast: string; p_organization_id: string }
+        Returns: Json
+      }
+      fn_flow_estado_de_edicao: {
+        Args: { p_flow: string }
+        Returns: Json
       }
       fn_flow_replace_graph: {
         Args: {

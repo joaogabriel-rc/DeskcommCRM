@@ -57,6 +57,7 @@ import { canalGraphParceiroLigado } from "@/lib/channels/graph-parceiro/credenti
 import { findGraphPartnerSession } from "@/lib/channels/graph-parceiro/session";
 import { acaoApagarSchema, acaoEditarSchema, executarGestao } from "@/lib/channels/gestao-de-modelos";
 import { slotKey } from "@/lib/channels/meta/build-components";
+import { formatoEfetivo } from "@/lib/channels/template-variaveis";
 import { hashContract } from "@/lib/channels/meta/contract-hash";
 import { deriveTemplateContract, describeAddress } from "@/lib/channels/meta/template-contract";
 import { traduzir } from "@/lib/i18n/dicionario";
@@ -283,7 +284,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     let gravadas = 0;
     for (const tpl of remotas) {
-      const parameterFormat = tpl.parameterFormat === "NAMED" ? "NAMED" : "POSITIONAL";
+      const parameterFormat = formatoEfetivo(tpl.parameterFormat, tpl.components);
       const { error } = await admin.from("meta_templates").upsert(
         {
           organization_id: r.ctx.orgId,

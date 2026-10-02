@@ -33,6 +33,7 @@
  * central e passa o resultado — esta função continua pura. A borda do envio
  * (`conferirDefinicao()`) segue conferindo de novo na hora de mandar.
  */
+import { problemasDosBlocos } from "@/lib/flows/blocos";
 import { bindingState, explainBindingState, isStatusSendable } from "@/lib/channels/meta/template-binding";
 import { acoesDoNo } from "@/lib/flows/acoes";
 import { FLOW_TRIGGERS, type FlowTriggerId } from "@/lib/flows/triggers";
@@ -89,6 +90,10 @@ export function problemasParaAtivar(
           `Em ${nome}, o envio fora da janela de 24 horas exige um template aprovado: escolha o modelo.`,
         );
       }
+    } else if (config.blocks?.length) {
+      // Formato em blocos (0502): texto, imagem, atraso e botões — a régua é a
+      // mesma que a tela mostra (`lib/flows/blocos.ts`).
+      problemas.push(...problemasDosBlocos(config, nome));
     } else if (!config.body?.trim() && !(config.buttons ?? []).length) {
       // Sem corpo E sem botões não sobra nada para mandar. Só botões ainda
       // renderiza (eles saem como lista numerada), então isso não é problema.

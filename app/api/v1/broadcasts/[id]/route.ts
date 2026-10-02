@@ -26,6 +26,7 @@
  * registro de onde parou.
  */
 import { randomUUID } from "node:crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { NextRequest } from "next/server";
 
 import { ok, fail } from "@/lib/api/wrappers";
@@ -36,11 +37,13 @@ import { requireSupportWrite } from "@/lib/impersonate/support";
 import {
   criarFluxoDoDisparo,
   fluxoDoDisparo,
+  fluxoDoDisparoComUso,
   prontidaoDoFluxo,
   problemasDaMensagemGuiada,
 } from "@/lib/disparos/fluxo-do-disparo";
 import { horarioJaPassou } from "@/lib/disparos/agendamento";
 import { listarPublico, resumoDoSegmento } from "@/lib/disparos/segmento";
+import { recusaDeProtecao } from "@/lib/flows/uso";
 import type { MessageNodeConfig } from "@/lib/flows/types";
 import {
   atualizarDisparoSchema,
@@ -61,6 +64,28 @@ export const dynamic = "force-dynamic";
  * operador faria de qualquer jeito.
  */
 const TETO_DE_PUBLICO = 5000;
+
+const MSG_DISPARO_COM_HISTORICO =
+  "Este disparo já processou destinatários e não pode ser apagado — o registro de quem recebeu o quê faz parte do histórico. Cancele-o.";
+
+/** Destinatário fora de `pending`, ou qualquer execução no fluxo do disparo. */
+async function disparoTemHistorico(db: SupabaseClient, orgId: string, id: string): Promise<boolean> {
+  const { count: processados } = await db
+    .from("broadcast_recipients")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", orgId)
+    .eq("broadcast_id", id)
+    .neq("status", "pending");
+  if ((processados ?? 0) > 0) return true;
+  const fluxo = await fluxoDoDisparo(db, orgId, id).catch(() => null);
+  if (!fluxo) return false;
+  const { count: execucoes } = await db
+    .from("flow_executions")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", orgId)
+    .eq("flow_id", fluxo.id);
+  return (execucoes ?? 0) > 0;
+}
 
 export async function GET(
   _req: NextRequest,
@@ -93,7 +118,7 @@ export async function GET(
     .order("updated_at", { ascending: false })
     .limit(20);
 
-  const fluxo = await fluxoDoDisparo(supabase, authz.org.orgId, id).catch(() => null);
+  const fluxo = await fluxoDoDisparoComUso(supabase, authz.org.orgId, id);
   return ok(
     { ...(data as unknown as DisparoRow), modo: fluxo ? "fluxo" : "guiado", fluxo, problemas: falhas ?? [] },
     { requestId },
@@ -195,7 +220,7 @@ export async function PATCH(
       requestId,
       metadata: { campos: Object.keys(patch), ...(parsed.data.modo ? { modo: parsed.data.modo } : {}) },
     });
-    const fluxoAtual = await fluxoDoDisparo(supabase, authz.org.orgId, id).catch(() => null);
+    const fluxoAtual = await fluxoDoDisparoComUso(supabase, authz.org.orgId, id);
     return ok(
       { ...(data as unknown as DisparoRow), modo: fluxoAtual ? "fluxo" : "guiado", fluxo: fluxoAtual },
       { requestId },
@@ -439,15 +464,13 @@ export async function DELETE(
     .maybeSingle();
   if (!atual) return fail("not_found", "Disparo não encontrado.", 404, { requestId });
 
-  // Um disparo que JÁ ENVIOU é histórico: apagá-lo levaria junto o registro de
-  // quem recebeu o quê, que é a única prova de que a mensagem saiu. Cancele.
-  if ((atual as { sent_count: number }).sent_count > 0) {
-    return fail(
-      "conflict",
-      "Este disparo já enviou mensagens e não pode ser apagado — o registro de quem recebeu faz parte do histórico. Cancele-o.",
-      409,
-      { requestId },
-    );
+  // Um disparo que JÁ TOCOU alguém é histórico: apagá-lo levaria junto o
+  // registro de quem recebeu o quê — e, em modo fluxo, as execuções e o
+  // caminho de cada contato. `sent_count > 0` não bastava: um disparo cujas
+  // mensagens FALHARAM tem `sent_count = 0` e tudo isso. A régua é a mesma do
+  // gatilho do banco (migration 0507): destinatário processado ou execução.
+  if (await disparoTemHistorico(supabase, authz.org.orgId, id)) {
+    return fail("conflict", MSG_DISPARO_COM_HISTORICO, 409, { requestId });
   }
 
   const { error } = await supabase
@@ -455,7 +478,14 @@ export async function DELETE(
     .delete()
     .eq("id", id)
     .eq("organization_id", authz.org.orgId);
-  if (error) return fail("internal_error", error.message, 500, { requestId });
+  if (error) {
+    // Corrida com o worker (o primeiro destinatário foi processado no meio):
+    // o gatilho do banco recusa, e a resposta é a mesma.
+    if (recusaDeProtecao(error)?.tipo === "disparo_com_historico") {
+      return fail("conflict", MSG_DISPARO_COM_HISTORICO, 409, { requestId });
+    }
+    return fail("internal_error", error.message, 500, { requestId });
+  }
 
   void audit({
     action: "broadcast.deleted",

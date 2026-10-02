@@ -77,7 +77,7 @@
       "lane": "execucao",
       "col": 5,
       "type": "service",
-      "label": "Nó MESSAGE: janela de 24h (texto ou template) e botões como saídas"
+      "label": "Nó MESSAGE em BLOCOS (texto, imagem, atraso): botão de fluxo é saída, botão de URL abre o site, Próximo passo é a saída padrão"
     },
     {
       "id": "fronteira",
@@ -105,7 +105,7 @@
       "lane": "execucao",
       "col": 6,
       "type": "service",
-      "label": "flow-reply.v1: casa a resposta com o botão e retoma pelo caminho escolhido"
+      "label": "flow-reply.v1: casa a resposta com o botão; clique TARDIO desvia a mesma execução (listening_node_id)"
     },
     {
       "id": "cron",
@@ -127,6 +127,34 @@
       "col": 7,
       "type": "external",
       "label": "N8N / servidor do cliente (webhook com anti-SSRF e HMAC)"
+    },
+    {
+      "id": "blocos",
+      "lane": "execucao",
+      "col": 6,
+      "type": "service",
+      "label": "lib/flows/blocos.ts: a estrutura única de blocos, lida também do formato antigo (body + buttons)"
+    },
+    {
+      "id": "atraso_curto",
+      "lane": "execucao",
+      "col": 4,
+      "type": "service",
+      "label": "agent-worker: tique FLOW_DELAY_TICK_MS (2s) retoma atrasos curtos com o mesmo claim do cron"
+    },
+    {
+      "id": "midia_do_fluxo",
+      "lane": "borda",
+      "col": 2,
+      "type": "service",
+      "label": "POST /flows/[id]/media: imagem do bloco em whatsapp-media/<org>/flows/<fluxo>/"
+    },
+    {
+      "id": "reconciliacao_disparo",
+      "lane": "banco",
+      "col": 6,
+      "type": "service",
+      "label": "fn_broadcast_recipient_reconcile: destinatário do disparo reflete o desfecho das mensagens e da execução (0501)"
     }
   ],
   "edges": [
@@ -148,6 +176,14 @@
     { "id": "e16", "from": "cron", "to": "engine", "label": "retoma no vencimento" },
     { "id": "e17", "from": "acoes", "to": "emissores", "label": "tag/etapa geram evento novo (e podem iniciar outro flow)" },
     { "id": "e18", "from": "engine", "to": "n8n", "label": "nó WEBHOOK" },
-    { "id": "e19", "from": "n8n", "to": "emissores", "label": "N8N escreve pela API e o evento volta como gatilho" }
+    { "id": "e19", "from": "n8n", "to": "emissores", "label": "N8N escreve pela API e o evento volta como gatilho" },
+    { "id": "e20", "from": "message_node", "to": "blocos", "label": "lê os blocos e as saídas de botão" },
+    { "id": "e21", "from": "canvas", "to": "blocos", "label": "o editor de blocos grava config.blocks" },
+    { "id": "e22", "from": "engine", "to": "atraso_curto", "label": "atraso no nó grava next_execution_at + node_cursor" },
+    { "id": "e23", "from": "atraso_curto", "to": "engine", "label": "reentra o MESMO nó a partir do cursor" },
+    { "id": "e24", "from": "canvas", "to": "midia_do_fluxo", "label": "sobe a imagem do bloco" },
+    { "id": "e25", "from": "midia_do_fluxo", "to": "message_node", "label": "no envio, a imagem é copiada para a pasta da conversa" },
+    { "id": "e26", "from": "envio", "to": "reconciliacao_disparo", "label": "messages.broadcast_recipient_id (gatilho SQL)" },
+    { "id": "e27", "from": "exec_tbl", "to": "reconciliacao_disparo", "label": "mudança de status da execução (gatilho SQL)" }
   ]
 }

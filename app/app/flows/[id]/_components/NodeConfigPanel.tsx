@@ -6,11 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { useT } from "@/lib/i18n/IdiomaProvider";
 import { CaretDown, CaretUp, Trash, Plus, X } from "@/lib/ui/icons";
 import { InserirVariavel } from "@/components/catalogo/InserirVariavel";
 import { SeletorDeCampo, SeletorDeTags } from "@/components/catalogo/SeletorDeCampo";
+import { useCamposDoContato } from "@/hooks/catalogo/useCatalogo";
 import type { RuleCondition } from "@/lib/automation/conditions";
 import { ACOES_DO_FLOW, acaoPorTipo, acoesDoNo, type CampoDeAcao } from "@/lib/flows/acoes";
 import { FLOW_TRIGGERS, type FlowTriggerId } from "@/lib/flows/triggers";
@@ -34,9 +34,12 @@ import {
 import { NODE_VISUALS } from "./nodeVisuals";
 import { PreviaDoModelo } from "./PreviaDoModelo";
 import { SeletorDeModelo } from "./SeletorDeModelo";
+import { EditorDeBlocos } from "./EditorDeBlocos";
 import { TriggerPicker } from "./TriggerPicker";
 
 interface Props {
+  /** O fluxo do nó — a imagem de um bloco sobe para a pasta dele. */
+  flowId: string;
   node: RFNode;
   onChange: (patch: Partial<RFNode["data"]>) => void;
   onDelete: () => void;
@@ -53,7 +56,7 @@ function Campo({ label, ajuda, children }: { label: string; ajuda?: string; chil
   );
 }
 
-export function NodeConfigPanel({ node, onChange, onDelete, onDuplicate }: Props) {
+export function NodeConfigPanel({ flowId, node, onChange, onDelete, onDuplicate }: Props) {
   const t = useT();
   const type = node.type as FlowNodeType;
   const visual = NODE_VISUALS[type];
@@ -84,7 +87,9 @@ export function NodeConfigPanel({ node, onChange, onDelete, onDuplicate }: Props
       </Campo>
 
       {type === "TRIGGER" && <CamposDoGatilho config={config as TriggerNodeConfig} patch={patchConfig} />}
-      {type === "MESSAGE" && <CamposDeMensagem config={config as MessageNodeConfig} patch={patchConfig} />}
+      {type === "MESSAGE" && (
+        <CamposDeMensagem flowId={flowId} config={config as MessageNodeConfig} patch={patchConfig} />
+      )}
       {type === "CONDITION" && <CamposDeCondicao config={config as ConditionNodeConfig} patch={patchConfig} />}
       {type === "ACTION" && <CamposDeAcao config={config as ActionNodeConfig} patch={patchConfig} />}
       {type === "DELAY" && <CamposDeEspera config={config as DelayNodeConfig} patch={patchConfig} />}
@@ -191,14 +196,15 @@ function CamposDoGatilho({
  * é exatamente o que a Meta reprova.
  */
 function CamposDeMensagem({
+  flowId,
   config,
   patch,
 }: {
+  flowId: string;
   config: MessageNodeConfig;
   patch: (p: Record<string, unknown>) => void;
 }) {
   const t = useT();
-  const botoes = config.buttons ?? [];
   const foraDaJanela = config.window_mode === "outside_24h";
 
   return (
@@ -228,66 +234,7 @@ function CamposDeMensagem({
       {foraDaJanela ? (
         <ModeloDaMensagem config={config} patch={patch} />
       ) : (
-        <Campo
-          label={t("Texto da mensagem")}
-          ajuda={t(
-            "O botão ao lado insere a variável certa — inclusive os campos do usuário que você cadastrou.",
-          )}
-        >
-          <div className="flex flex-col gap-2">
-            <Textarea
-              rows={5}
-              value={config.body ?? ""}
-              onChange={(e) => patch({ body: e.target.value })}
-            />
-            <div className="flex justify-end">
-              {/* Acrescenta no FIM do texto, e não na posição do cursor: o
-                  `Textarea` aqui não é controlado por ref, e ler a seleção
-                  pediria um componente novo. Acrescentar no fim é previsível e
-                  o operador reposiciona com um recortar-e-colar. */}
-              <InserirVariavel onInserir={(v) => patch({ body: `${config.body ?? ""}${v}` })} />
-            </div>
-          </div>
-        </Campo>
-      )}
-
-      {!foraDaJanela && (
-      <Campo
-        label={t("Botões")}
-        ajuda={t("Cada botão vira uma saída do passo: ligue cada um ao caminho que ele deve seguir.")}
-      >
-        <div className="flex flex-col gap-2">
-          {botoes.map((b, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <Input
-                value={b.label}
-                onChange={(e) => {
-                  const next = [...botoes];
-                  next[i] = { label: e.target.value };
-                  patch({ buttons: next });
-                }}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => patch({ buttons: botoes.filter((_, j) => j !== i) })}
-                aria-label={t("Remover botão")}
-              >
-                <X size={14} aria-hidden />
-              </Button>
-            </div>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => patch({ buttons: [...botoes, { label: `${t("Opção")} ${botoes.length + 1}` }] })}
-          >
-            <Plus size={14} aria-hidden className="mr-1" /> {t("Adicionar botão")}
-          </Button>
-        </div>
-      </Campo>
+        <EditorDeBlocos flowId={flowId} config={config} patch={patch} />
       )}
     </>
   );
@@ -315,6 +262,7 @@ export function ModeloDaMensagem({
   const t = useT();
   const [seletorAberto, setSeletorAberto] = useState(false);
   const catalogo = useCatalogoDeModelos({ todos: true });
+  const { data: camposDoUsuario = [] } = useCamposDoContato();
   const modelo = acharModeloNoCatalogo(catalogo.data, config);
   const valores = config.template_values ?? {};
   const temRetrato = !!config.template_name?.trim() && !!config.template_language?.trim();
@@ -328,7 +276,7 @@ export function ModeloDaMensagem({
       onOpenChange={setSeletorAberto}
       conexaoAtual={config.channel_session_id}
       modeloAtual={config.template_id}
-      onEscolher={(m, conexaoId) => patch(configDoModeloEscolhido(m, conexaoId, valores))}
+      onEscolher={(m, conexaoId) => patch(configDoModeloEscolhido(m, conexaoId, valores, camposDoUsuario))}
     />
   );
 
@@ -418,7 +366,9 @@ export function ModeloDaMensagem({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => patch(configDoModeloEscolhido(modelo, config.channel_session_id ?? null, valores))}
+              onClick={() =>
+                patch(configDoModeloEscolhido(modelo, config.channel_session_id ?? null, valores, camposDoUsuario))
+              }
             >
               {t("Vincular a este modelo")}
             </Button>

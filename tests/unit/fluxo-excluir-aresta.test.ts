@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { conectarSaida, removerArestas, saidaLivre } from "@/lib/flows/arestas";
+import {
+  conectarSaida,
+  podarArestasDeBotaoOrfas,
+  removerArestas,
+  saidaLivre,
+} from "@/lib/flows/arestas";
 import { nextNode } from "@/lib/flows/graph";
 import type { FlowEdgeRow, FlowNodeRow } from "@/lib/flows/types";
 import { fromReactFlow, toReactFlow, type RFEdge, type RFNode } from "@/lib/flows/ui-mappers";
@@ -18,7 +23,9 @@ import { fromReactFlow, toReactFlow, type RFEdge, type RFNode } from "@/lib/flow
  * Os defeitos que este arquivo prende:
  *   - ligar numa saída ocupada SOMAVA uma segunda aresta (o motor seguia a
  *     primeira, então "apaguei A→B e liguei A→C" podia seguir por A→B);
- *   - o "+" ligava o passo novo mesmo com a saída padrão já ocupada.
+ *   - o "+" ligava o passo novo mesmo com a saída padrão já ocupada;
+ *   - a aresta de um botão removido ou trocado para link ficava no estado,
+ *     invisível, era gravada e voltava quando o botão voltava a ser de fluxo.
  */
 
 const A = "aaaaaaaa-0000-4000-8000-000000000001";
@@ -33,8 +40,22 @@ function aresta(id: string, source: string, target: string, sourceHandle: string
   return { id, source, target, sourceHandle };
 }
 
-/** Mensagem com dois botões: `button:0` ("Sim") e `button:1` ("Não"). */
-const mensagemComBotoes = () => no(A, "MESSAGE", { body: "Posso confirmar?", buttons: [{ label: "Sim" }, { label: "Não" }] });
+/** Mensagem em blocos com um botão de fluxo (`b1`) e um de link (`b2`). */
+const mensagemComBotoes = (acaoB1: "fluxo" | "url" = "fluxo") =>
+  no(A, "MESSAGE", {
+    window_mode: "inside_24h",
+    blocks: [
+      {
+        id: "t1",
+        tipo: "texto",
+        texto: "Posso confirmar?",
+        botoes: [
+          { id: "b1", rotulo: "Sim", acao: acaoB1, ...(acaoB1 === "url" ? { url: "https://ex.com" } : {}) },
+          { id: "b2", rotulo: "Site", acao: "url", url: "https://ex.com" },
+        ],
+      },
+    ],
+  });
 
 /** O banco do canvas: o save SUBSTITUI o grafo inteiro, como `fn_flow_replace_graph`. */
 function bancoDoFluxo(nodes: FlowNodeRow[] = [], edges: FlowEdgeRow[] = []) {
@@ -49,6 +70,9 @@ function bancoDoFluxo(nodes: FlowNodeRow[] = [], edges: FlowEdgeRow[] = []) {
     },
     get arestas() {
       return gravado.edges;
+    },
+    get nos() {
+      return gravado.nodes;
     },
   };
 }
@@ -102,33 +126,57 @@ describe("apagar uma aresta do construtor de fluxo", () => {
   });
 
   it("trocar o destino de uma saída não mexe nas OUTRAS saídas do mesmo nó", () => {
-    const antes = [aresta("e-sim", A, B, "button:0"), aresta("e-nao", A, B, "button:1")];
-    const depois = conectarSaida(antes, aresta("e-nao2", A, C, "button:1"));
-    expect(depois.map((e) => e.id)).toEqual(["e-sim", "e-nao2"]);
+    const antes = [aresta("e-sim", A, B, "button:b1"), aresta("e-prox", A, B, null)];
+    const depois = conectarSaida(antes, aresta("e-prox2", A, C, null));
+    expect(depois.map((e) => e.id)).toEqual(["e-sim", "e-prox2"]);
     const cond = conectarSaida([aresta("e-t", A, B, "true"), aresta("e-f", A, C, "false")], aresta("e-t2", A, C, "true"));
     expect(cond.map((e) => `${e.id}:${e.sourceHandle}`)).toEqual(["e-f:false", "e-t2:true"]);
   });
 
   it("10 · apagar a aresta de um botão não apaga o botão nem o nó", () => {
+    const msg = mensagemComBotoes();
     const banco = bancoDoFluxo();
-    const arestas = removerArestas([aresta("e-sim", A, B, "button:0"), aresta("e-nao", A, C, "button:1")], ["e-sim"]);
-    banco.salvar([mensagemComBotoes(), no(B, "END"), no(C, "END")], arestas);
+    const arestas = removerArestas([aresta("e-sim", A, B, "button:b1"), aresta("e-prox", A, C)], ["e-sim"]);
+    banco.salvar([msg, no(B, "END"), no(C, "END")], arestas);
     const reaberto = banco.reabrir();
     const noA = reaberto.nodes.find((n) => n.id === A)!;
-    expect(noA.data.config.buttons as unknown[]).toHaveLength(2);
-    expect(reaberto.edges.map((e) => e.id)).toEqual(["e-nao"]);
-    expect(saidaLivre(reaberto.edges, A, "button:0")).toBe(true);
+    expect((noA.data.config.blocks as Array<{ botoes: unknown[] }>)[0]!.botoes).toHaveLength(2);
+    expect(reaberto.edges.map((e) => e.id)).toEqual(["e-prox"]);
+    expect(saidaLivre(reaberto.edges, A, "button:b1")).toBe(true);
   });
 
-  it("11 · apagar a saída única não apaga o nó, e o motor para ali", () => {
-    const arestas = removerArestas([aresta("e-ab", A, B)], ["e-ab"]);
-    const g = fromReactFlow([no(A, "MESSAGE", { body: "Oi" }), no(B, "END")], arestas);
+  it("11 · apagar o Próximo passo não apaga o nó, e o motor volta a esperar o clique", () => {
+    const msg = mensagemComBotoes();
+    const arestas = removerArestas([aresta("e-sim", A, B, "button:b1"), aresta("e-prox", A, C)], ["e-prox"]);
+    const g = fromReactFlow([msg, no(B, "END"), no(C, "END")], arestas);
     const grafo = {
       nodesById: new Map(g.nodes.map((n) => [n.id, n])),
       edgesBySource: new Map([[A, g.edges]]),
     };
     expect(grafo.nodesById.has(A)).toBe(true);
+    // sem saída padrão o motor NÃO cai na aresta do botão
     expect(nextNode(grafo, A, null)).toBeNull();
+    expect(nextNode(grafo, A, "button:b1")?.id).toBe(B);
+  });
+
+  it("8 · botão de URL não é saída: a aresta dele é podada do estado, não só escondida", () => {
+    const arestas = [aresta("e-sim", A, B, "button:b1"), aresta("e-prox", A, C)];
+    expect(podarArestasDeBotaoOrfas([mensagemComBotoes("fluxo")], arestas)).toBe(arestas);
+
+    // o operador troca "Sim" para "Abrir site": a ligação sai do estado
+    const podadas = podarArestasDeBotaoOrfas([mensagemComBotoes("url")], arestas);
+    expect(podadas.map((e) => e.id)).toEqual(["e-prox"]);
+
+    // e NÃO volta quando o botão volta a ser de fluxo — a saída fica livre
+    const deVolta = podarArestasDeBotaoOrfas([mensagemComBotoes("fluxo")], podadas);
+    expect(deVolta.map((e) => e.id)).toEqual(["e-prox"]);
+    expect(saidaLivre(deVolta, A, "button:b1")).toBe(true);
+  });
+
+  it("botão removido também solta a aresta dele", () => {
+    const semBotao = no(A, "MESSAGE", { blocks: [{ id: "t1", tipo: "texto", texto: "Oi" }] });
+    const podadas = podarArestasDeBotaoOrfas([semBotao], [aresta("e-sim", A, B, "button:b1"), aresta("e-prox", A, C)]);
+    expect(podadas.map((e) => e.id)).toEqual(["e-prox"]);
   });
 
   it("12-13 · fluxos antigos abrem com todas as arestas: botão por índice, modelo, condição e padrão", () => {
@@ -150,8 +198,14 @@ describe("apagar uma aresta do construtor de fluxo", () => {
     const banco = bancoDoFluxo();
     banco.salvar([no(T, "TRIGGER"), legado, modelo, cond], arestas);
     const reaberto = banco.reabrir();
+    expect(podarArestasDeBotaoOrfas(reaberto.nodes, reaberto.edges)).toBe(reaberto.edges);
     expect(reaberto.edges.map((e) => [e.id, e.source, e.target, e.sourceHandle ?? null])).toEqual(
       arestas.map((e) => [e.id, e.source, e.target, e.sourceHandle ?? null]),
     );
+  });
+
+  it("a poda só toca `button:*` de nó de mensagem — saída de condição e padrão nunca", () => {
+    const arestas = [aresta("e1", C, A, "true"), aresta("e2", T, A, null), aresta("e3", C, B, "button:9")];
+    expect(podarArestasDeBotaoOrfas([no(C, "CONDITION"), no(T, "TRIGGER")], arestas)).toBe(arestas);
   });
 });

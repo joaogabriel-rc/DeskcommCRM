@@ -111,6 +111,7 @@ export function DisparosList({ initialData }: { initialData: DisparoRow[] }) {
                   {d.sent_count}/{d.total_recipients} {t("enviados")}
                   {d.failed_count > 0 && ` · ${d.failed_count} ${t("falhas")}`}
                   {d.skipped_count > 0 && ` · ${d.skipped_count} ${t("pulados")}`}
+                  {(d.in_flow_count ?? 0) > 0 && ` · ${d.in_flow_count} ${t("em andamento")}`}
                 </span>
                 <Button
                   size="icon"

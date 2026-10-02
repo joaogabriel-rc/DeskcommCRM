@@ -274,7 +274,10 @@ test("A+B+C · novo fluxo no construtor, gatilho, modelo aprovado e saída de bo
 
   // ── C. Cada resposta rápida é uma saída do card ──
   const cardDaMensagem = page.locator(".react-flow__node-MESSAGE").first();
-  await expect(cardDaMensagem.locator(".react-flow__handle.source")).toHaveCount(2);
+  // Duas saídas de botão + o "Próximo passo", que todo nó de mensagem tem
+  // desde a 0502 (botão ≠ próximo passo).
+  await expect(cardDaMensagem.locator(".react-flow__handle.source")).toHaveCount(3);
+  await expect(cardDaMensagem.getByTestId(/^proximo-passo-/)).toBeVisible();
   await expect(cardDaMensagem.locator('[data-handleid="button:0"]')).toHaveCount(1);
   await expect(cardDaMensagem.locator('[data-handleid="button:1"]')).toHaveCount(1);
   await expect(cardDaMensagem.getByText("Olá {{1}}", { exact: false }).first()).toBeVisible();

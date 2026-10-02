@@ -53,6 +53,7 @@ import { renderFlowTemplate } from "@/lib/flows/template";
 import { motivoDoErro } from "@/lib/flows/erro";
 import { logger } from "@/lib/logger";
 import { mensagemDeDisparoSchema, type MensagemDeDisparo } from "@/lib/schemas/disparos";
+import { desfechoDoEnvio, erroDoDesfecho } from "@/lib/messaging/desfecho-do-envio";
 
 /** Quantos disparos diferentes um tick atende. */
 const DISPAROS_POR_TICK = 5;
@@ -127,6 +128,30 @@ interface FluxoDoDisparo {
   id: string;
 }
 
+type DesfechoDoDestinatario = "in_flow" | "sent" | "failed" | "skipped";
+
+const DESFECHOS = new Set<string>(["in_flow", "sent", "failed", "skipped"]);
+
+/**
+ * O status do destinatário depois do pedido, derivado pelo BANCO das mensagens
+ * ligadas a ele e da execução (`fn_broadcast_recipient_reconcile`, 0501). Se a
+ * reconciliação falhar, o destinatário fica `in_flow` — nunca `sent` presumido.
+ */
+async function desfechoReconciliado(
+  admin: SupabaseClient,
+  destinatario: LinhaDeDestinatario,
+): Promise<DesfechoDoDestinatario> {
+  const { data, error } = await admin.rpc("fn_broadcast_recipient_reconcile", { p_recipient: destinatario.id });
+  if (error) {
+    logger.error("[broadcast-worker] reconciliação do destinatário falhou", {
+      recipient_id: destinatario.id,
+      error: error.message,
+    });
+    return "in_flow";
+  }
+  return typeof data === "string" && DESFECHOS.has(data) ? (data as DesfechoDoDestinatario) : "in_flow";
+}
+
 /**
  * Modo fluxo: o destinatário ENTRA no fluxo do disparo, carregando a permissão
  * que o agendamento materializou para ele.
@@ -137,17 +162,22 @@ interface FluxoDoDisparo {
  * inserção (`fn_flow_execution_do_disparo_coerente`) e amarra a execução ao
  * disparo DONO do fluxo.
  *
- * Desfecho: `sent` = entrou no fluxo e o primeiro trecho rodou sem falha;
- * `failed` = a execução falhou (o motivo real vai para o destinatário);
- * `skipped` = nem entrou.
+ * Desfecho (migration 0501): ENTRAR no fluxo não é enviar. O destinatário
+ * passa a `in_flow` antes da execução começar, e o status final sai das
+ * MENSAGENS que o fluxo pediu (ligadas a ele por `broadcast_recipient_id`) e
+ * da execução — `fn_broadcast_recipient_reconcile`, chamada pelos gatilhos e
+ * aqui no fim. `sent` = ao menos uma mensagem aceita pelo canal e nenhuma
+ * recusada; `failed` = recusa do canal ou execução falha; `in_flow` = ainda sem
+ * desfecho (uma espera antes do primeiro envio, ou mensagem em fila);
+ * `skipped` = nem entrou, ou o fluxo terminou sem mandar nada.
  */
 async function iniciarNoFluxo(
   admin: SupabaseClient,
   destinatario: LinhaDeDestinatario,
   fluxo: FluxoDoDisparo,
-): Promise<"sent" | "failed" | "skipped"> {
+): Promise<DesfechoDoDestinatario> {
   const agora = new Date().toISOString();
-  const marcar = (status: "sent" | "failed" | "skipped", error: string | null) =>
+  const marcar = (status: DesfechoDoDestinatario, error: string | null) =>
     admin
       .from("broadcast_recipients")
       .update({ status, error, sent_at: status === "sent" ? agora : null, claimed_until: null, updated_at: agora })
@@ -179,6 +209,10 @@ async function iniciarNoFluxo(
 
   try {
     await assertServiceBoundarySupabase(admin, boundary);
+    // `in_flow` ANTES de a execução começar: as mensagens que ela pedir já
+    // encontram o destinatário fora de `pending`, e o gatilho da 0501 as leva
+    // ao status dele.
+    await marcar("in_flow", null);
     const r = await startFlowExecution(admin, {
       organizationId: destinatario.organization_id,
       flowId: fluxo.id,
@@ -188,26 +222,13 @@ async function iniciarNoFluxo(
     if (!r.ok) {
       // `already_active`: o índice único por destinatário (ou por contato em
       // voo) barrou uma segunda execução — um lease que venceu no meio do lote.
-      // A pessoa JÁ está no fluxo; não é falha, e não recebe de novo.
-      if (r.reason === "already_active") {
-        await marcar("sent", null);
-        return "sent";
-      }
+      // A pessoa JÁ está no fluxo; não recebe de novo, e o desfecho é o da
+      // execução que já existe.
+      if (r.reason === "already_active") return await desfechoReconciliado(admin, destinatario);
       await marcar("failed", r.reason ?? "flow_start_failed");
       return "failed";
     }
-    const { data: exec } = await admin
-      .from("flow_executions")
-      .select("status, last_error")
-      .eq("id", r.executionId!)
-      .eq("organization_id", destinatario.organization_id)
-      .maybeSingle();
-    if ((exec as { status?: string } | null)?.status === "failed") {
-      await marcar("failed", ((exec as { last_error?: string | null }).last_error ?? "flow_failed").slice(0, 300));
-      return "failed";
-    }
-    await marcar("sent", null);
-    return "sent";
+    return await desfechoReconciliado(admin, destinatario);
   } catch (err) {
     await marcar("failed", motivoDoErro(err).slice(0, 300));
     return "failed";
@@ -220,7 +241,7 @@ async function enviarUm(
   destinatario: LinhaDeDestinatario,
   mensagem: MensagemDeDisparo,
   requestId: string,
-): Promise<"sent" | "failed" | "skipped"> {
+): Promise<DesfechoDoDestinatario> {
   const agora = new Date().toISOString();
 
   // A GUARDA DE ÚLTIMA HORA. O público foi materializado quando o operador
@@ -265,7 +286,15 @@ async function enviarUm(
     const envio = entradaDeDisparo(mensagem, boundary.conversation_id, { contact: contato });
     if (!envio.ok) throw new Error(envio.error);
 
-    await sendMessageHandler(
+    // `in_flow` antes do pedido: o gatilho da 0501 leva o desfecho da mensagem
+    // (inclusive a recusa que chega depois, pelo webhook) a este destinatário.
+    await admin
+      .from("broadcast_recipients")
+      .update({ status: "in_flow", error: null, claimed_until: null, updated_at: agora })
+      .eq("id", destinatario.id)
+      .eq("organization_id", destinatario.organization_id);
+
+    const enviada = await sendMessageHandler(
       admin,
       {
         organization_id: destinatario.organization_id,
@@ -276,15 +305,23 @@ async function enviarUm(
         },
         actor: { type: "webhook_source", id: disparo.id },
         requestId,
+        broadcastRecipientId: destinatario.id,
       },
       envio.input as Parameters<typeof sendMessageHandler>[2],
     );
 
-    await admin
-      .from("broadcast_recipients")
-      .update({ status: "sent", sent_at: agora, error: null, claimed_until: null, updated_at: agora })
-      .eq("id", destinatario.id);
-    return "sent";
+    // O handler devolve a linha `failed` em vez de lançar quando o canal
+    // recusa. Antes, o destinatário virava `sent` mesmo assim.
+    const desfecho = desfechoDoEnvio(enviada);
+    if (desfecho.kind === "recusado") {
+      await admin
+        .from("broadcast_recipients")
+        .update({ status: "failed", error: erroDoDesfecho(desfecho), claimed_until: null, updated_at: agora })
+        .eq("id", destinatario.id)
+        .eq("organization_id", destinatario.organization_id);
+      return "failed";
+    }
+    return await desfechoReconciliado(admin, destinatario);
   } catch (err) {
     await admin
       .from("broadcast_recipients")
@@ -394,44 +431,29 @@ export async function runBroadcastWorkerTick(admin: SupabaseClient): Promise<Res
     resumo.enviados += enviados;
     resumo.falhas += falhas;
 
-    // Os contadores saem de uma CONTAGEM, não de um incremento acumulado no
-    // processo: incrementar `sent_count + enviados` a partir do valor lido no
-    // claim perderia o que outro tick gravou no meio. A contagem é a verdade.
-    const { count: pendentes } = await admin
-      .from("broadcast_recipients")
-      .select("id", { count: "exact", head: true })
-      .eq("broadcast_id", bruto.id)
-      .eq("status", "pending");
-    const { count: enviadosTotal } = await admin
-      .from("broadcast_recipients")
-      .select("id", { count: "exact", head: true })
-      .eq("broadcast_id", bruto.id)
-      .eq("status", "sent");
-    const { count: falhasTotal } = await admin
-      .from("broadcast_recipients")
-      .select("id", { count: "exact", head: true })
-      .eq("broadcast_id", bruto.id)
-      .eq("status", "failed");
-    const { count: puladosTotal } = await admin
-      .from("broadcast_recipients")
-      .select("id", { count: "exact", head: true })
-      .eq("broadcast_id", bruto.id)
-      .eq("status", "skipped");
-
-    const acabou = (pendentes ?? 0) === 0;
-    if (acabou) resumo.concluidos += 1;
+    // Os contadores saem de uma CONTAGEM feita pelo banco, não de um incremento
+    // acumulado no processo — e a mesma função é chamada pelos gatilhos da
+    // 0501 quando uma mensagem muda de status depois. Concluir exige que não
+    // reste ninguém `pending` NEM `in_flow`: "entrou no fluxo" não é "enviado".
+    const { data: contagem, error: contagemErr } = await admin.rpc("fn_broadcast_recount", {
+      p_broadcast: bruto.id,
+    });
+    if (contagemErr) {
+      logger.error("[broadcast-worker] recontagem do disparo falhou", {
+        broadcast_id: bruto.id,
+        error: contagemErr.message,
+      });
+    }
+    const c = (contagem ?? {}) as { pending?: number; in_flow?: number; status?: string };
+    const semPendentes = !contagemErr && (c.pending ?? 1) === 0;
+    if (semPendentes && c.status === "completed") resumo.concluidos += 1;
 
     await admin
       .from("broadcasts")
       .update({
-        status: acabou ? "completed" : "running",
-        sent_count: enviadosTotal ?? 0,
-        failed_count: falhasTotal ?? 0,
-        skipped_count: puladosTotal ?? 0,
-        finished_at: acabou ? new Date().toISOString() : null,
-        // Reagenda para o próximo minuto. O lease some junto: manter o claim
-        // depois de devolver o disparo travaria a fila por 50 segundos à toa.
-        next_run_at: acabou ? null : new Date(Date.now() + 60_000).toISOString(),
+        // Sem pendentes, o worker não tem mais lote a mandar: quem conclui o
+        // disparo é a recontagem, quando o último `in_flow` tiver desfecho.
+        next_run_at: semPendentes ? null : new Date(Date.now() + 60_000).toISOString(),
         claimed_until: null,
         updated_at: new Date().toISOString(),
       })

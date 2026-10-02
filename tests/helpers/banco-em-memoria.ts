@@ -8,7 +8,7 @@
  * verdade, então "a organização A não vê o modelo da B" é medido, não suposto.
  *
  * Cobre o subconjunto do builder que as rotas de fluxos e o catálogo usam:
- * select/insert/update/upsert (com `onConflict`)/delete, eq/is/in/or (com lt/gt)/order/limit/range,
+ * select/insert/update/upsert (com `onConflict`)/delete, eq/neq/is/in/or (com lt/gt)/order/limit/range,
  * maybeSingle/single/then, e `rpc` por função registrada. `or` entende a forma
  * que `escopoDaConexao` monta: `col.eq.v,and(col.is.null,col.eq.v)`.
  */
@@ -270,12 +270,35 @@ export function criarBanco(
         filtros.push((l) => iguais(valorDe(l, col), v));
         return q;
       },
+      // Como no Postgres: `neq` não casa NULL (null <> x é desconhecido).
+      neq: (col: string, v: unknown) => {
+        filtros.push((l) => valorDe(l, col) !== null && valorDe(l, col) !== undefined && !iguais(valorDe(l, col), v));
+        return q;
+      },
       is: (col: string, _v: null) => {
         filtros.push((l) => valorDe(l, col) === null || valorDe(l, col) === undefined);
         return q;
       },
       in: (col: string, vs: unknown[]) => {
         filtros.push((l) => vs.some((v) => iguais(l[col], v)));
+        return q;
+      },
+      // Comparações: número com número, texto com texto (ISO-8601 ordena
+      // como o instante). Nulo nunca passa, como no Postgres.
+      gt: (col: string, v: unknown) => {
+        filtros.push((l) => valorDe(l, col) != null && (valorDe(l, col) as never) > (v as never));
+        return q;
+      },
+      gte: (col: string, v: unknown) => {
+        filtros.push((l) => valorDe(l, col) != null && (valorDe(l, col) as never) >= (v as never));
+        return q;
+      },
+      lt: (col: string, v: unknown) => {
+        filtros.push((l) => valorDe(l, col) != null && (valorDe(l, col) as never) < (v as never));
+        return q;
+      },
+      lte: (col: string, v: unknown) => {
+        filtros.push((l) => valorDe(l, col) != null && (valorDe(l, col) as never) <= (v as never));
         return q;
       },
       or: (expr: string) => {

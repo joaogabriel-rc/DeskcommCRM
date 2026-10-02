@@ -25,6 +25,7 @@ import {
   type NoParaValidar,
 } from "@/lib/flows/validacao";
 import type { MessageNodeConfig } from "@/lib/flows/types";
+import { usoDoFluxo, type UsoDoFluxo } from "@/lib/flows/uso";
 
 export const GATILHO_DO_DISPARO = "broadcast" as const;
 
@@ -47,6 +48,24 @@ export async function fluxoDoDisparo(
     .maybeSingle();
   if (error) throw new Error(`fluxo_do_disparo: ${error.message}`);
   return (data as FluxoDoDisparo | null) ?? null;
+}
+
+/**
+ * O fluxo do disparo com o estado de edição (migration 0507) — o que a tela do
+ * disparo recebe, pela rota E pelo SSR da página. As duas portas usam esta
+ * função: quando a página montava o seu próprio `fluxo` sem `uso`, o aviso de
+ * fluxo protegido sumia ao abrir o disparo direto, porque o `initialData`
+ * fresco (staleTime global) nunca refaz o GET.
+ */
+export async function fluxoDoDisparoComUso(
+  db: SupabaseClient,
+  organizationId: string,
+  broadcastId: string,
+): Promise<(FluxoDoDisparo & { uso: UsoDoFluxo | null }) | null> {
+  const fluxo = await fluxoDoDisparo(db, organizationId, broadcastId).catch(() => null);
+  if (!fluxo) return null;
+  const uso = await usoDoFluxo(db, fluxo.id).catch(() => null);
+  return { ...fluxo, uso };
 }
 
 /**

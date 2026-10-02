@@ -71,17 +71,31 @@ describe("deriveTemplateContract contra payload real da Meta", () => {
     expect(describeAddress(c.slots[0]!.address)).toBe("card 1 › cabeçalho");
   });
 
-  it("parameterFormat vem da Meta, não é inferido da chave", () => {
+  it("parameterFormat vem da Meta — e POSITIONAL com marcador NOMEADO é corrigido para NAMED", () => {
     expect(contractOf("hello_world").parameterFormat).toBe("POSITIONAL");
-    // Chave nomeada + parameter_format ausente continua POSITIONAL: inferir do
-    // formato da chave classificaria errado e mudaria o payload de envio.
-    const inventado = deriveTemplateContract({
+    // NAMED declarado com chave numérica continua NAMED: a declaração da Meta
+    // vale e a chave não a desmente.
+    const nomeadoNumerico = deriveTemplateContract({
       name: "x",
       language: "pt_BR",
-      components: [{ type: "BODY", text: "Oi {{customer_name}}" }],
+      parameter_format: "NAMED",
+      components: [{ type: "BODY", text: "Oi {{1}}" }],
     });
-    expect(inventado.parameterFormat).toBe("POSITIONAL");
-    expect(inventado.slots[0]!.key).toBe("customer_name");
+    expect(nomeadoNumerico.parameterFormat).toBe("NAMED");
+    // POSITIONAL (declarado ou ausente) com `{{customer_name}}` é leitura
+    // impossível: posicional não tem parâmetro com nome. Era a presunção que a
+    // criação gravava (var1_teste), e o envio saía sem `parameter_name` — a
+    // Meta respondia 132000. O efetivo é NAMED.
+    for (const declarado of [undefined, "POSITIONAL"]) {
+      const c = deriveTemplateContract({
+        name: "var1_teste",
+        language: "pt_BR",
+        ...(declarado ? { parameter_format: declarado } : {}),
+        components: [{ type: "BODY", text: "{{var1}} {{var2}}" }],
+      });
+      expect(c.parameterFormat).toBe("NAMED");
+      expect(c.slots.map((s) => s.key)).toEqual(["var1", "var2"]);
+    }
   });
 
   it("botão URL estático não vira slot; só o com placeholder vira", () => {

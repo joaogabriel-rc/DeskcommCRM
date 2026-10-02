@@ -224,7 +224,11 @@ describe("o conteúdo da definição, e o campo que causava as recusas", () => {
     // O `exemplos` chega a `montarComponents` — a forma da chamada mudou quando
     // cabeçalho e botões entraram, o objeto virou multilinha.
     expect(fonte).toMatch(/montarComponents\(\{[\s\S]{0,200}?exemplos,/);
-    expect(fonte).toMatch(/nVariaveis > 0 &&/);
+    // Um campo de amostra por variável do texto — posicional OU nomeada, pela
+    // régua única — e o envio travado enquanto falta uma.
+    expect(fonte).toMatch(/variaveisParaExemplo\(corpo, categorias\)/);
+    expect(fonte).toMatch(/doCorpo\.map\(\(v\) =>/);
+    expect(fonte).toMatch(/disabled=\{[^}]*faltaExemplo\}/);
   });
 
   it("a rota devolve o CONTEÚDO, não só o estado", () => {
@@ -329,7 +333,9 @@ describe("o formulário completo — idioma, cabeçalho e botões", () => {
   it("a tela respeita os limites de tamanho da plataforma", () => {
     // Passar do limite é recusa, e a recusa não diz que o problema era o tamanho.
     const fonte = fonteDoFormulario();
-    expect(fonte).toMatch(/slice\(0, LIMITE_CORPO\)/);
+    // O corpo corta no limite pelo editor de variáveis (`limite={LIMITE_CORPO}`),
+    // o rodapé continua no input.
+    expect(fonte).toMatch(/limite=\{LIMITE_CORPO\}/);
     expect(fonte).toMatch(/slice\(0, LIMITE_RODAPE\)/);
     expect(LIMITE_CORPO).toBe(1024);
     expect(LIMITE_RODAPE).toBe(60);
@@ -341,7 +347,7 @@ describe("o formulário completo — idioma, cabeçalho e botões", () => {
     // a forma mudou quando o "colar URL" virou "subir arquivo", mas a regra é a
     // mesma: a plataforma aceita um formato por definição.
     const fonte = fonteDoFormulario();
-    expect(fonte).toMatch(/if \(e\.target\.value\) setMidiaUrl\(""\)/);
+    expect(fonte).toMatch(/if \(v\) setMidiaUrl\(""\)/);
     expect(fonte).toMatch(/setMidiaUrl\(j\.data\.url\);\s*\n\s*setCabecalho\(""\);/);
     expect(fonte).toMatch(/cabecalho && "pointer-events-none opacity-50"/);
   });

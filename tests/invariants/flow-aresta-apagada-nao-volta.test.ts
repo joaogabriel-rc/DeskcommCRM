@@ -14,7 +14,7 @@ import { beforeAll, describe, expect, it } from "vitest";
  *   salva A→B · salva sem A→B · confere que sumiu e que os nós ficaram ·
  *   salva A→C · salva de novo igual · só A→C existe.
  *
- * O lado da tela (estado, saída ocupada) é provado em
+ * O lado da tela (estado, poda, saída ocupada) é provado em
  * `tests/unit/fluxo-excluir-aresta.test.ts` e no e2e
  * `tests/e2e/fluxo-apagar-aresta.spec.ts`.
  */
@@ -53,7 +53,10 @@ const NOS = JSON.stringify([
     id: A,
     type: "MESSAGE",
     label: "Mensagem",
-    config: { window_mode: "inside_24h", body: "Posso confirmar?", buttons: [{ label: "Sim" }] },
+    config: {
+      window_mode: "inside_24h",
+      blocks: [{ id: "t1", tipo: "texto", texto: "Posso confirmar?", botoes: [{ id: "b1", rotulo: "Sim", acao: "fluxo" }] }],
+    },
     position_x: 300,
     position_y: 0,
   },
@@ -105,12 +108,12 @@ beforeAll(() => {
 
 describe("apagar uma aresta persiste no banco", () => {
   it("A→B gravada (controle positivo: sem ele, uma função que não grava nada passaria)", () => {
-    salvar([ar(E_TA, T, A), ar(E_AB, A, B), ar(E_BOTAO, A, C, "button:0")]);
-    expect(arestasGravadas()).toEqual([`${A}>${B}:padrao`, `${A}>${C}:button:0`, `${T}>${A}:padrao`].sort());
+    salvar([ar(E_TA, T, A), ar(E_AB, A, B), ar(E_BOTAO, A, C, "button:b1")]);
+    expect(arestasGravadas()).toEqual([`${A}>${B}:padrao`, `${A}>${C}:button:b1`, `${T}>${A}:padrao`].sort());
   });
 
   it("salvar SEM A→B a tira do banco — e os quatro nós continuam", () => {
-    salvar([ar(E_TA, T, A), ar(E_BOTAO, A, C, "button:0")]);
+    salvar([ar(E_TA, T, A), ar(E_BOTAO, A, C, "button:b1")]);
     expect(arestasGravadas()).not.toContain(`${A}>${B}:padrao`);
     expect(nosGravados()).toBe(4);
   });
@@ -119,7 +122,7 @@ describe("apagar uma aresta persiste no banco", () => {
     salvar([ar(E_TA, T, A)]);
     expect(arestasGravadas()).toEqual([`${T}>${A}:padrao`]);
     const botoes = ultima(
-      sql(`select jsonb_array_length(config->'buttons') from public.flow_nodes where id = '${A}'::uuid;`),
+      sql(`select jsonb_array_length(config->'blocks'->0->'botoes') from public.flow_nodes where id = '${A}'::uuid;`),
     );
     expect(botoes).toBe("1");
   });

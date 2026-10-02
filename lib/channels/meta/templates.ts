@@ -9,8 +9,12 @@
  *
  * ─── O que esta integração suporta, e o que ela recusa ANTES da Meta ─────────
  *
- * Cabeçalho de TEXTO, corpo com `{{n}}`, rodapé e até três botões (resposta
- * rápida, link, telefone) — o que o formulário monta (`montarComponents`).
+ * Cabeçalho de TEXTO, corpo com variáveis — `{{1}}` (POSITIONAL) ou
+ * `{{primeiro_nome}}` (NAMED), nunca os dois —, rodapé e até três botões
+ * (resposta rápida, link, telefone) — o que o formulário monta
+ * (`montarComponents`). O formato é DERIVADO dos tokens
+ * (`lib/channels/template-variaveis.ts`) e vai declarado à Meta; depois de
+ * criar, a definição é RELIDA nela e o formato gravado é o que ela devolveu.
  * Cabeçalho de MÍDIA fica de fora: a Meta só aceita, na criação, o arquivo
  * enviado pelo upload dela (`header_handle` de uma sessão de upload), e esta
  * integração ainda não faz esse upload. Mandar um link comum ali é recusa certa
@@ -28,6 +32,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "../archived";
 import { CHANNEL_PROVIDER_META } from "../capabilities";
 import { contarVariaveis, LIMITE_BOTOES, LIMITE_CORPO, LIMITE_RODAPE } from "../template-conteudo";
+import {
+  formatoDosComponentes,
+  formatoEfetivo,
+  lerVariaveis,
+  textosComVariavel,
+} from "../template-variaveis";
 import type { ChannelTemplate, ChannelTemplateDraft, ChannelTemplateOps } from "../types";
 
 import { resolveMetaCreds } from "./credentials";
@@ -58,6 +68,15 @@ function numeracaoContinua(t: string): boolean {
   return indices(t).every((n, i) => n === i + 1);
 }
 
+/** O exemplo nomeado `{param_name, example}` desta variável existe e não é vazio. */
+function exemploNomeado(lista: unknown, nome: string): boolean {
+  if (!Array.isArray(lista)) return false;
+  return lista.some((e) => {
+    const o = obj(e);
+    return !!o && o.param_name === nome && !!texto(o.example).trim();
+  });
+}
+
 /**
  * Confere o rascunho com as regras que a Meta aplica e que se sabe de antemão.
  * `null` = pode seguir. A frase é o que o operador lê.
@@ -68,12 +87,25 @@ export function validarRascunhoOficial(draft: ChannelTemplateDraft): string | nu
   }
   if (!IDIOMA_VALIDO.test(draft.language ?? "")) return "Idioma inválido (ex.: pt_BR).";
   if (!CATEGORIAS.has(draft.category)) return "Categoria inválida.";
-  if (draft.parameterFormat && draft.parameterFormat !== "POSITIONAL") {
-    return "Esta integração cria modelos só com valores numerados ({{1}}, {{2}}…).";
-  }
   if (!Array.isArray(draft.components) || draft.components.length === 0) {
     return "O modelo precisa de conteúdo.";
   }
+
+  // A régua única das variáveis. Antes, `{{var1}}` era texto para esta função
+  // (só `{{n}}` contava): passava sem exemplo e sem formato, e a Meta o
+  // tratava como NAMED enquanto o CRM gravava POSITIONAL.
+  const invalida = textosComVariavel(draft.components).flatMap((t) => lerVariaveis(t).invalidas)[0];
+  if (invalida) {
+    return `${invalida} não é uma variável válida. Use {{1}}, {{2}}… ou um nome com letras minúsculas, números e _ (ex.: {{primeiro_nome}}).`;
+  }
+  const formato = formatoDosComponentes(draft.components);
+  if (formato === "MISTO") {
+    return "Use só valores numerados ({{1}}, {{2}}…) ou só nomes ({{primeiro_nome}}) — a Meta não aceita os dois no mesmo modelo.";
+  }
+  if (draft.parameterFormat && formato && draft.parameterFormat !== formato) {
+    return "O formato declarado não bate com as variáveis do texto.";
+  }
+  const nomeado = formato === "NAMED";
 
   const vistos = new Set<string>();
   let temCorpo = false;
@@ -93,12 +125,17 @@ export function validarRascunhoOficial(draft: ChannelTemplateDraft): string | nu
       const t = texto(c.text).trim();
       if (!t) return "O cabeçalho de texto está vazio.";
       if (t.length > LIMITE_CABECALHO) return `O cabeçalho passa de ${LIMITE_CABECALHO} caracteres.`;
-      const n = contarVariaveis(t);
-      if (n > 1) return "O cabeçalho aceita no máximo um valor ({{1}}).";
-      if (!numeracaoContinua(t)) return "O cabeçalho só pode usar {{1}}.";
-      const exemplos = obj(c.example)?.header_text;
-      if (n > 0 && (!Array.isArray(exemplos) || exemplos.length !== n || !exemplos.every((e) => texto(e).trim()))) {
-        return "Falta o exemplo do valor do cabeçalho.";
+      const varsCab = lerVariaveis(t).variaveis;
+      if (varsCab.length > 1) return "O cabeçalho aceita no máximo uma variável.";
+      if (!nomeado && !numeracaoContinua(t)) return "O cabeçalho só pode usar {{1}}.";
+      if (varsCab.length > 0) {
+        const ok = nomeado
+          ? exemploNomeado(obj(c.example)?.header_text_named_params, varsCab[0]!.nome)
+          : (() => {
+              const exemplos = obj(c.example)?.header_text;
+              return Array.isArray(exemplos) && exemplos.length === 1 && !!texto(exemplos[0]).trim();
+            })();
+        if (!ok) return "Falta o exemplo da variável do cabeçalho.";
       }
     }
 
@@ -107,12 +144,21 @@ export function validarRascunhoOficial(draft: ChannelTemplateDraft): string | nu
       const t = texto(c.text);
       if (!t.trim()) return "O texto da mensagem está vazio.";
       if (t.length > LIMITE_CORPO) return `O texto passa de ${LIMITE_CORPO} caracteres.`;
-      if (!numeracaoContinua(t)) return "Os valores precisam ser numerados sem pular: {{1}}, {{2}}, {{3}}…";
-      const n = contarVariaveis(t);
-      if (n > 0) {
-        const amostras = (obj(c.example)?.body_text as unknown[] | undefined)?.[0];
-        if (!Array.isArray(amostras) || amostras.length !== n || !amostras.every((e) => texto(e).trim())) {
-          return "A revisão exige um exemplo de cada valor do texto.";
+      if (nomeado) {
+        const nomeadas = obj(c.example)?.body_text_named_params;
+        for (const v of lerVariaveis(t).variaveis) {
+          if (!exemploNomeado(nomeadas, v.nome)) {
+            return `A revisão exige um exemplo de cada variável — falta o de {{${v.nome}}}.`;
+          }
+        }
+      } else {
+        if (!numeracaoContinua(t)) return "Os valores precisam ser numerados sem pular: {{1}}, {{2}}, {{3}}…";
+        const n = contarVariaveis(t);
+        if (n > 0) {
+          const amostras = (obj(c.example)?.body_text as unknown[] | undefined)?.[0];
+          if (!Array.isArray(amostras) || amostras.length !== n || !amostras.every((e) => texto(e).trim())) {
+            return "A revisão exige um exemplo de cada valor do texto.";
+          }
         }
       }
     }
@@ -121,7 +167,7 @@ export function validarRascunhoOficial(draft: ChannelTemplateDraft): string | nu
       const t = texto(c.text);
       if (!t.trim()) return "O rodapé está vazio.";
       if (t.length > LIMITE_RODAPE) return `O rodapé passa de ${LIMITE_RODAPE} caracteres.`;
-      if (contarVariaveis(t) > 0) return "O rodapé não aceita valores ({{n}}).";
+      if (lerVariaveis(t).variaveis.length > 0) return "O rodapé não aceita variáveis.";
     }
 
     if (tipo === "BUTTONS") {
@@ -211,6 +257,35 @@ async function contaDoNumero(organizationId: string, phoneNumberId: string) {
   return { wabaId: linha.meta_waba_id, admin };
 }
 
+/**
+ * A definição como a Meta a gravou, pelo id devolvido na criação. Tolerante:
+ * falha de rede ou resposta estranha devolvem `null` e a criação segue com o
+ * que ela mesma sabe — a sincronização corrige depois.
+ */
+async function relerDefinicao(
+  creds: { token: string; graphVersion: string },
+  id: string,
+): Promise<{ status?: string; category?: string; parameterFormat?: string; components?: unknown[] } | null> {
+  try {
+    const campos = "name,language,status,category,parameter_format,components";
+    const r = await fetch(
+      `https://graph.facebook.com/${creds.graphVersion}/${encodeURIComponent(id)}?fields=${campos}`,
+      { headers: { Authorization: `Bearer ${creds.token}` }, signal: AbortSignal.timeout(TEMPO_LIMITE_MS) },
+    );
+    if (!r.ok) return null;
+    const j = (await r.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!j) return null;
+    return {
+      ...(typeof j.status === "string" && j.status ? { status: j.status } : {}),
+      ...(typeof j.category === "string" && j.category ? { category: j.category } : {}),
+      ...(typeof j.parameter_format === "string" ? { parameterFormat: j.parameter_format } : {}),
+      ...(Array.isArray(j.components) ? { components: j.components } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function indisponivel(acao: string): never {
   throw new Error(`meta_template_indisponivel: ${acao} ainda não é feito pelo CRM no canal oficial.`);
 }
@@ -233,6 +308,11 @@ export const metaCloudTemplateOps: ChannelTemplateOps = {
       throw new Error("meta_not_configured: sem credencial para esta conexão (nem na sessão, nem no ambiente).");
     }
 
+    // O formato vai DECLARADO: sai dos tokens, não de presunção. Omitido, a
+    // Meta classifica sozinha e o espelho ficava com o palpite do CRM.
+    const formato = formatoDosComponentes(draft.components);
+    const parameterFormat = formato === "NAMED" || formato === "POSITIONAL" ? formato : undefined;
+
     const url = `https://graph.facebook.com/${creds.graphVersion}/${encodeURIComponent(wabaId)}/message_templates`;
     let res: Response;
     try {
@@ -244,7 +324,7 @@ export const metaCloudTemplateOps: ChannelTemplateOps = {
           language: draft.language,
           category: draft.category,
           components: draft.components,
-          ...(draft.parameterFormat ? { parameter_format: draft.parameterFormat } : {}),
+          ...(parameterFormat ? { parameter_format: parameterFormat } : {}),
         }),
         signal: AbortSignal.timeout(TEMPO_LIMITE_MS),
       });
@@ -261,18 +341,22 @@ export const metaCloudTemplateOps: ChannelTemplateOps = {
     const id = typeof json?.id === "string" || typeof json?.id === "number" ? String(json.id) : "";
     if (!id) throw new Error("meta_template_rejeitado: a Meta aceitou o pedido mas não devolveu o id do modelo.");
 
+    // RELÊ na Meta o que ela gravou: é dela o `parameter_format` que o envio
+    // vai precisar. Se a releitura falhar, o formato é o dos tokens — nunca
+    // POSITIONAL presumido (foi essa presunção que produziu o 132000).
+    const relido = await relerDefinicao(creds, id);
+    const components = relido?.components ?? draft.components;
     return {
       name: draft.name,
       language: draft.language,
       // O estado é o que a Meta disse. Sem ele, PENDING — o estado de todo modelo
       // recém-criado. Nunca APPROVED por conta própria.
-      status: typeof json?.status === "string" && json.status ? json.status : "PENDING",
-      category: typeof json?.category === "string" && json.category ? json.category : draft.category,
-      // A criação não devolve os componentes: os que foram enviados são os que a
-      // Meta revisa.
-      components: draft.components,
+      status: relido?.status ?? (typeof json?.status === "string" && json.status ? json.status : "PENDING"),
+      category:
+        relido?.category ?? (typeof json?.category === "string" && json.category ? json.category : draft.category),
+      components,
       rejectedReason: null,
-      parameterFormat: draft.parameterFormat ?? "POSITIONAL",
+      parameterFormat: formatoEfetivo(relido?.parameterFormat ?? parameterFormat ?? null, components),
       providerTemplateId: id,
     };
   },

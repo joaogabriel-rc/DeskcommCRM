@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
+import { usoDoFluxo } from "@/lib/flows/uso";
 import { voltarDoFluxo } from "@/lib/flows/voltar";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { createClient } from "@/lib/supabase/server";
@@ -29,7 +30,12 @@ export default async function FlowDetailPage({ params }: PageProps) {
   ]);
   if (!flow) redirect("/app/flows");
 
-  const initialData = { ...flow, nodes: nodes ?? [], edges: edges ?? [] } as unknown as FlowDetailRow;
+  // Fluxo de disparo: o estado de edição vem JUNTO (migration 0507), senão a
+  // tela abriria um histórico como editável até a primeira busca.
+  const uso = (flow as { broadcast_id?: string | null }).broadcast_id
+    ? await usoDoFluxo(supabase, id).catch(() => null)
+    : null;
+  const initialData = { ...flow, nodes: nodes ?? [], edges: edges ?? [], uso } as unknown as FlowDetailRow;
   // O fluxo de um disparo volta ao DISPARO dono; o de Automações, à lista.
   const volta = voltarDoFluxo(flow as { broadcast_id?: string | null });
 

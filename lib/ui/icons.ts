@@ -152,4 +152,13 @@ export {
   ArrowsOutSimple,
   // /admin/modulos: módulo opcional com tabela própria (ADR-0002)
   Stack,
+  // editor de variáveis dos modelos e blocos do nó de mensagem
+  TextT,
+  BracketsCurly,
+  DotsSixVertical,
+  ArrowUp,
+  ArrowDown,
+  LinkSimple,
+  Timer,
+  Hash,
 } from "@phosphor-icons/react/dist/ssr";

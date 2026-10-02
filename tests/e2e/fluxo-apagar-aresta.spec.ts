@@ -3,14 +3,17 @@
  *
  * O caso que o operador reportou, dirigido como ele faria:
  *
- *   1. liga a saída de uma mensagem sem botões (A) a um passo (B), arrastando
- *      — a saída já levava a M, e ligar numa saída ocupada troca o destino;
+ *   1. liga o "Próximo passo" de uma mensagem a um passo (B), arrastando;
  *   2. clica na linha (ela fica selecionada) e apaga pela lixeira que aparece;
  *   3. a linha some, os dois passos ficam no canvas;
  *   4. liga a mesma saída em OUTRO passo (C) e salva;
  *   5. recarrega: só A→C existe — na tela e no banco;
- *   6. a saída de um BOTÃO (mensagem M) também se apaga (pela tecla Delete)
- *      sem apagar o botão nem o nó.
+ *   6. a saída de um BOTÃO também se apaga (pela tecla Delete) sem apagar o
+ *      botão nem o nó, e o botão de link (URL) não tem saída nenhuma;
+ *   7. um botão CRIADO PELA TELA (id = UUID, saída `button:<uuid>` de 43
+ *      caracteres) tem a saída ligada e o "Salvar" é aceito — o schema antigo
+ *      (`max(40)`) respondia "Dados inválidos" aqui, e os casos acima não
+ *      pegavam porque semeiam ids curtos (`b1`).
  *
  * O fluxo é semeado aqui, como RASCUNHO (fluxo ativo é só leitura no canvas),
  * por service role com sufixo único — e removido no fim. Nada envia WhatsApp.
@@ -39,7 +42,6 @@ const T = crypto.randomUUID();
 const A = crypto.randomUUID();
 const B = crypto.randomUUID();
 const C = crypto.randomUUID();
-const M = crypto.randomUUID();
 
 function foto(page: Page, nome: string) {
   fs.mkdirSync(EVIDENCIA, { recursive: true });
@@ -89,7 +91,7 @@ async function arestasNoBanco(): Promise<string[]> {
     .select("source_node_id, target_node_id, source_handle")
     .eq("flow_id", fluxoId);
   if (error) throw new Error(error.message);
-  const nome = (id: string) => ({ [T]: "T", [A]: "A", [B]: "B", [C]: "C", [M]: "M" })[id] ?? id;
+  const nome = (id: string) => ({ [T]: "T", [A]: "A", [B]: "B", [C]: "C" })[id] ?? id;
   return (data ?? [])
     .map((e) => `${nome(e.source_node_id)}>${nome(e.target_node_id)}:${e.source_handle ?? "proximo"}`)
     .sort();
@@ -115,24 +117,33 @@ test.beforeAll(async () => {
   const base = { organization_id: ORG, flow_id: fluxoId };
   const nos = await admin.from("flow_nodes").insert([
     { ...base, id: T, type: "TRIGGER", label: "Quando…", config: { trigger_type: "contact_tag_added", config: { tag: `E2E-AR-${ts}` } }, position_x: 0, position_y: 120 },
-    { ...base, id: A, type: "MESSAGE", label: "Mensagem A", config: { window_mode: "inside_24h", body: "Olá" }, position_x: 320, position_y: 80 },
     {
       ...base,
-      id: M,
+      id: A,
       type: "MESSAGE",
-      label: "Mensagem M",
-      config: { window_mode: "inside_24h", body: "Posso confirmar?", buttons: [{ label: "Sim" }, { label: "Não" }] },
+      label: "Mensagem A",
+      config: {
+        window_mode: "inside_24h",
+        blocks: [
+          {
+            id: "t1",
+            tipo: "texto",
+            texto: "Posso confirmar sua presença?",
+            botoes: [
+              { id: "b1", rotulo: "Sim", acao: "fluxo" },
+              { id: "b2", rotulo: "Ver site", acao: "url", url: "https://exemplo.test/aula" },
+            ],
+          },
+        ],
+      },
       position_x: 320,
-      position_y: 360,
+      position_y: 80,
     },
     { ...base, id: B, type: "END", label: "Fim B", config: {}, position_x: 700, position_y: 0 },
     { ...base, id: C, type: "END", label: "Fim C", config: {}, position_x: 700, position_y: 320 },
   ]);
   if (nos.error) throw new Error(`seed dos nós: ${nos.error.message}`);
-  const ar = await admin.from("flow_edges").insert([
-    { ...base, source_node_id: T, target_node_id: A },
-    { ...base, source_node_id: A, target_node_id: M },
-  ]);
+  const ar = await admin.from("flow_edges").insert({ ...base, source_node_id: T, target_node_id: A });
   if (ar.error) throw new Error(`seed da aresta: ${ar.error.message}`);
 });
 
@@ -140,7 +151,7 @@ test.afterAll(async () => {
   if (fluxoId) await admin.from("flows").delete().eq("id", fluxoId);
 });
 
-test("a linha da saída única se apaga, a saída fica livre, A→C fica e A→B não volta no reload", async ({ page }) => {
+test("a linha do Próximo passo se apaga, a saída fica livre, A→C fica e A→B não volta no reload", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page);
   await page.goto(`${APP_URL}/app/flows/${fluxoId}`);
@@ -150,19 +161,18 @@ test("a linha da saída única se apaga, a saída fica livre, A→C fica e A→B
 
   // Fluxo antigo/semeado abre com a aresta que já tinha.
   await expect(linha(page, T, A)).toHaveCount(1);
-  // Mensagem com botões tem uma saída por botão; sem botões, a saída única.
-  await expect(card(page, M).locator(".react-flow__handle.source")).toHaveCount(2);
-  await expect(card(page, A).locator(".react-flow__handle.source")).toHaveCount(1);
-  await expect(linha(page, A, M)).toHaveCount(1);
+  // Botão de URL não é saída: a mensagem tem "Sim" + "Próximo passo", e só.
+  await expect(card(page, A).locator(".react-flow__handle.source")).toHaveCount(2);
+  await expect(card(page, A).locator('[data-handleid="button:b1"]')).toHaveCount(1);
+  await expect(card(page, A).locator('[data-handleid="button:b2"]')).toHaveCount(0);
 
-  // ── 1. religa a saída única de A (que levava a M) em B: troca o destino ──
-  const proximo = card(page, A).locator(".react-flow__handle.source");
+  // ── 1. liga o Próximo passo em B ──
+  const proximo = page.getByTestId(`proximo-passo-${A}`).locator(".react-flow__handle.source");
   await ligar(page, proximo, B);
   await expect(linha(page, A, B)).toHaveCount(1);
-  await expect(linha(page, A, M)).toHaveCount(0);
   await salvar(page);
   expect(await arestasNoBanco()).toEqual(["A>B:proximo", "T>A:proximo"]);
-  await foto(page, "01-saida-religada-em-B");
+  await foto(page, "01-proximo-passo-ligado-em-B");
 
   // ── 2. seleciona a linha e apaga pela lixeira ──
   const ab = linha(page, A, B);
@@ -178,7 +188,7 @@ test("a linha da saída única se apaga, a saída fica livre, A→C fica e A→B
   await expect(linha(page, A, B)).toHaveCount(0);
   await expect(card(page, A)).toBeVisible();
   await expect(card(page, B)).toBeVisible();
-  await expect(page.locator(".react-flow__node")).toHaveCount(5);
+  await expect(page.locator(".react-flow__node")).toHaveCount(4);
   await foto(page, "03-linha-apagada-passos-ficam");
 
   // ── 4. liga a mesma saída em C e salva ──
@@ -194,7 +204,7 @@ test("a linha da saída única se apaga, a saída fica livre, A→C fica e A→B
   await expect(card(page, A)).toBeVisible({ timeout: 30_000 });
   await expect(linha(page, A, C)).toHaveCount(1);
   await expect(linha(page, A, B)).toHaveCount(0);
-  await expect(page.locator(".react-flow__node")).toHaveCount(5);
+  await expect(page.locator(".react-flow__node")).toHaveCount(4);
   await foto(page, "05-depois-do-reload-so-A-C");
   // e salvar de novo, sem mexer, não ressuscita nada
   await salvar(page);
@@ -209,29 +219,73 @@ test("a saída de um BOTÃO se apaga pela tecla Delete sem apagar o botão nem o
   await page.locator(".react-flow__controls-fitview").click();
   await page.waitForTimeout(300);
 
-  await ligar(page, card(page, M).locator('[data-handleid="button:0"]'), B);
-  await expect(linha(page, M, B)).toHaveCount(1);
+  await ligar(page, card(page, A).locator('[data-handleid="button:b1"]'), B);
+  await expect(linha(page, A, B)).toHaveCount(1);
   await salvar(page);
-  expect(await arestasNoBanco()).toEqual(["A>C:proximo", "M>B:button:0", "T>A:proximo"]);
+  expect(await arestasNoBanco()).toEqual(["A>B:button:b1", "A>C:proximo", "T>A:proximo"]);
 
-  const botao = linha(page, M, B);
+  const botao = linha(page, A, B);
   await clicarNaLinha(page, botao);
   await expect(botao).toHaveClass(/selected/);
   await page.keyboard.press("Delete");
-  await expect(linha(page, M, B)).toHaveCount(0);
+  await expect(linha(page, A, B)).toHaveCount(0);
   // o botão "Sim" continua no card, com a saída livre, e o nó está lá
-  await expect(card(page, M).locator('[data-handleid="button:0"]')).toHaveCount(1);
-  await expect(card(page, M)).toContainText("Sim");
+  await expect(card(page, A).locator('[data-handleid="button:b1"]')).toHaveCount(1);
+  await expect(card(page, A)).toContainText("Sim");
   await expect(linha(page, A, C)).toHaveCount(1);
   await foto(page, "06-saida-do-botao-apagada");
 
   await salvar(page);
   await page.reload();
   await expect(card(page, A)).toBeVisible({ timeout: 30_000 });
-  await expect(linha(page, M, B)).toHaveCount(0);
-  await expect(card(page, M)).toContainText("Sim");
+  await expect(linha(page, A, B)).toHaveCount(0);
+  await expect(card(page, A)).toContainText("Sim");
   expect(await arestasNoBanco()).toEqual(["A>C:proximo", "T>A:proximo"]);
-  const { data } = await admin.from("flow_nodes").select("config").eq("id", M).single();
-  expect((data!.config as { buttons: unknown[] }).buttons).toHaveLength(2);
+  const { data } = await admin.from("flow_nodes").select("config").eq("id", A).single();
+  expect((data!.config as { blocks: Array<{ botoes: unknown[] }> }).blocks[0]!.botoes).toHaveLength(2);
   await foto(page, "07-reload-botao-intacto-sem-aresta");
+});
+
+test("um botão criado pela tela tem a saída button:<uuid> ligada e o Salvar é aceito", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page);
+  await page.goto(`${APP_URL}/app/flows/${fluxoId}`);
+  await expect(card(page, A)).toBeVisible({ timeout: 30_000 });
+
+  // O botão nasce pelo editor de blocos, como o operador faz: o id é um UUID.
+  await card(page, A).click();
+  const editor = page.getByTestId("node-config-sheet").getByTestId("editor-de-blocos");
+  await expect(editor).toBeVisible();
+  await editor.getByTestId("adicionar-botao").click();
+  const saidaNova = card(page, A).locator('[data-handleid^="button:"]:not([data-handleid="button:b1"])');
+  await expect(saidaNova).toHaveCount(1);
+  const handle = (await saidaNova.getAttribute("data-handleid"))!;
+  expect(handle).toMatch(/^button:[0-9a-f-]{36}$/);
+  expect(handle).toHaveLength(43);
+
+  // Em 1440px o painel é uma coluna ao lado do canvas (não o cobre): reenquadra com ele aberto.
+  await page.locator(".react-flow__controls-fitview").click();
+  await page.waitForTimeout(300);
+  await ligar(page, saidaNova, B);
+  await expect(linha(page, A, B)).toHaveCount(1);
+
+  // `salvar` exige 200 e "Flow salvo." — era aqui que o 400 "Dados inválidos" aparecia.
+  await salvar(page);
+  await foto(page, "08-botao-criado-pela-tela-ligado-e-salvo");
+
+  const { data: arestas, error } = await admin
+    .from("flow_edges")
+    .select("source_node_id, target_node_id, source_handle")
+    .eq("flow_id", fluxoId)
+    .eq("source_handle", handle);
+  if (error) throw new Error(error.message);
+  expect(arestas).toEqual([{ source_node_id: A, target_node_id: B, source_handle: handle }]);
+  const { data: no } = await admin.from("flow_nodes").select("config").eq("id", A).single();
+  const botoes = (no!.config as { blocks: Array<{ botoes: Array<{ id: string }> }> }).blocks[0]!.botoes;
+  expect(botoes.map((b) => b.id)).toContain(handle.slice("button:".length));
+
+  // e a ligação sobrevive ao reabrir
+  await page.reload();
+  await expect(card(page, A)).toBeVisible({ timeout: 30_000 });
+  await expect(linha(page, A, B)).toHaveCount(1);
 });

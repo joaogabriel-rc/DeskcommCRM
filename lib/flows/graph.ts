@@ -66,9 +66,12 @@ export async function loadFlowGraph(
  */
 export function nextNode(graph: FlowGraph, nodeId: string, handle: string | null | undefined): FlowNodeRow | null {
   const edges = graph.edgesBySource.get(nodeId) ?? [];
+  // O fallback para a primeira aresta NUNCA pega a de um botão: com o Próximo
+  // passo separado do botão (0502), "seguir pela saída padrão" que caísse na
+  // aresta do botão mandaria o contato por um caminho que ele não escolheu.
   const match =
     edges.find((e) => (e.source_handle ?? null) === (handle ?? null)) ??
-    (handle == null ? edges[0] : undefined);
+    (handle == null ? edges.find((e) => !(e.source_handle ?? "").startsWith("button:")) : undefined);
   if (!match) return null;
   return graph.nodesById.get(match.target_node_id) ?? null;
 }

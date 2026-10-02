@@ -5,9 +5,14 @@
  * (`sendMessageHandler`), com `serviceForAutomation` resolvendo a conversa do
  * contato. Nenhuma segunda camada de WhatsApp.
  *
- * ═══ Botões ═══
- * Cada botão é uma SAÍDA do nó (`source_handle = 'button:<i>'`), e não
- * conteúdo decorativo: depois de enviar, a execução PARA e espera a escolha.
+ * ═══ Blocos, botões e Próximo passo (migration 0502) ═══
+ * O nó é uma sequência de blocos (texto, imagem, atraso) — `lib/flows/blocos.ts`.
+ * O botão de FLUXO é uma saída do nó (`button:<id>`; `button:<i>` no formato
+ * antigo); o de URL abre o site e não é saída. O Próximo passo é a saída padrão
+ * (sem `source_handle`) e existe com ou sem botão: o fluxo segue por ele assim
+ * que o último bloco sai, e um clique que chegue depois DESVIA a execução para
+ * o botão (`resumeWithLateButtonClick`). Sem Próximo passo ligado, a execução
+ * ESPERA o clique, como sempre esperou.
  *
  * ── LIMITAÇÃO MEDIDA, não presumida ─────────────────────────────────────────
  *
@@ -53,9 +58,23 @@ import type { ServiceBoundary } from "@/lib/atendimento/fronteira";
 import { assertServiceBoundarySupabase } from "@/lib/atendimento/origem";
 import { serviceForAutomation } from "@/lib/atendimento/origem-automacao";
 import { checarGuardasDeContato } from "@/lib/automation/guarda-do-contato";
+import { caminhoDeMidiaDoFluxo } from "@/lib/flows/caminho-de-midia";
 import { motivoDoErro } from "@/lib/flows/erro";
+import { createHash } from "node:crypto";
+
+import { espacarEnvio } from "@/lib/automation/throttle";
+import {
+  ATRASO_MAX_SEGUNDOS,
+  ATRASO_MIN_SEGUNDOS,
+  blocosDaMensagem,
+  numeroInicialDoBloco,
+  saidasDeBotao,
+  textoDoBloco,
+  type BlocoDeImagem,
+} from "@/lib/flows/blocos";
 import { renderFlowTemplate } from "@/lib/flows/template";
 import type { FlowNodeCtx, MessageNodeConfig, NodeOutcome } from "@/lib/flows/types";
+import { desfechoDoEnvio, erroDoDesfecho } from "@/lib/messaging/desfecho-do-envio";
 
 /** FlowNodeCtx é estruturalmente um ActionCtx (mesmos campos) — só o nome do arquivo muda. */
 function asActionCtx(ctx: FlowNodeCtx): ActionCtx {
@@ -178,6 +197,63 @@ async function servicoDoDisparo(
   return autorizado;
 }
 
+/** Onde mora o arquivo de um bloco de imagem, e para onde ele é copiado no envio. */
+const BUCKET = "whatsapp-media";
+
+/**
+ * A imagem do bloco vai para a PASTA DA CONVERSA antes de sair — o mesmo
+ * desenho das fotos do catálogo (`lib/agent-engine/agent/fotos-do-produto.ts`).
+ * A cópia é da conversa: a inbox a mostra, a retenção de mídia e a LGPD a
+ * apagam com a conversa, e o arquivo do FLUXO (`<org>/flows/<fluxo>/…`) não é
+ * tocado por nenhuma delas. O destino é determinístico por arquivo de origem:
+ * reenviar ou retomar depois de uma queda reaproveita a cópia.
+ */
+async function entradaDaImagem(
+  ctx: FlowNodeCtx,
+  bloco: BlocoDeImagem,
+  conversationId: string,
+): Promise<{ ok: true; input: Record<string, unknown> } | { ok: false; error: string }> {
+  const origem = bloco.media_storage_path?.trim();
+  if (!origem) return { ok: false, error: "imagem_sem_arquivo" };
+  // O arquivo é DESTA organização — nunca um caminho de outra, vindo do config.
+  if (!origem.startsWith(`${ctx.organizationId}/flows/`)) return { ok: false, error: "imagem_fora_da_organizacao" };
+  // E é DESTE fluxo, no formato exato `<org>/flows/<fluxo>/<arquivo>` — sem
+  // `..`, segmento a mais ou pasta de outro fluxo (`lib/flows/caminho-de-midia.ts`).
+  if (!caminhoDeMidiaDoFluxo(origem, ctx.organizationId, ctx.flowId)) return { ok: false, error: "imagem_fora_do_fluxo" };
+  const ext = /\.([a-z0-9]{2,5})$/i.exec(origem)?.[1]?.toLowerCase() ?? "jpg";
+  const marca = createHash("sha256").update(origem).digest("hex").slice(0, 16);
+  const destino = `${ctx.organizationId}/${conversationId}/fluxo-${marca}.${ext}`;
+  const { error } = await ctx.admin.storage.from(BUCKET).copy(origem, destino);
+  if (error && !/already exists|duplicate/i.test(error.message) && (error as { statusCode?: string }).statusCode !== "409") {
+    return { ok: false, error: `imagem_nao_copiada: ${error.message.slice(0, 120)}` };
+  }
+  const legenda = bloco.legenda ? renderFlowTemplate(bloco.legenda, ctx.context) : "";
+  return {
+    ok: true,
+    input: {
+      conversation_id: conversationId,
+      type: "image",
+      media_storage_path: destino,
+      ...(bloco.media_mime ? { media_mime: bloco.media_mime } : {}),
+      ...(legenda.trim() ? { body: legenda } : {}),
+    },
+  };
+}
+
+/**
+ * Executa o nó de mensagem.
+ *
+ * Fora da janela: UM modelo aprovado (a regra da plataforma não muda com os
+ * blocos). Dentro: os blocos em ordem, a partir de `ctx.cursor`. Cada envio é
+ * conferido (`desfechoDoEnvio`) e grava o cursor; um bloco de ATRASO devolve
+ * `wait_delay` com o cursor do bloco seguinte — o motor persiste e o relógio
+ * retoma o MESMO nó dali. Entre dois envios seguidos do nó, o espaçamento
+ * anti-banimento de sempre (`espacarEnvio`).
+ *
+ * No fim, se houve botão de fluxo, o nó pede ao motor para ESCUTAR: seguir pelo
+ * Próximo passo com os botões ainda clicáveis (ou esperar o clique, se o nó não
+ * tem Próximo passo ligado).
+ */
 export async function executeMessageNode(ctx: FlowNodeCtx, config: MessageNodeConfig): Promise<NodeOutcome> {
   const actionCtx = asActionCtx(ctx);
   const guarda = checarGuardasDeContato(actionCtx);
@@ -190,23 +266,71 @@ export async function executeMessageNode(ctx: FlowNodeCtx, config: MessageNodeCo
     const boundary = ctx.servicoAutorizado
       ? await servicoDoDisparo(ctx, ctx.servicoAutorizado, guarda.contact.id, config.channel_session_id)
       : await serviceForAutomation(actionCtx, guarda.contact.id, config.channel_session_id);
-    const envio = entradaDeEnvio(config, boundary.conversation_id, ctx.context);
-    if (!envio.ok) return { kind: "failed", error: envio.error };
 
-    await sendMessageHandler(
-      ctx.admin,
-      {
-        organization_id: ctx.organizationId,
-        serviceBoundary: boundary,
-        proactiveContext: { organizationId: ctx.organizationId, contactId: guarda.contact.id },
-        actor: { type: "webhook_source", id: ctx.ruleId },
-        requestId: ctx.requestId,
-      },
-      envio.input as Parameters<typeof sendMessageHandler>[2],
-    );
+    const enviar = async (input: Record<string, unknown>): Promise<string | null> => {
+      const enviada = await sendMessageHandler(
+        ctx.admin,
+        {
+          organization_id: ctx.organizationId,
+          serviceBoundary: boundary,
+          proactiveContext: { organizationId: ctx.organizationId, contactId: guarda.contact.id },
+          actor: { type: "webhook_source", id: ctx.ruleId },
+          requestId: ctx.requestId,
+          ...(ctx.broadcastRecipientId ? { broadcastRecipientId: ctx.broadcastRecipientId } : {}),
+        },
+        input as Parameters<typeof sendMessageHandler>[2],
+      );
+      // O handler NÃO lança quando o canal recusa: devolve a linha `failed`.
+      // Ignorar o retorno fazia a recusa virar avanço — e o disparo, sucesso.
+      const desfecho = desfechoDoEnvio(enviada);
+      return desfecho.kind === "recusado" ? erroDoDesfecho(desfecho) : null;
+    };
 
-    // Com botões, o nó é uma PERGUNTA: a execução para aqui até a resposta chegar.
-    return (config.buttons ?? []).length > 0 ? { kind: "wait_button" } : { kind: "advance" };
+    const escutar = saidasDeBotao(config).length > 0;
+
+    if (config.window_mode === "outside_24h") {
+      const envio = entradaDeEnvio(config, boundary.conversation_id, ctx.context);
+      if (!envio.ok) return { kind: "failed", error: envio.error };
+      const erro = await enviar(envio.input);
+      if (erro) return { kind: "failed", error: erro };
+      return { kind: "advance", ...(escutar ? { escutar: true } : {}) };
+    }
+
+    const blocos = blocosDaMensagem(config);
+    if (!blocos.some((b) => b.tipo !== "atraso")) return { kind: "failed", error: "missing_body" };
+
+    let enviouNesteTrecho = false;
+    let numero = numeroInicialDoBloco(blocos, ctx.cursor ?? 0);
+    for (let i = ctx.cursor ?? 0; i < blocos.length; i++) {
+      const bloco = blocos[i]!;
+      if (bloco.tipo === "atraso") {
+        const s = Math.min(Math.max(Number(bloco.segundos) || ATRASO_MIN_SEGUNDOS, ATRASO_MIN_SEGUNDOS), ATRASO_MAX_SEGUNDOS);
+        return { kind: "wait_delay", until: new Date(Date.now() + s * 1000).toISOString(), cursor: i + 1 };
+      }
+
+      let input: Record<string, unknown> | null = null;
+      if (bloco.tipo === "texto") {
+        const r = textoDoBloco(bloco, ctx.context, numero);
+        numero = r.proximoNumero;
+        if (r.texto.trim()) input = { conversation_id: boundary.conversation_id, type: "text", body: r.texto };
+      } else {
+        const r = await entradaDaImagem(ctx, bloco, boundary.conversation_id);
+        if (!r.ok) return { kind: "failed", error: r.error };
+        input = r.input;
+      }
+
+      if (input) {
+        // Blocos seguidos sem atraso ainda são envios AUTOMATIZADOS do mesmo
+        // número: o espaçamento anti-banimento vale entre eles.
+        if (enviouNesteTrecho) await espacarEnvio(`conversa:${boundary.conversation_id}`);
+        const erro = await enviar(input);
+        if (erro) return { kind: "failed", error: erro };
+        enviouNesteTrecho = true;
+      }
+      await ctx.salvarCursor?.(i + 1);
+    }
+
+    return { kind: "advance", ...(escutar ? { escutar: true } : {}) };
   } catch (err) {
     return { kind: "failed", error: motivoDoErro(err) };
   }

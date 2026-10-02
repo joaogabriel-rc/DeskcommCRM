@@ -45128,6 +45128,644 @@ grant execute on function public.fn_meta_ecos_correlacionar(uuid, uuid, timestam
 comment on function public.fn_meta_ecos_correlacionar(uuid, uuid, timestamptz) is
   'Classifica como historico os ecos em espera da janela cujo wamid é media_placeholder from_me no history guardado da MESMA janela. Só estado; nunca cria mensagem. Devolve os wamids classificados.';
 
+-- ---- o status do disparo reflete o resultado do envio (migration 0501) ----
+--
+-- Racional no cabeçalho da migration. Corpo IDÊNTICO ao da migration; entra
+-- ANTES da VARREDURA anon porque cria função.
+
+alter table public.broadcast_recipients drop constraint if exists broadcast_recipients_status_check;
+alter table public.broadcast_recipients
+  add constraint broadcast_recipients_status_check
+  check (status in ('pending', 'in_flow', 'sent', 'failed', 'skipped'));
+
+alter table public.broadcasts add column if not exists in_flow_count int not null default 0;
+
+create unique index if not exists uq_broadcast_recipients_org_id
+  on public.broadcast_recipients (organization_id, id);
+
+create index if not exists idx_broadcast_recipients_broadcast_status
+  on public.broadcast_recipients (broadcast_id, status);
+
+alter table public.messages add column if not exists broadcast_recipient_id uuid;
+
+do $$ begin
+  alter table public.messages
+    add constraint messages_broadcast_recipient_fk
+    foreign key (organization_id, broadcast_recipient_id)
+    references public.broadcast_recipients (organization_id, id)
+    on delete set null (broadcast_recipient_id);
+exception when duplicate_object then null; end $$;
+
+create index if not exists idx_messages_broadcast_recipient
+  on public.messages (broadcast_recipient_id)
+  where broadcast_recipient_id is not null;
+
+comment on column public.messages.broadcast_recipient_id is
+  'Destinatário de disparo que originou esta mensagem (0501). Preenchido só pelo worker do disparo e pelo motor de fluxo — nunca pelo corpo de uma requisição.';
+
+-- ── Recontagem do disparo ─────────────────────────────────────────────────────
+create or replace function public.fn_broadcast_recount(p_broadcast uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_pending int := 0;
+  v_in_flow int := 0;
+  v_sent int := 0;
+  v_failed int := 0;
+  v_skipped int := 0;
+  v_status text;
+begin
+  select
+    count(*) filter (where status = 'pending'),
+    count(*) filter (where status = 'in_flow'),
+    count(*) filter (where status = 'sent'),
+    count(*) filter (where status = 'failed'),
+    count(*) filter (where status = 'skipped')
+  into v_pending, v_in_flow, v_sent, v_failed, v_skipped
+  from public.broadcast_recipients
+  where broadcast_id = p_broadcast;
+
+  update public.broadcasts b
+     set sent_count = v_sent,
+         failed_count = v_failed,
+         skipped_count = v_skipped,
+         in_flow_count = v_in_flow,
+         -- Concluir é só de `running`, e só sem ninguém pendente nem em
+         -- andamento. Cancelado, pausado e falho não são reabertos por contagem.
+         status = case
+           when b.status = 'running' and v_pending = 0 and v_in_flow = 0 then 'completed'
+           else b.status
+         end,
+         finished_at = case
+           when b.status = 'running' and v_pending = 0 and v_in_flow = 0 then coalesce(b.finished_at, now())
+           else b.finished_at
+         end,
+         updated_at = now()
+   where b.id = p_broadcast
+  returning b.status into v_status;
+
+  return jsonb_build_object(
+    'status', v_status,
+    'pending', v_pending,
+    'in_flow', v_in_flow,
+    'sent', v_sent,
+    'failed', v_failed,
+    'skipped', v_skipped
+  );
+end;
+$$;
+
+revoke execute on function public.fn_broadcast_recount(uuid) from public, anon, authenticated;
+grant execute on function public.fn_broadcast_recount(uuid) to service_role;
+
+-- ── Reconciliação do destinatário ─────────────────────────────────────────────
+create or replace function public.fn_broadcast_recipient_reconcile(p_recipient uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  r public.broadcast_recipients%rowtype;
+  v_total int := 0;
+  v_recusada boolean := false;
+  v_aceita boolean := false;
+  v_primeiro_envio timestamptz;
+  v_erro_msg text;
+  v_exec_status text;
+  v_exec_erro text;
+  v_tem_exec boolean := false;
+  v_novo text;
+  v_erro text;
+begin
+  select * into r from public.broadcast_recipients where id = p_recipient;
+  if not found then return null; end if;
+  -- `pending` ainda não foi processado; `skipped` é desfecho de guarda local.
+  if r.status not in ('in_flow', 'sent', 'failed') then return r.status; end if;
+
+  select count(*),
+         coalesce(bool_or(m.status = 'failed'), false),
+         coalesce(bool_or(m.status in ('sent', 'delivered', 'read')), false),
+         min(m.sent_at) filter (where m.status in ('sent', 'delivered', 'read'))
+    into v_total, v_recusada, v_aceita, v_primeiro_envio
+    from public.messages m
+   where m.organization_id = r.organization_id
+     and m.broadcast_recipient_id = r.id;
+
+  if v_recusada then
+    select left(concat_ws(': ', m.error_code, m.error_message), 300) into v_erro_msg
+      from public.messages m
+     where m.organization_id = r.organization_id
+       and m.broadcast_recipient_id = r.id
+       and m.status = 'failed'
+     order by m.updated_at desc nulls last
+     limit 1;
+  end if;
+
+  select e.status, e.last_error into v_exec_status, v_exec_erro
+    from public.flow_executions e
+   where e.organization_id = r.organization_id
+     and e.broadcast_recipient_id = r.id
+   limit 1;
+  v_tem_exec := found;
+
+  if v_recusada then
+    v_novo := 'failed';
+    v_erro := coalesce(nullif(v_erro_msg, ''), 'envio_recusado');
+  elsif v_aceita then
+    v_novo := 'sent';
+    v_erro := null;
+  elsif v_tem_exec and v_exec_status = 'failed' then
+    v_novo := 'failed';
+    v_erro := left(coalesce(v_exec_erro, 'flow_failed'), 300);
+  elsif v_tem_exec and v_exec_status = 'completed' and v_total = 0 then
+    v_novo := 'skipped';
+    v_erro := 'fluxo_concluido_sem_envio';
+  elsif v_tem_exec and v_exec_status = 'cancelled' and v_total = 0 then
+    v_novo := 'skipped';
+    v_erro := 'fluxo_cancelado';
+  elsif v_total > 0 or v_tem_exec then
+    v_novo := 'in_flow';
+    v_erro := null;
+  else
+    -- Nada que diga o contrário: o desfecho gravado pelo worker (ex.: falha antes
+    -- de pedir o envio) continua valendo.
+    return r.status;
+  end if;
+
+  if v_novo is distinct from r.status or v_erro is distinct from r.error then
+    update public.broadcast_recipients
+       set status = v_novo,
+           error = v_erro,
+           sent_at = case when v_novo = 'sent' then coalesce(v_primeiro_envio, r.sent_at, now()) else r.sent_at end,
+           updated_at = now()
+     where id = r.id;
+    perform public.fn_broadcast_recount(r.broadcast_id);
+  end if;
+
+  return v_novo;
+end;
+$$;
+
+revoke execute on function public.fn_broadcast_recipient_reconcile(uuid) from public, anon, authenticated;
+grant execute on function public.fn_broadcast_recipient_reconcile(uuid) to service_role;
+
+-- ── Gatilhos: a mensagem e a execução avisam o destinatário ───────────────────
+create or replace function public.fn_trg_broadcast_recipient_from_message()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.fn_broadcast_recipient_reconcile(new.broadcast_recipient_id);
+  return null;
+end;
+$$;
+
+revoke execute on function public.fn_trg_broadcast_recipient_from_message() from public, anon, authenticated;
+
+create or replace function public.fn_trg_broadcast_recipient_from_execution()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.fn_broadcast_recipient_reconcile(new.broadcast_recipient_id);
+  return null;
+end;
+$$;
+
+revoke execute on function public.fn_trg_broadcast_recipient_from_execution() from public, anon, authenticated;
+
+drop trigger if exists trg_messages_broadcast_recipient_ins on public.messages;
+create trigger trg_messages_broadcast_recipient_ins
+  after insert on public.messages
+  for each row
+  when (new.broadcast_recipient_id is not null)
+  execute function public.fn_trg_broadcast_recipient_from_message();
+
+drop trigger if exists trg_messages_broadcast_recipient_upd on public.messages;
+create trigger trg_messages_broadcast_recipient_upd
+  after update of status on public.messages
+  for each row
+  when (new.broadcast_recipient_id is not null and old.status is distinct from new.status)
+  execute function public.fn_trg_broadcast_recipient_from_message();
+
+drop trigger if exists trg_flow_executions_broadcast_recipient on public.flow_executions;
+create trigger trg_flow_executions_broadcast_recipient
+  after update of status on public.flow_executions
+  for each row
+  when (new.broadcast_recipient_id is not null and old.status is distinct from new.status)
+  execute function public.fn_trg_broadcast_recipient_from_execution();
+
+-- ---- o nó de mensagem em blocos e o Próximo passo (migration 0502) ----
+--
+-- Racional no cabeçalho da migration. Corpo IDÊNTICO ao da migration; não cria
+-- função — fica junto do bloco da 0501 por ser a mesma entrega.
+
+alter table public.flow_executions add column if not exists node_cursor int;
+alter table public.flow_executions add column if not exists listening_node_id uuid;
+alter table public.flow_executions add column if not exists listening_until timestamptz;
+
+do $$ begin
+  alter table public.flow_executions
+    add constraint flow_executions_listening_node_fk
+    foreign key (listening_node_id) references public.flow_nodes(id) on delete set null;
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table public.flow_executions
+    add constraint flow_executions_node_cursor_check
+    check (node_cursor is null or node_cursor >= 0);
+exception when duplicate_object then null; end $$;
+
+-- O handler de resposta procura "algum botão deste contato ainda clicável".
+create index if not exists idx_flow_executions_listening
+  on public.flow_executions (organization_id, contact_id, listening_until)
+  where listening_node_id is not null;
+
+comment on column public.flow_executions.node_cursor is
+  'Próximo bloco a executar dentro do nó de mensagem em blocos (0502). Nulo fora de um nó em andamento.';
+comment on column public.flow_executions.listening_node_id is
+  'Nó de mensagem cujos botões de fluxo seguem clicáveis depois do Próximo passo (0502). Clique desvia esta execução.';
+comment on column public.flow_executions.listening_until is
+  'Até quando o clique tardio num botão de fluxo ainda desvia a execução (0502).';
+
+-- ---- o fluxo de disparo congela quando é usado, e o disparo se duplica (migration 0507) ----
+-- Ver supabase/migrations/20261002000000_0507_fluxo_de_disparo_congela_e_duplica.sql
+-- para o racional. Idempotente: índice e funções com if not exists / create or
+-- replace, gatilhos com drop if exists antes. Nenhum dado é reescrito.
+
+-- ═══ 1. "Este fluxo já foi usado?" precisa de índice ════════════════════════
+
+create index if not exists idx_flow_executions_flow on public.flow_executions (flow_id);
+
+-- ═══ 2. O estado de edição ══════════════════════════════════════════════════
+
+create or replace function public.fn_flow_estado_de_edicao_interno(p_flow uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_org uuid;
+  v_disparo uuid;
+  v_status text;
+  v_vivas integer;
+  v_usado boolean;
+  v_estado text;
+begin
+  select f.organization_id, f.broadcast_id into v_org, v_disparo
+    from public.flows f
+   where f.id = p_flow;
+  if not found then
+    return null;
+  end if;
+  if v_disparo is null then
+    return jsonb_build_object('escopo', 'automacao', 'estado', null, 'vivas', 0, 'usado', false, 'disparo_status', null);
+  end if;
+
+  select b.status into v_status
+    from public.broadcasts b
+   where b.id = v_disparo and b.organization_id = v_org;
+
+  select count(*) filter (
+           where e.status in ('running', 'waiting')
+              or (e.listening_node_id is not null
+                  and e.listening_until > now()
+                  and e.status in ('waiting', 'completed'))),
+         count(*) > 0
+    into v_vivas, v_usado
+    from public.flow_executions e
+   where e.flow_id = p_flow and e.organization_id = v_org;
+
+  v_estado := case
+    when v_status is null then 'historico'
+    when v_status in ('completed', 'cancelled', 'failed') then 'historico'
+    when v_status in ('scheduled', 'running') then 'em_uso'
+    when v_vivas > 0 then 'em_uso'
+    when v_usado then 'historico'
+    else 'editavel'
+  end;
+
+  return jsonb_build_object(
+    'escopo', 'disparo',
+    'estado', v_estado,
+    'vivas', v_vivas,
+    'usado', v_usado,
+    'disparo_status', v_status
+  );
+end;
+$$;
+
+revoke all on function public.fn_flow_estado_de_edicao_interno(uuid) from public, anon, authenticated, service_role;
+
+-- A face para a tela: a mesma resposta, só para quem é da organização do fluxo.
+create or replace function public.fn_flow_estado_de_edicao(p_flow uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_org uuid;
+begin
+  select f.organization_id into v_org from public.flows f where f.id = p_flow;
+  if v_org is null then
+    return null;
+  end if;
+  if auth.uid() is not null
+     and not (v_org in (select public.fn_user_org_ids()) or public.fn_is_platform_admin()) then
+    return null;
+  end if;
+  return public.fn_flow_estado_de_edicao_interno(p_flow);
+end;
+$$;
+
+revoke all on function public.fn_flow_estado_de_edicao(uuid) from public, anon;
+grant execute on function public.fn_flow_estado_de_edicao(uuid) to authenticated, service_role;
+
+-- ═══ 3. A trava ═════════════════════════════════════════════════════════════
+
+create or replace function public.fn_flow_exigir_editavel(p_flow uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v jsonb;
+begin
+  perform 1
+     from public.broadcasts b
+     join public.flows f on f.broadcast_id = b.id
+    where f.id = p_flow
+      for share of b;
+  v := public.fn_flow_estado_de_edicao_interno(p_flow);
+  if v is not null and v ->> 'escopo' = 'disparo' and v ->> 'estado' <> 'editavel' then
+    raise exception 'flow_protegido:%', v ->> 'estado'
+      using errcode = 'PT409',
+            hint = 'O fluxo deste disparo já foi usado ou está em uso. Duplique o disparo para editar uma cópia.';
+  end if;
+end;
+$$;
+
+revoke all on function public.fn_flow_exigir_editavel(uuid) from public, anon, authenticated, service_role;
+
+-- ═══ 4. O grafo: flow_nodes e flow_edges ════════════════════════════════════
+
+create or replace function public.fn_trg_flow_grafo_protegido()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org uuid;
+  v_flow uuid;
+begin
+  if tg_op = 'DELETE' then
+    v_org := old.organization_id;
+    v_flow := old.flow_id;
+  else
+    v_org := new.organization_id;
+    v_flow := new.flow_id;
+  end if;
+
+  -- A cascata de quem está acima já decidiu: a empresa saiu, ou o fluxo saiu
+  -- pela própria guarda.
+  if exists (select 1 from public.organizations o where o.id = v_org)
+     and exists (select 1 from public.flows f where f.id = v_flow) then
+    perform public.fn_flow_exigir_editavel(v_flow);
+  end if;
+
+  if tg_op = 'UPDATE' and old.flow_id is distinct from new.flow_id
+     and exists (select 1 from public.flows f where f.id = old.flow_id) then
+    perform public.fn_flow_exigir_editavel(old.flow_id);
+  end if;
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.fn_trg_flow_grafo_protegido() from public, anon, authenticated, service_role;
+
+drop trigger if exists trg_flow_nodes_protegido on public.flow_nodes;
+create trigger trg_flow_nodes_protegido
+  before insert or update or delete on public.flow_nodes
+  for each row execute function public.fn_trg_flow_grafo_protegido();
+
+drop trigger if exists trg_flow_edges_protegido on public.flow_edges;
+create trigger trg_flow_edges_protegido
+  before insert or update or delete on public.flow_edges
+  for each row execute function public.fn_trg_flow_grafo_protegido();
+
+-- ═══ 5. A definição: flows ══════════════════════════════════════════════════
+
+create or replace function public.fn_trg_flow_definicao_protegida()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.broadcast_id is null then
+    if tg_op = 'DELETE' then
+      return old;
+    end if;
+    return new;
+  end if;
+
+  if tg_op = 'DELETE' then
+    if exists (select 1 from public.organizations o where o.id = old.organization_id)
+       and exists (select 1 from public.broadcasts b where b.id = old.broadcast_id) then
+      perform public.fn_flow_exigir_editavel(old.id);
+    end if;
+    return old;
+  end if;
+
+  -- Nome, descrição, versão e `updated_at` não mudam o que o contato percorre.
+  if (new.trigger_type, new.trigger_config, new.broadcast_id, new.organization_id, new.status)
+     is distinct from
+     (old.trigger_type, old.trigger_config, old.broadcast_id, old.organization_id, old.status) then
+    perform public.fn_flow_exigir_editavel(old.id);
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.fn_trg_flow_definicao_protegida() from public, anon, authenticated, service_role;
+
+drop trigger if exists trg_flows_definicao_protegida on public.flows;
+create trigger trg_flows_definicao_protegida
+  before update or delete on public.flows
+  for each row execute function public.fn_trg_flow_definicao_protegida();
+
+-- ═══ 6. O disparo que já tocou alguém não se apaga ══════════════════════════
+
+create or replace function public.fn_trg_broadcast_historico_protegido()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (select 1 from public.organizations o where o.id = old.organization_id) then
+    return old;
+  end if;
+  if exists (select 1 from public.broadcast_recipients r
+              where r.broadcast_id = old.id and r.status <> 'pending')
+     or exists (select 1 from public.flow_executions e
+                  join public.flows f on f.id = e.flow_id
+                 where f.broadcast_id = old.id)
+     or exists (select 1 from public.flow_executions e
+                  join public.broadcast_recipients r on r.id = e.broadcast_recipient_id
+                 where r.broadcast_id = old.id) then
+    raise exception 'disparo_com_historico'
+      using errcode = 'PT409',
+            hint = 'Este disparo já processou destinatários: o registro de quem recebeu o quê é histórico. Cancele-o.';
+  end if;
+  return old;
+end;
+$$;
+
+revoke all on function public.fn_trg_broadcast_historico_protegido() from public, anon, authenticated, service_role;
+
+drop trigger if exists trg_broadcasts_historico_protegido on public.broadcasts;
+create trigger trg_broadcasts_historico_protegido
+  before delete on public.broadcasts
+  for each row execute function public.fn_trg_broadcast_historico_protegido();
+
+-- ═══ 7. Duplicar o disparo ══════════════════════════════════════════════════
+
+create or replace function public.fn_broadcast_duplicar(p_broadcast uuid, p_organization_id uuid)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_origem public.broadcasts%rowtype;
+  v_fluxo_origem public.flows%rowtype;
+  v_novo uuid := gen_random_uuid();
+  v_fluxo_novo uuid;
+  v_nome text;
+  v_mapa jsonb;
+begin
+  select * into v_origem
+    from public.broadcasts b
+   where b.id = p_broadcast and b.organization_id = p_organization_id;
+  if not found then
+    raise exception 'broadcast_not_found_in_organization' using errcode = 'P0002';
+  end if;
+
+  v_nome := left(v_origem.name, 120 - length(' (cópia)')) || ' (cópia)';
+
+  insert into public.broadcasts (id, organization_id, name, status, segment, message, created_by_user_id)
+  values (v_novo, p_organization_id, v_nome, 'draft', v_origem.segment, v_origem.message, auth.uid());
+
+  select * into v_fluxo_origem
+    from public.flows f
+   where f.organization_id = p_organization_id and f.broadcast_id = p_broadcast;
+
+  if found then
+    v_fluxo_novo := gen_random_uuid();
+
+    insert into public.flows (id, organization_id, name, description, status, trigger_type, trigger_config,
+                              version, created_by_user_id, broadcast_id)
+    values (v_fluxo_novo, p_organization_id, left('Disparo: ' || v_nome, 120), v_fluxo_origem.description,
+            'draft', v_fluxo_origem.trigger_type, v_fluxo_origem.trigger_config, 1, auth.uid(), v_novo);
+
+    select coalesce(jsonb_object_agg(n.id::text, gen_random_uuid()), '{}'::jsonb) into v_mapa
+      from public.flow_nodes n
+     where n.flow_id = v_fluxo_origem.id and n.organization_id = p_organization_id;
+
+    insert into public.flow_nodes (id, organization_id, flow_id, type, label, config, position_x, position_y)
+    select (v_mapa ->> n.id::text)::uuid, p_organization_id, v_fluxo_novo, n.type, n.label,
+           replace(n.config::text, v_fluxo_origem.id::text, v_fluxo_novo::text)::jsonb,
+           n.position_x, n.position_y
+      from public.flow_nodes n
+     where n.flow_id = v_fluxo_origem.id and n.organization_id = p_organization_id;
+
+    insert into public.flow_edges (id, organization_id, flow_id, source_node_id, target_node_id, source_handle)
+    select gen_random_uuid(), p_organization_id, v_fluxo_novo,
+           (v_mapa ->> e.source_node_id::text)::uuid, (v_mapa ->> e.target_node_id::text)::uuid,
+           e.source_handle
+      from public.flow_edges e
+     where e.flow_id = v_fluxo_origem.id and e.organization_id = p_organization_id;
+  end if;
+
+  return jsonb_build_object(
+    'broadcast_id', v_novo,
+    'flow_id', v_fluxo_novo,
+    'flow_id_origem', v_fluxo_origem.id
+  );
+end;
+$$;
+
+revoke all on function public.fn_broadcast_duplicar(uuid, uuid) from public, anon;
+grant execute on function public.fn_broadcast_duplicar(uuid, uuid) to authenticated, service_role;
+
+-- ---- um fluxo só se liga a disparo em rascunho (migration 0508) ----
+-- Ver supabase/migrations/20261002010000_0508_fluxo_so_se_liga_a_disparo_em_rascunho.sql
+-- para o racional. Idempotente: create or replace, gatilho com drop if exists.
+
+create or replace function public.fn_trg_flow_vinculo_ao_disparo()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_status text;
+begin
+  if new.broadcast_id is null then
+    return new;
+  end if;
+  if tg_op = 'UPDATE'
+     and new.broadcast_id is not distinct from old.broadcast_id
+     and new.organization_id is not distinct from old.organization_id then
+    return new;
+  end if;
+
+  select b.status into v_status
+    from public.broadcasts b
+   where b.id = new.broadcast_id
+     and b.organization_id = new.organization_id
+     for share;
+  -- Disparo inexistente ou de OUTRA organização: quem recusa é a FK composta
+  -- `flows_broadcast_org_fk` (0399), com o erro de sempre — esta regra é sobre
+  -- o ESTADO do disparo, o isolamento já era garantido pela estrutura.
+  if not found then
+    return new;
+  end if;
+  if v_status <> 'draft' then
+    raise exception 'flow_vinculo_invalido:%', v_status
+      using errcode = 'PT409',
+            hint = 'O fluxo só pode ser ligado a um disparo em rascunho.';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.fn_trg_flow_vinculo_ao_disparo() from public, anon, authenticated, service_role;
+
+drop trigger if exists trg_flows_vinculo_ao_disparo on public.flows;
+create trigger trg_flows_vinculo_ao_disparo
+  before insert or update of broadcast_id, organization_id on public.flows
+  for each row execute function public.fn_trg_flow_vinculo_ao_disparo();
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria

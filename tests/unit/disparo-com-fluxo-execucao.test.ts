@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as Origem from "@/lib/atendimento/origem";
 import { criarBanco, type BancoEmMemoria } from "../helpers/banco-em-memoria";
+import { gravarMensagemDoDisparo, rpcsDaReconciliacao } from "../helpers/disparo-reconciliacao-em-memoria";
 
 /**
  * DISPARO → EXECUÇÃO DO FLUXO → MENSAGEM, carregando a permissão do disparo.
@@ -31,10 +32,22 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/lib/logger", () => ({ logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 vi.mock("@/app/api/v1/messages/_handler", () => ({
-  sendMessageHandler: vi.fn(async (_db: unknown, ctx: { serviceBoundary: unknown }, input: Record<string, unknown>) => {
-    h.envios.push({ boundary: ctx.serviceBoundary, input });
-    return { id: "msg-1" };
-  }),
+  // O envio devolve a LINHA, como o handler real — com status. A mensagem fica
+  // ligada ao destinatário (0501), e o "gatilho" do dublê a reconcilia.
+  sendMessageHandler: vi.fn(
+    async (
+      _db: unknown,
+      ctx: { serviceBoundary: unknown; organization_id: string; broadcastRecipientId?: string },
+      input: Record<string, unknown>,
+    ) => {
+      h.envios.push({ boundary: ctx.serviceBoundary, input });
+      return gravarMensagemDoDisparo(h.banco, {
+        organization_id: ctx.organization_id,
+        broadcast_recipient_id: ctx.broadcastRecipientId ?? null,
+        status: "sent",
+      });
+    },
+  ),
 }));
 vi.mock("@/lib/atendimento/origem", async (original) => ({
   ...(await original<typeof Origem>()),
@@ -118,6 +131,7 @@ function montar(o: { permissao?: unknown; fluxoDaOrg?: string; comEspera?: boole
         h.banco.tabelas.broadcast_recipients!.filter((r) => r.broadcast_id === a.p_broadcast && r.status === "pending"),
       fn_claim_due_flow_executions: () =>
         h.banco.tabelas.flow_executions!.filter((e) => e.status === "waiting" && e.waiting_for === "delay"),
+      ...rpcsDaReconciliacao(() => h.banco),
     },
     { flow_executions: { attempts: 0, last_error: null, conversation_id: null, next_execution_at: null } },
   );

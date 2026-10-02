@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { apiClient } from "@/lib/api/client";
 import type { ConexaoComModelos, ModeloDoCatalogo } from "@/lib/channels/catalogo-de-modelos";
+import { valorPadraoDaVariavel } from "@/lib/variaveis/campos-do-sistema";
 
 export interface CatalogoDeModelos {
   conexoes: ConexaoComModelos[];
@@ -59,10 +60,22 @@ export function configDoModeloEscolhido(
   modelo: ModeloDoCatalogo,
   conexaoId: string | null,
   valoresAtuais: Record<string, string>,
+  /**
+   * Os campos do usuário da organização. Com eles, a variável criada pelo
+   * autocomplete do modelo (`{{primeiro_nome}}`, `{{cpf}}`) já chega ao fluxo
+   * apontando para o dado do contato; nome livre (`{{var1}}`) fica em branco
+   * para quem monta o fluxo escolher. O EXEMPLO da aprovação nunca é usado:
+   * ele é só para a revisão da Meta.
+   */
+  camposDoUsuario: ReadonlyArray<{ key: string }> = [],
 ): Record<string, unknown> {
   const template_values: Record<string, string> = {};
   for (const e of modelo.espacos) {
-    template_values[e.valueKey] = valoresAtuais[e.valueKey] ?? modelo.savedValues[e.valueKey] ?? "";
+    template_values[e.valueKey] =
+      valoresAtuais[e.valueKey] ??
+      modelo.savedValues[e.valueKey] ??
+      valorPadraoDaVariavel(e.key, camposDoUsuario) ??
+      "";
   }
   return {
     template_id: modelo.id,

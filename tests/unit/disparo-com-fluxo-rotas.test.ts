@@ -74,6 +74,24 @@ beforeEach(() => {
         h.materializacoes.push(args);
         return { inseridos: (args.p_contact_ids as string[]).length, pulados: 0 };
       },
+      // A regra do banco (migration 0507), na forma mínima que estas rotas
+      // precisam: o estado vem do status do disparo e das execuções do fluxo.
+      fn_flow_estado_de_edicao: (args) => {
+        const fluxo = (h.banco.tabelas.flows ?? []).find((f) => f.id === args.p_flow);
+        if (!fluxo) return null;
+        if (!fluxo.broadcast_id) return { escopo: "automacao", estado: null, vivas: 0, usado: false, disparo_status: null };
+        const disparo = (h.banco.tabelas.broadcasts ?? []).find((b) => b.id === fluxo.broadcast_id);
+        const status = String(disparo?.status ?? "");
+        const usado = (h.banco.tabelas.flow_executions ?? []).some((e) => e.flow_id === fluxo.id);
+        const estado = ["completed", "cancelled", "failed"].includes(status)
+          ? "historico"
+          : ["scheduled", "running"].includes(status)
+            ? "em_uso"
+            : usado
+              ? "historico"
+              : "editavel";
+        return { escopo: "disparo", estado, vivas: 0, usado, disparo_status: status };
+      },
       fn_flow_replace_graph: (args) => {
         h.banco.tabelas.flow_nodes = (h.banco.tabelas.flow_nodes ?? []).filter((n) => n.flow_id !== args.p_flow_id);
         for (const n of args.p_nodes as Array<Record<string, unknown>>) {

@@ -8,7 +8,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
-import { fluxoDoDisparo } from "@/lib/disparos/fluxo-do-disparo";
+import { fluxoDoDisparoComUso } from "@/lib/disparos/fluxo-do-disparo";
 import type { DisparoRow } from "@/lib/schemas/disparos";
 import { createClient } from "@/lib/supabase/server";
 
@@ -31,7 +31,10 @@ export default async function DisparoPage({ params }: { params: Promise<{ id: st
     .eq("organization_id", activeOrg.orgId)
     .maybeSingle();
   if (!data) notFound();
-  const fluxo = await fluxoDoDisparo(supabase, activeOrg.orgId, id).catch(() => null);
+  // O mesmo `fluxo` que a rota devolve, com o `uso` (0507): é o `initialData`
+  // da tela, e com o staleTime global o GET não é refeito ao abrir — sem `uso`
+  // aqui, o aviso de fluxo protegido não aparece.
+  const fluxo = await fluxoDoDisparoComUso(supabase, activeOrg.orgId, id);
 
   return (
     <DisparoEditor

@@ -129,6 +129,29 @@ export function useExcluirDisparo() {
 }
 
 /**
+ * DUPLICAR o disparo (migration 0507): um disparo novo em rascunho, com uma
+ * cópia independente do fluxo — a saída de quem precisa mudar um fluxo que já
+ * foi usado e virou histórico. Devolve o id do disparo novo.
+ */
+export function useDuplicarDisparo(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await apiClient.post<{ data: { broadcast_id: string; flow_id: string | null } }>(
+        `/api/v1/broadcasts/${id}/duplicar`,
+        {},
+      );
+      return res.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: disparosQueryKey });
+      toast.success("Disparo duplicado. A cópia é um rascunho e pode ser editada.");
+    },
+    onError: (err) => showApiError(err),
+  });
+}
+
+/**
  * A PRÉVIA do público. Chamada a cada mudança de critério, com `enabled` para
  * não bater no servidor enquanto o construtor está vazio.
  *

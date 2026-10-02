@@ -37,6 +37,8 @@
  * os dois; contar placeholder previne metade e dá a sensação de estar coberto.
  */
 
+import { formatoEfetivo } from "../template-variaveis";
+
 export type ButtonSubType = "url" | "copy_code" | "quick_reply";
 
 /** Tipo de valor que o slot espera — decide o widget na tela e o `type` no payload. */
@@ -220,10 +222,12 @@ export function deriveTemplateContract(t: {
   return {
     name: t.name,
     language: t.language,
-    // Default POSITIONAL: é o que a Meta assume quando o campo não vem, e é o
-    // formato de todo template legado. Nunca inferir da CHAVE ('1' vs 'nome') —
-    // um template NAMED com chave numérica existe e seria classificado errado.
-    parameterFormat: t.parameter_format === "NAMED" ? "NAMED" : "POSITIONAL",
+    // O declarado vale — com UMA correção, e só numa direção (`formatoEfetivo`):
+    // declarado POSITIONAL com marcador NOMEADO (`{{var1}}`) é leitura
+    // impossível, porque posicional não tem parâmetro com nome. Foi a
+    // presunção que a criação gravava, e o envio saía sem `parameter_name`
+    // (132000). NAMED com chave numérica existe e continua NAMED.
+    parameterFormat: formatoEfetivo(t.parameter_format, components),
     slots,
   };
 }

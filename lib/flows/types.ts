@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ServiceBoundary } from "@/lib/atendimento/fronteira";
 import type { EventRow } from "@/lib/event-log/dispatcher";
+import type { BlocoDaMensagem } from "@/lib/flows/blocos";
 
 /**
  * Os tipos de PASSO do flow.
@@ -65,6 +66,12 @@ export interface FlowExecutionRow {
   service_boundary?: unknown;
   /** O destinatário do disparo que iniciou esta execução (0399). */
   broadcast_recipient_id?: string | null;
+  /** Próximo bloco dentro do nó de mensagem em andamento (0502). */
+  node_cursor?: number | null;
+  /** Nó cujos botões de fluxo seguem clicáveis depois do Próximo passo (0502). */
+  listening_node_id?: string | null;
+  listening_until?: string | null;
+  updated_at?: string;
 }
 
 /**
@@ -78,6 +85,8 @@ export interface FlowExecutionRow {
 export interface FlowNodeCtx {
   admin: SupabaseClient;
   organizationId: string;
+  /** O fluxo que está executando — a pasta em que as imagens dele moram. */
+  flowId: string;
   ruleId: string;
   ruleName: string;
   event: EventRow;
@@ -90,12 +99,33 @@ export interface FlowNodeCtx {
    * derivar uma do evento — um disparo não nasce de evento.
    */
   servicoAutorizado?: ServiceBoundary | null;
+  /**
+   * O destinatário do disparo dono desta execução (0399), repassado ao envio
+   * para ligar cada mensagem a ele (`messages.broadcast_recipient_id`, 0501).
+   */
+  broadcastRecipientId?: string | null;
+  /**
+   * De qual bloco o nó de mensagem recomeça (0502): 0 na primeira entrada; o
+   * cursor gravado quando a execução volta de um atraso DENTRO do nó.
+   */
+  cursor?: number;
+  /**
+   * Grava o progresso dentro do nó a cada bloco enviado — é o que impede um
+   * worker que reinicia no meio do nó de reenviar o que já saiu.
+   */
+  salvarCursor?: (cursor: number) => Promise<void>;
 }
 
 export type NodeOutcome =
-  | { kind: "advance"; handle?: string | null }
+  /**
+   * `escutar`: o nó mandou botões de FLUXO. O motor segue pelo Próximo passo e
+   * deixa os botões clicáveis (um clique tardio desvia a execução); sem aresta
+   * de Próximo passo, a execução ESPERA o clique, como sempre esperou.
+   */
+  | { kind: "advance"; handle?: string | null; escutar?: boolean }
   | { kind: "wait_button" }
-  | { kind: "wait_delay"; until: string }
+  /** `cursor` presente: a espera é DENTRO do nó, e a retomada reentra nele a partir deste bloco. */
+  | { kind: "wait_delay"; until: string; cursor?: number }
   | { kind: "end" }
   | { kind: "failed"; error: string };
 
@@ -138,6 +168,12 @@ export type MessageWindowMode = "inside_24h" | "outside_24h";
  * não distingue — casa a resposta pelo mesmo `casarRespostaDeBotao`.
  */
 export interface MessageNodeConfig {
+  /**
+   * Os BLOCOS do nó (texto, imagem, atraso) — o formato novo, editado pelos
+   * construtores de Automação e de Disparo. Ausente = formato antigo, lido de
+   * `body` + `buttons` como um bloco só (`lib/flows/blocos.ts`).
+   */
+  blocks?: BlocoDaMensagem[];
   body?: string;
   buttons?: MessageButton[];
   window_mode?: MessageWindowMode;

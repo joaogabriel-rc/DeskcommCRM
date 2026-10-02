@@ -75,6 +75,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type pg from "pg";
 
 import { createInboundTurnHandler } from "@/lib/agent-engine/agent/inbound-turn";
+import { runFlowWorkerTick } from "@/lib/flows/engine";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   createFollowupTurnHandler,
   type FollowupTurnDeps,
@@ -333,6 +335,27 @@ export async function startWorker(
       })
       .catch((err: unknown) => log.error("enforceHolds falhou", { error: errMsg(err) }));
   }, env.QUEUE_REAPER_INTERVAL_MS);
+
+  // Atrasos CURTOS dos fluxos (0502): retoma execuções vencidas a cada poucos
+  // segundos. O claim (`fn_claim_due_flow_executions`, com lease) é o mesmo do
+  // cron, então os dois nunca retomam a mesma execução; e o tique não se
+  // sobrepõe a si mesmo (`fluxoEmCurso`).
+  let fluxoEmCurso = false;
+  const flowDelayTimer =
+    env.FLOW_DELAY_TICK_MS > 0
+      ? setInterval(() => {
+          if (fluxoEmCurso || shuttingDown) return;
+          fluxoEmCurso = true;
+          runFlowWorkerTick(createAdminClient(), { limit: 25, leaseSeconds: 60 })
+            .then((r) => {
+              if (r.claimed > 0) log.info("atrasos de fluxo retomados", { ...r });
+            })
+            .catch((err: unknown) => log.error("tique dos atrasos de fluxo falhou", { error: errMsg(err) }))
+            .finally(() => {
+              fluxoEmCurso = false;
+            });
+        }, env.FLOW_DELAY_TICK_MS)
+      : null;
 
   const loopsAbort = new AbortController();
 
@@ -624,6 +647,7 @@ export async function startWorker(
     });
     clearInterval(reaperTimer);
     clearInterval(holdsTimer);
+    if (flowDelayTimer) clearInterval(flowDelayTimer);
     server.close();
     server.closeIdleConnections();
     loopsAbort.abort();

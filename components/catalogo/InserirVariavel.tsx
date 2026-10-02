@@ -37,6 +37,8 @@ import { Plus } from "@/lib/ui/icons";
 // não aqui: traduzir numa constante de módulo congelaria o idioma no primeiro
 // import, e quem trocasse de idioma continuaria vendo o anterior.
 const FIXAS: Array<{ label: string; variavel: string }> = [
+  { label: "Primeiro nome", variavel: "{{contact.first_name}}" },
+  { label: "Sobrenome", variavel: "{{contact.last_name}}" },
   { label: "Nome", variavel: "{{contact.name}}" },
   { label: "Nome de exibição", variavel: "{{contact.display_name}}" },
   { label: "Telefone", variavel: "{{contact.phone}}" },

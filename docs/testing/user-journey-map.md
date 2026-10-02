@@ -3191,23 +3191,27 @@ semeado e removido pela própria spec). Evidência em `evidence/modelos-g1/`.
 não tem credencial real) e a aprovação chegando depois — o status automático é a
 etapa seguinte (H).
 
-## J41 — Apagar só a ligação entre dois passos no construtor de Fluxos `[P1]` (2026-10-01)
+## J44 — Apagar só a ligação entre dois passos no construtor de Fluxos `[P1]` (2026-10-01)
 
 Clicar numa linha do construtor a seleciona e mostra a lixeira "Apagar conexão";
 a lixeira ou Delete/Backspace apagam só a ligação, os dois passos ficam e a saída
 fica livre. Spec: `tests/e2e/fluxo-apagar-aresta.spec.ts` (login como `manager`,
-fluxo rascunho semeado e removido pela própria spec). Medido no CI, run
-36906131108, parte 5, commit `6d60d7be9`. Evidência em `evidence/fluxo-apagar-aresta/`.
+fluxo rascunho T→A, B, C semeado e removido pela própria spec; A é uma mensagem
+com o botão de fluxo "Sim" e um botão de link). Medido no CI, run 37031608005,
+parte 5, commit `d30c7b1ff`: os três testes do spec verdes (o vermelho do run é
+de `disparo-guiado-e-com-fluxo.spec.ts`). As capturas não estão versionadas:
+ficaram no artefato `evidencia-fluxo-apagar-aresta-parte-5` desse run.
 
 | Caso | O que prova | Estado |
 |---|---|---|
-| J41.1 | A saída única de A, que levava a M, religada em Fim B: a ligação antiga sai (uma saída, um destino) e o banco grava só `A>B` (`evidence/fluxo-apagar-aresta/01-saida-religada-em-B.png`) | **MEDIDO EM TELA** + banco |
-| J41.2 | Clicar na linha A→B a seleciona: ela fica destacada e mostra a lixeira no meio (`evidence/fluxo-apagar-aresta/02-linha-selecionada-com-lixeira.png`) | **MEDIDO EM TELA** |
-| J41.3 | A lixeira apaga só a linha: os cinco passos continuam no desenho (`evidence/fluxo-apagar-aresta/03-linha-apagada-passos-ficam.png`) | **MEDIDO EM TELA** |
-| J41.4 | A mesma saída ligada em Fim C e salva; o banco tem `A>C` e não tem `A>B` (`evidence/fluxo-apagar-aresta/04-religado-em-C-e-salvo.png`) | **MEDIDO EM TELA** + banco |
-| J41.5 | Recarregada a página, só A→C existe; salvar de novo sem mexer não ressuscita A→B (`evidence/fluxo-apagar-aresta/05-depois-do-reload-so-A-C.png`) | **MEDIDO EM TELA** + banco |
-| J41.6 | A saída do botão "Sim" de M (`button:0`) apagada pela tecla Delete; o card continua com "Sim" e "Não" (`evidence/fluxo-apagar-aresta/06-saida-do-botao-apagada.png`) | **MEDIDO EM TELA** + banco |
-| J41.7 | Recarregada a página, a ligação do botão não volta e `config.buttons` continua com os dois botões (`evidence/fluxo-apagar-aresta/07-reload-botao-intacto-sem-aresta.png`) | **MEDIDO EM TELA** + banco |
+| J44.1 | O "Próximo passo" de A, arrastado até B: o banco grava `A>B:proximo` | **MEDIDO EM TELA** + banco |
+| J44.2 | Clicar na linha A→B a seleciona: ela fica destacada e mostra a lixeira no meio | **MEDIDO EM TELA** |
+| J44.3 | A lixeira apaga só a linha: os quatro passos continuam no desenho | **MEDIDO EM TELA** |
+| J44.4 | O mesmo "Próximo passo" ligado em C e salvo; o banco tem `A>C:proximo` e não tem `A>B` | **MEDIDO EM TELA** + banco |
+| J44.5 | Recarregada a página, só A→C existe; salvar de novo sem mexer não ressuscita A→B | **MEDIDO EM TELA** + banco |
+| J44.6 | A saída do botão "Sim" (`button:b1`), ligada em B, apagada pela tecla Delete; o card continua com "Sim", e o botão de link não tem saída | **MEDIDO EM TELA** + banco |
+| J44.7 | Recarregada a página, a ligação do botão não volta e `config.blocks[0].botoes` continua com os dois botões | **MEDIDO EM TELA** + banco |
+| J44.8 | Um botão criado pela tela (`button:<uuid>`) tem a saída ligada e o Salvar é aceito, onde antes dava "Dados inválidos" | **MEDIDO EM TELA** + banco |
 
 **NÃO MEDIDO pela tela:** o "+" não ligar o passo novo quando a saída padrão da
 origem já está ocupada; isso só é coberto pelo unitário de `saidaLivre`
@@ -3337,3 +3341,59 @@ Testing Library), e a prova pela tela fica pendente, com prioridade.
 | J41.4 | Trocar a conta do número oficial esconde os modelos da conta anterior (inclusive os criados pelo CRM), sem apagar; reconectar a mesma conta não duplica | `tests/unit/modelos-isolados-pela-conta-da-conexao.test.ts` | unidade — **tela pendente** |
 | J41.5 | Ficha do contato: tags como chips, "+ Adicionar tag" com busca soma sem substituir, remover uma a uma; todos os campos com valor ou "Não definido", preencher e limpar | `tests/unit/ficha-do-contato-tags-e-campos.test.tsx` + `contato-ficha-persistencia.test.ts` | componente + handler — **tela pendente** |
 | J41.6 | Disparo em seções; "+ Condição" abre cheio com o registro de tags vazio; campos do sistema contam; horário passado é recusado; ida e volta ao construtor sem duplicar o fluxo | `tests/unit/disparo-menu-de-condicao.test.tsx` + `disparo-publico-e-agendamento.test.ts` | componente + rotas — **tela pendente** |
+
+## J43 — Fluxo de disparo usado vira histórico, e o disparo se duplica `[P1]` (2026-10-02)
+
+Migration 0507. O fluxo de um disparo apontava para a definição VIVA: depois de
+enviado, "Ver fluxo" nem abria (etapa A, `16242d117`), e nada impedia de
+reescrever o grafo — o que anulava o `node_id` de todo o histórico. Regra única
+no banco (`fn_flow_estado_de_edicao_interno`): `editavel` (disparo `draft`/`paused`
+sem execução), `em_uso` (`scheduled`/`running` ou execução viva), `historico`
+(disparo terminado, ou já usado). Spec: `tests/e2e/fluxo-de-disparo-historico.spec.ts`
+(parte 5 do CI). Evidência prevista em `evidence/fluxo-de-disparo-historico/`.
+
+| Caso | O que prova | Estado |
+|---|---|---|
+| J43.1 | Disparo concluído: o cartão mostra "Definição histórica" e "Ver fluxo" abre o construtor | `tests/unit/disparo-ver-fluxo.test.tsx` + spec (não rodada aqui) |
+| J43.2 | Construtor de fluxo histórico: selo, aviso, sem Salvar nem "+", arrastar não move (getBoundingClientRect), painel em `fieldset` desabilitado | `tests/unit/fluxo-de-disparo-protegido-tela.test.tsx` + spec (não rodada aqui) |
+| J43.3 | Nenhum caminho altera o grafo protegido: RPC, REST direta (`flow_nodes`, `flow_edges`, `flows`), `service_role`; `node_id` do histórico intacto | `tests/invariants/fluxo-de-disparo-protegido.test.ts` (Postgres real) |
+| J43.4 | A demonstração: reescrever um fluxo usado (Automações, fora da regra) com os MESMOS ids anula o `node_id` dos eventos | idem |
+| J43.5 | Disparo com destinatário processado ou execução não se apaga (inclusive com `sent_count = 0`); rascunho apaga com a cascata | invariante + `tests/unit/fluxo-de-disparo-protegido-rotas.test.ts` |
+| J43.6 | Apagar a ORGANIZAÇÃO continua levando tudo, com histórico protegido dentro | invariante |
+| J43.7 | Duplicar: rascunho "(cópia)", fluxo com ids novos, config/posições/arestas, imagem copiada para a pasta nova; nada de execução, evento ou destinatário; a cópia é editável | invariante + rotas + spec (não rodada aqui) |
+
+**NÃO MEDIDO:** a spec E2E não rodou nesta máquina. O `next build` de produção foi
+morto por falta de memória (exit 137) na VPS de 8 GB que também roda a produção, e
+uma nova tentativa poderia levar o kernel a escolher um processo da produção; a
+prova de tela fica para o job `e2e` (parte 5). A concorrência real entre salvar e
+agendar (o `for share`) não tem teste com duas sessões. A cópia de imagem foi
+provada com Storage simulado, não com o Storage do Supabase.
+
+## J42 — Variáveis dos modelos, status real do disparo e mensagem em blocos `[P0]` (2026-09-30)
+
+Três frentes de uma rodada (migrations 0501 e 0502). Spec:
+`tests/e2e/modelo-variaveis-e-mensagem-em-blocos.spec.ts` (admin para Templates,
+manager para os construtores; cenário semeado e removido pela própria spec),
+rodada com `next build` + `next start` contra o Supabase local atualizado pelo
+`baseline.sql` em modo UPDATE (o caminho do `update.sh`). Evidência em
+`evidence/mensagem-em-blocos/`.
+
+| Caso | O que prova | Estado |
+|---|---|---|
+| J42.1 | Templates da Meta: `{{` abre o seletor em duas colunas (Campos do sistema / Campos personalizados do usuário), filtra pelo que se digita, e o campo escolhido vira etiqueta não editável — medido por `getBoundingClientRect`/`isContentEditable` (`evidence/mensagem-em-blocos/01-chaves-abrem-o-seletor.png`) | **MEDIDO EM TELA** |
+| J42.2 | `{{var1}}` digitado inteiro vira etiqueta; uma amostra por variável, na ordem do texto; "Enviar para revisão" travado até todas preenchidas; apagar a variável tira a amostra dela (`evidence/mensagem-em-blocos/02-etiquetas-e-amostras.png`) | **MEDIDO EM TELA** |
+| J42.3 | `{{VAR1}}` é apontado como variável inválida e trava o envio (`evidence/mensagem-em-blocos/03-variavel-invalida-apontada.png`) | **MEDIDO EM TELA** |
+| J42.4 | Automações: o nó antigo (texto + botão) abre como bloco; atraso, texto, imagem (upload real para `whatsapp-media/<org>/flows/<fluxo>/`) e botão de LINK no mesmo nó; o botão de link não vira saída (`evidence/mensagem-em-blocos/04-blocos-no-mesmo-no.png`) | **MEDIDO EM TELA** + banco |
+| J42.5 | O card tem a saída do botão E o "Próximo passo"; ligar o Próximo passo e salvar grava `config.blocks` e as duas arestas (`button:0` e a padrão), mantendo o id do botão antigo (`evidence/mensagem-em-blocos/05-proximo-passo-e-botao-ligados.png`) | **MEDIDO EM TELA** + banco |
+| J42.6 | Disparo em modo fluxo: o MESMO editor de blocos no construtor do disparo (`evidence/mensagem-em-blocos/06-disparo-mesmo-editor.png`) | **MEDIDO EM TELA** + banco |
+| J42.7 | Execução: blocos em ordem, atraso durável com cursor, retomada sem reenvio, botão ≠ Próximo passo, clique tardio desvia a mesma execução (e reabre a concluída), formato antigo espera o clique | `tests/unit/fluxo-mensagem-em-blocos.test.ts` (motor, worker e handler de verdade) + `tests/invariants/fluxo-mensagem-em-blocos.test.ts` |
+| J42.8 | Disparo: recusa da Meta = `failed`, `sent` só com mensagem aceita, `in_flow` enquanto não há desfecho, recusa que chega depois pelo webhook corrige o disparo | `tests/unit/disparo-status-real-do-envio.test.ts` + `tests/invariants/disparo-status-real-do-envio.test.ts` (funções e gatilhos SQL reais) |
+| J42.9 | `var1_teste`: criação declara NAMED e relê na Meta; contrato gravado POSITIONAL com `{{var1}}` envia com `parameter_name` | `tests/unit/modelo-variaveis-nomeadas.test.ts` + `meta-criar-modelo-oficial.test.ts` |
+
+**NÃO MEDIDO:** a criação e a aprovação na Meta de verdade (rig sem credencial;
+a rede para `graph.facebook.com` sai do servidor); o envio real pelo WhatsApp e o
+clique de um contato de verdade; o atraso curto pelo tique do `agent-worker`
+(provado pelo `runFlowWorkerTick`, que é a mesma função, mas o processo do worker
+não foi subido). `disparo-guiado-e-com-fluxo.spec.ts` está desatualizada desde o
+`ba11dc269` (tela de disparo em seções: o selo "Modo guiado" virou "Mensagem" e o
+botão `modo-fluxo` saiu) — falha igual na base, antes desta rodada.

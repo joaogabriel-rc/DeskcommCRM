@@ -87,6 +87,14 @@ export interface HandlerCtx {
   idempotencyKey?: string;
   /** Identidade estável do job interno; não usar claim, que muda em cada reclaim. */
   sourceJobId?: string;
+  /**
+   * Destinatário do DISPARO que originou este envio (migration 0501). Vive no
+   * ctx, e não no input, porque só o worker do disparo e o motor de fluxo o
+   * conhecem de fonte confiável; gravado em `messages.broadcast_recipient_id`,
+   * é o que liga a recusa do canal (inclusive a que chega depois, pelo
+   * webhook) ao status do destinatário.
+   */
+  broadcastRecipientId?: string;
   organization_id: string;
   actor: Actor;
   /**

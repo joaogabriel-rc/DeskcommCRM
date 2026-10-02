@@ -42,6 +42,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { InserirVariavel } from "@/components/catalogo/InserirVariavel";
 import { ValorDoCampo } from "@/components/catalogo/SeletorDeCampo";
 import { CriarModeloOficial } from "@/components/connections/TemplatesClient";
+import { AvisoDeFluxoProtegido } from "@/components/disparos/AvisoDeFluxoProtegido";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -156,6 +157,9 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
   const modo: ModoDeDisparo = disparo.modo ?? (disparo.fluxo ? "fluxo" : "guiado");
   const editavel = disparo.status === "draft" || disparo.status === "paused";
   const rascunho = disparo.status === "draft";
+  // O FLUXO tem regra própria (migration 0507): pausado depois que alguém entrou
+  // já é histórico. Sem a resposta do servidor, vale o rascunho, como antes.
+  const fluxoEditavel = disparo.fluxo?.uso ? disparo.fluxo.uso.estado === "editavel" : rascunho;
 
   const temCriterio = temCriterioDePublico(segmento);
   const previa = usePreviaDePublico(segmento, temCriterio);
@@ -201,6 +205,13 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
   }
 
   async function irParaConstrutor() {
+    // Fora de rascunho/pausa o botão é "Ver fluxo": só abre. Salvar aqui batia
+    // no 409 "Pause o disparo antes de editar" do PATCH, e a navegação nunca
+    // acontecia — o fluxo de um disparo concluído ficava inalcançável.
+    if (!editavel) {
+      if (disparo.fluxo?.id) router.push(`/app/flows/${disparo.fluxo.id}`);
+      return;
+    }
     // Salva ANTES de sair (nome, público, envio) e, se ainda é mensagem, troca o
     // modo — a rota cria o fluxo do disparo uma vez só e devolve o id dele.
     const r =
@@ -332,8 +343,13 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
           </div>
           <div className="flex flex-wrap gap-4 text-xs text-text-muted">
             <span>
-              {disparo.sent_count} {modo === "fluxo" ? t("entraram no fluxo") : t("enviados")}
+              {disparo.sent_count} {t("enviados")}
             </span>
+            {(disparo.in_flow_count ?? 0) > 0 && (
+              <span>
+                {disparo.in_flow_count} {modo === "fluxo" ? t("em andamento no fluxo") : t("aguardando o canal")}
+              </span>
+            )}
             <span>
               {disparo.failed_count} {t("falharam")}
             </span>
@@ -448,13 +464,14 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
                 "Monte aqui o que cada contato recebe: o primeiro passo costuma ser a mensagem com o modelo aprovado, e dali saem os caminhos dos botões, esperas e condições. Este fluxo é só deste disparo — não aparece em Automações.",
               )}
             </p>
+            <AvisoDeFluxoProtegido uso={disparo.fluxo?.uso} broadcastId={disparo.id} />
             <div className="flex flex-wrap gap-2">
               <Button
                 onClick={() => void irParaConstrutor()}
                 disabled={!disparo.fluxo || salvar.isPending}
                 data-testid="configurar-fluxo"
               >
-                {rascunho ? t("Abrir o Construtor de Fluxos") : t("Ver fluxo")}
+                {fluxoEditavel ? t("Abrir o Construtor de Fluxos") : t("Ver fluxo")}
               </Button>
               {rascunho && (
                 <Button variant="ghost" onClick={() => setVoltandoParaMensagem(true)} disabled={salvar.isPending}>

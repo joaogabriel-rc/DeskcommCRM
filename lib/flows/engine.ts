@@ -12,11 +12,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseServiceBoundary, type ServiceBoundary } from "@/lib/atendimento/fronteira";
 import type { EventRow } from "@/lib/event-log/dispatcher";
 import { motivoDoErro } from "@/lib/flows/erro";
-import { loadFlowGraph, nextNode } from "@/lib/flows/graph";
+import { BOTAO_CLICAVEL_POR_MS, casarSaidaDeBotao, saidasDeBotao } from "@/lib/flows/blocos";
+import { loadFlowGraph, nextNode, type FlowGraph } from "@/lib/flows/graph";
 import { executeActionNode } from "@/lib/flows/nodes/action";
 import { executeConditionNode } from "@/lib/flows/nodes/condition";
 import { executeDelayNode } from "@/lib/flows/nodes/delay";
-import { casarRespostaDeBotao, executeMessageNode } from "@/lib/flows/nodes/message";
+import { executeMessageNode } from "@/lib/flows/nodes/message";
 import { executeWebhookNode } from "@/lib/flows/nodes/webhook";
 import type {
   FlowExecutionRow,
@@ -87,6 +88,7 @@ function buildNodeCtx(
   return {
     admin,
     organizationId: execution.organization_id,
+    flowId: execution.flow_id,
     ruleId: execution.id,
     ruleName: `flow:${execution.flow_id}`,
     event: buildEventRow(execution),
@@ -97,6 +99,19 @@ function buildNodeCtx(
     // relida a cada retomada (delay, botão), e por isso a mensagem que sai
     // depois de uma espera usa a MESMA permissão que o disparo materializou.
     servicoAutorizado: parseServiceBoundary(execution.service_boundary ?? null),
+    broadcastRecipientId: execution.broadcast_recipient_id ?? null,
+    // O cursor só vale para o nó em que a execução PAROU (atraso dentro dele);
+    // ao avançar para outro nó ele volta a nulo (ver `runExecutionForward`).
+    cursor: execution.node_cursor ?? 0,
+    salvarCursor: async (cursor: number) => {
+      execution.node_cursor = cursor;
+      const { error } = await admin
+        .from("flow_executions")
+        .update({ node_cursor: cursor, updated_at: new Date().toISOString() })
+        .eq("id", execution.id)
+        .eq("organization_id", execution.organization_id);
+      if (error) logger.error("[flows.engine] node_cursor update failed", { error: error.message, id: execution.id });
+    },
   };
 }
 
@@ -120,6 +135,11 @@ async function runNode(ctx: FlowNodeCtx, node: FlowNodeRow): Promise<NodeOutcome
     default:
       return { kind: "failed", error: `unknown_node_type:${node.type}` };
   }
+}
+
+/** O nó tem a saída PADRÃO (Próximo passo) ligada a alguma etapa? */
+function temProximoPasso(graph: FlowGraph, nodeId: string): boolean {
+  return (graph.edgesBySource.get(nodeId) ?? []).some((e) => (e.source_handle ?? null) === null);
 }
 
 /**
@@ -172,30 +192,59 @@ export async function runExecutionForward(admin: SupabaseClient, executionId: st
       return;
     }
     if (outcome.kind === "wait_delay") {
-      await recordEvent(admin, execution, node.id, "waiting", { waiting_for: "delay", until: outcome.until });
+      await recordEvent(admin, execution, node.id, "waiting", {
+        waiting_for: "delay",
+        until: outcome.until,
+        ...(outcome.cursor !== undefined ? { cursor: outcome.cursor } : {}),
+      });
       await persist(admin, execution, {
         status: "waiting",
         waiting_for: "delay",
         waiting_node_id: node.id,
         current_node_id: node.id,
         next_execution_at: outcome.until,
+        // Atraso DENTRO do nó de mensagem: a retomada reentra este nó a partir
+        // deste bloco. Nó DELAY clássico: nulo, e a retomada segue adiante.
+        node_cursor: outcome.cursor ?? null,
       });
       return;
     }
 
     // advance
+    let escutar: { listening_node_id: string; listening_until: string } | null = null;
+    if (outcome.escutar) {
+      // Botão ≠ Próximo passo. Com a saída padrão ligada, o fluxo SEGUE por
+      // ela e os botões de fluxo ficam clicáveis — o clique tardio desvia esta
+      // execução. Sem ela, a execução espera o clique, como sempre esperou.
+      if (!temProximoPasso(graph, node.id)) {
+        await recordEvent(admin, execution, node.id, "waiting", { waiting_for: "button_reply" });
+        await persist(admin, execution, {
+          status: "waiting",
+          waiting_for: "button_reply",
+          waiting_node_id: node.id,
+          current_node_id: node.id,
+          node_cursor: null,
+        });
+        return;
+      }
+      escutar = {
+        listening_node_id: node.id,
+        listening_until: new Date(Date.now() + BOTAO_CLICAVEL_POR_MS).toISOString(),
+      };
+    }
     const next = nextNode(graph, node.id, outcome.handle);
     await recordEvent(admin, execution, node.id, "completed");
     if (!next) {
+      if (escutar) await persist(admin, execution, { ...escutar, node_cursor: null });
       await finish(admin, execution, { status: "completed" });
       return;
     }
-    execution = { ...execution, current_node_id: next.id };
+    execution = { ...execution, current_node_id: next.id, node_cursor: null };
     // Persiste o passo a cada nó — se o processo morrer no meio de um flow
     // longo, a retomada (worker/reply handler) parte do último nó concluído,
     // não do início.
     // eslint-disable-next-line no-await-in-loop
-    await persist(admin, execution, { current_node_id: next.id });
+    await persist(admin, execution, { current_node_id: next.id, node_cursor: null, ...(escutar ?? {}) });
   }
 
   await finish(admin, execution, { status: "failed", last_error: "max_steps_exceeded" });
@@ -316,14 +365,19 @@ export async function resumeWithButtonReply(
   const node = graph.nodesById.get(execution.waiting_node_id);
   if (!node) return { matched: false };
 
-  const index = casarRespostaDeBotao(node.config as MessageNodeConfig, replyText);
-  if (index === null) return { matched: false };
+  const saidas = saidasDeBotao(node.config as MessageNodeConfig);
+  const handle = casarSaidaDeBotao(saidas, replyText);
+  if (handle === null) return { matched: false };
 
   // Avança PARA ALÉM do nó que perguntou antes de retomar o laço — senão
   // runExecutionForward reexecutaria este mesmo nó (reenviando a pergunta em
   // vez de seguir o caminho escolhido).
-  const next = nextNode(graph, node.id, `button:${index}`);
-  await recordEvent(admin, execution, node.id, "resumed", { reply: replyText, option_index: index });
+  const next = nextNode(graph, node.id, handle);
+  await recordEvent(admin, execution, node.id, "resumed", {
+    reply: replyText,
+    option_index: saidas.findIndex((s) => s.handle === handle),
+    handle,
+  });
   await admin
     .from("flow_executions")
     .update({
@@ -331,6 +385,7 @@ export async function resumeWithButtonReply(
       waiting_for: null,
       waiting_node_id: null,
       current_node_id: next?.id ?? node.id,
+      node_cursor: null,
       completed_at: next ? null : new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
@@ -340,9 +395,97 @@ export async function resumeWithButtonReply(
   return { matched: true };
 }
 
+/**
+ * O CLIQUE TARDIO num botão de fluxo (0502): o fluxo já seguiu pelo Próximo
+ * passo, e o contato clica depois. Decisão do dono do produto: o clique DESVIA
+ * esta mesma execução para a saída do botão — a espera em curso (um atraso
+ * adiante) é cancelada e, se a execução já terminou, ela é REABERTA. Uma linha
+ * só: o índice "uma execução ativa por fluxo e contato" e o "uma por
+ * destinatário de disparo" continuam valendo.
+ *
+ * Só desvia quem pode: execução `waiting` ou `completed` (a `running` está no
+ * meio de um passo; `failed` e `cancelled` — inclusive a anonimizada pela LGPD —
+ * não voltam). A atualização é condicional ao estado lido: dois cliques ao
+ * mesmo tempo desviam uma vez.
+ */
+export async function resumeWithLateButtonClick(
+  admin: SupabaseClient,
+  execution: FlowExecutionRow,
+  replyText: string,
+): Promise<{ matched: boolean }> {
+  if (!execution.listening_node_id || !execution.listening_until) return { matched: false };
+  if (new Date(execution.listening_until).getTime() < Date.now()) return { matched: false };
+  if (execution.status !== "waiting" && execution.status !== "completed") return { matched: false };
+
+  const graph = await loadFlowGraph(admin, execution.organization_id, execution.flow_id);
+  const node = graph.nodesById.get(execution.listening_node_id);
+  if (!node) return { matched: false };
+  const saidas = saidasDeBotao(node.config as MessageNodeConfig);
+  const handle = casarSaidaDeBotao(saidas, replyText);
+  if (handle === null) return { matched: false };
+  const next = nextNode(graph, node.id, handle);
+  // Botão sem etapa ligada: o clique foi reconhecido, mas não há para onde ir.
+  if (!next) return { matched: false };
+
+  const { data, error } = await admin
+    .from("flow_executions")
+    .update({
+      status: "running",
+      waiting_for: null,
+      waiting_node_id: null,
+      next_execution_at: null,
+      claimed_until: null,
+      node_cursor: null,
+      listening_node_id: null,
+      listening_until: null,
+      current_node_id: next.id,
+      completed_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", execution.id)
+    .eq("organization_id", execution.organization_id)
+    .eq("status", execution.status)
+    .eq("listening_node_id", node.id)
+    .select("id")
+    .maybeSingle();
+  if (error || !data) {
+    if (error) logger.warn("[flows.engine] desvio pelo clique tardio recusado", { error: error.message, id: execution.id });
+    return { matched: false };
+  }
+  await recordEvent(admin, execution, node.id, "resumed", {
+    reply: replyText,
+    handle,
+    late_click: true,
+    previous_status: execution.status,
+  });
+  await runExecutionForward(admin, execution.id);
+  return { matched: true };
+}
+
 /** Retomada pelo relógio do DELAY (cron/flow-worker). */
 export async function resumeWithDelay(admin: SupabaseClient, execution: FlowExecutionRow): Promise<void> {
   if (execution.status !== "waiting" || execution.waiting_for !== "delay" || !execution.waiting_node_id) return;
+
+  // Atraso DENTRO do nó de mensagem: reentra o MESMO nó, a partir do cursor.
+  if (execution.node_cursor !== null && execution.node_cursor !== undefined) {
+    await recordEvent(admin, execution, execution.waiting_node_id, "resumed", { cursor: execution.node_cursor });
+    await admin
+      .from("flow_executions")
+      .update({
+        status: "running",
+        waiting_for: null,
+        waiting_node_id: null,
+        next_execution_at: null,
+        claimed_until: null,
+        current_node_id: execution.waiting_node_id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", execution.id)
+      .eq("organization_id", execution.organization_id);
+    await runExecutionForward(admin, execution.id);
+    return;
+  }
+
   const graph = await loadFlowGraph(admin, execution.organization_id, execution.flow_id);
   const next = nextNode(graph, execution.waiting_node_id, null);
   await recordEvent(admin, execution, execution.waiting_node_id, "resumed", {});
