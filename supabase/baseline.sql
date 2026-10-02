@@ -45717,6 +45717,54 @@ $$;
 revoke all on function public.fn_broadcast_duplicar(uuid, uuid) from public, anon;
 grant execute on function public.fn_broadcast_duplicar(uuid, uuid) to authenticated, service_role;
 
+-- ---- um fluxo só se liga a disparo em rascunho (migration 0508) ----
+-- Ver supabase/migrations/20261002010000_0508_fluxo_so_se_liga_a_disparo_em_rascunho.sql
+-- para o racional. Idempotente: create or replace, gatilho com drop if exists.
+
+create or replace function public.fn_trg_flow_vinculo_ao_disparo()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_status text;
+begin
+  if new.broadcast_id is null then
+    return new;
+  end if;
+  if tg_op = 'UPDATE'
+     and new.broadcast_id is not distinct from old.broadcast_id
+     and new.organization_id is not distinct from old.organization_id then
+    return new;
+  end if;
+
+  select b.status into v_status
+    from public.broadcasts b
+   where b.id = new.broadcast_id
+     and b.organization_id = new.organization_id
+     for share;
+  if not found then
+    raise exception 'flow_vinculo_invalido:disparo_fora_da_organizacao'
+      using errcode = 'PT409',
+            hint = 'O fluxo só pode ser ligado a um disparo da mesma organização.';
+  end if;
+  if v_status <> 'draft' then
+    raise exception 'flow_vinculo_invalido:%', v_status
+      using errcode = 'PT409',
+            hint = 'O fluxo só pode ser ligado a um disparo em rascunho.';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.fn_trg_flow_vinculo_ao_disparo() from public, anon, authenticated, service_role;
+
+drop trigger if exists trg_flows_vinculo_ao_disparo on public.flows;
+create trigger trg_flows_vinculo_ao_disparo
+  before insert or update of broadcast_id, organization_id on public.flows
+  for each row execute function public.fn_trg_flow_vinculo_ao_disparo();
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
