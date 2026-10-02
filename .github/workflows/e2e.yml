@@ -1111,6 +1111,7 @@ jobs:
         fluxo-construtor-e-modelo-aprovado.spec.ts
         fluxo-apagar-aresta.spec.ts
         disparo-guiado-e-com-fluxo.spec.ts
+        fluxo-de-disparo-historico.spec.ts
         modelo-oficial-criado-pelo-crm.spec.ts
         modelo-variaveis-e-mensagem-em-blocos.spec.ts
         jev-decisoes-rapidas.spec.ts

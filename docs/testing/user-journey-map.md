@@ -3315,6 +3315,33 @@ Testing Library), e a prova pela tela fica pendente, com prioridade.
 | J41.5 | Ficha do contato: tags como chips, "+ Adicionar tag" com busca soma sem substituir, remover uma a uma; todos os campos com valor ou "Não definido", preencher e limpar | `tests/unit/ficha-do-contato-tags-e-campos.test.tsx` + `contato-ficha-persistencia.test.ts` | componente + handler — **tela pendente** |
 | J41.6 | Disparo em seções; "+ Condição" abre cheio com o registro de tags vazio; campos do sistema contam; horário passado é recusado; ida e volta ao construtor sem duplicar o fluxo | `tests/unit/disparo-menu-de-condicao.test.tsx` + `disparo-publico-e-agendamento.test.ts` | componente + rotas — **tela pendente** |
 
+## J43 — Fluxo de disparo usado vira histórico, e o disparo se duplica `[P1]` (2026-10-02)
+
+Migration 0507. O fluxo de um disparo apontava para a definição VIVA: depois de
+enviado, "Ver fluxo" nem abria (etapa A, `16242d117`), e nada impedia de
+reescrever o grafo — o que anulava o `node_id` de todo o histórico. Regra única
+no banco (`fn_flow_estado_de_edicao_interno`): `editavel` (disparo `draft`/`paused`
+sem execução), `em_uso` (`scheduled`/`running` ou execução viva), `historico`
+(disparo terminado, ou já usado). Spec: `tests/e2e/fluxo-de-disparo-historico.spec.ts`
+(parte 5 do CI). Evidência prevista em `evidence/fluxo-de-disparo-historico/`.
+
+| Caso | O que prova | Estado |
+|---|---|---|
+| J43.1 | Disparo concluído: o cartão mostra "Definição histórica" e "Ver fluxo" abre o construtor | `tests/unit/disparo-ver-fluxo.test.tsx` + spec (não rodada aqui) |
+| J43.2 | Construtor de fluxo histórico: selo, aviso, sem Salvar nem "+", arrastar não move (getBoundingClientRect), painel em `fieldset` desabilitado | `tests/unit/fluxo-de-disparo-protegido-tela.test.tsx` + spec (não rodada aqui) |
+| J43.3 | Nenhum caminho altera o grafo protegido: RPC, REST direta (`flow_nodes`, `flow_edges`, `flows`), `service_role`; `node_id` do histórico intacto | `tests/invariants/fluxo-de-disparo-protegido.test.ts` (Postgres real) |
+| J43.4 | A demonstração: reescrever um fluxo usado (Automações, fora da regra) com os MESMOS ids anula o `node_id` dos eventos | idem |
+| J43.5 | Disparo com destinatário processado ou execução não se apaga (inclusive com `sent_count = 0`); rascunho apaga com a cascata | invariante + `tests/unit/fluxo-de-disparo-protegido-rotas.test.ts` |
+| J43.6 | Apagar a ORGANIZAÇÃO continua levando tudo, com histórico protegido dentro | invariante |
+| J43.7 | Duplicar: rascunho "(cópia)", fluxo com ids novos, config/posições/arestas, imagem copiada para a pasta nova; nada de execução, evento ou destinatário; a cópia é editável | invariante + rotas + spec (não rodada aqui) |
+
+**NÃO MEDIDO:** a spec E2E não rodou nesta máquina. O `next build` de produção foi
+morto por falta de memória (exit 137) na VPS de 8 GB que também roda a produção, e
+uma nova tentativa poderia levar o kernel a escolher um processo da produção; a
+prova de tela fica para o job `e2e` (parte 5). A concorrência real entre salvar e
+agendar (o `for share`) não tem teste com duas sessões. A cópia de imagem foi
+provada com Storage simulado, não com o Storage do Supabase.
+
 ## J42 — Variáveis dos modelos, status real do disparo e mensagem em blocos `[P0]` (2026-09-30)
 
 Três frentes de uma rodada (migrations 0501 e 0502). Spec:
