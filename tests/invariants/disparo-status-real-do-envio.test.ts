@@ -65,10 +65,13 @@ function seed(): void {
       on conflict do nothing;
     insert into public.broadcasts (id, organization_id, name, status) values
       ('${DISPARO}', '${ORG}', 'Disparo 0501', 'running'),
-      ('${DISPARO_FLUXO}', '${ORG}', 'Disparo 0501 fluxo', 'running')
+      ('${DISPARO_FLUXO}', '${ORG}', 'Disparo 0501 fluxo', 'draft')
       on conflict do nothing;
+    -- O fluxo se liga com o disparo em RASCUNHO, como no produto (a 0508 recusa
+    -- ligar a um disparo que já saiu); só então o disparo vai a running.
     insert into public.flows (id, organization_id, name, trigger_type, broadcast_id)
       values ('${FLUXO}', '${ORG}', 'Fluxo 0501', 'broadcast', '${DISPARO_FLUXO}') on conflict do nothing;
+    update public.broadcasts set status = 'running' where id = '${DISPARO_FLUXO}';
     insert into public.broadcast_recipients (id, organization_id, broadcast_id, contact_id, status, service_boundary) values
       ('${R1}', '${ORG}', '${DISPARO}', '${C1}', 'in_flow', ${permissao(C1)}),
       ('${R2}', '${ORG}', '${DISPARO}', '${C2}', 'in_flow', ${permissao(C2)}),

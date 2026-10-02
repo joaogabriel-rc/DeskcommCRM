@@ -14,10 +14,12 @@
 --
 -- ─── A regra ────────────────────────────────────────────────────────────────
 -- Quando o vínculo NASCE ou MUDA (insert com `broadcast_id`, ou update que troca
--- `broadcast_id`/`organization_id`), o disparo tem de ser da MESMA organização e
--- estar em `draft` — o único estado em que o produto cria o fluxo do disparo
--- (`criarFluxoDoDisparo`, troca de modo só em rascunho) e em que a duplicação
--- (0507) o cria. `broadcast_id` NULL não é tocado: Automações seguem iguais.
+-- `broadcast_id`/`organization_id`), o disparo tem de estar em `draft` — o único
+-- estado em que o produto cria o fluxo do disparo (`criarFluxoDoDisparo`, troca
+-- de modo só em rascunho) e em que a duplicação (0507) o cria. Ser da MESMA
+-- organização continua garantido pela FK composta `flows_broadcast_org_fk`
+-- (0399), que recusa o vínculo cruzado com o erro de sempre. `broadcast_id`
+-- NULL não é tocado: Automações seguem iguais.
 -- Trocar de um disparo para OUTRO cai nas duas guardas: a 0507 exige o fluxo de
 -- origem editável, esta exige o disparo de destino em rascunho.
 --
@@ -53,10 +55,11 @@ begin
    where b.id = new.broadcast_id
      and b.organization_id = new.organization_id
      for share;
+  -- Disparo inexistente ou de OUTRA organização: quem recusa é a FK composta
+  -- `flows_broadcast_org_fk` (0399), com o erro de sempre — esta regra é sobre
+  -- o ESTADO do disparo, o isolamento já era garantido pela estrutura.
   if not found then
-    raise exception 'flow_vinculo_invalido:disparo_fora_da_organizacao'
-      using errcode = 'PT409',
-            hint = 'O fluxo só pode ser ligado a um disparo da mesma organização.';
+    return new;
   end if;
   if v_status <> 'draft' then
     raise exception 'flow_vinculo_invalido:%', v_status

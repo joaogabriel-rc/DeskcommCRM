@@ -102,6 +102,7 @@ describe("INSERT de fluxo com broadcast_id", () => {
     ).toContain(`flow_vinculo_invalido:${status}`);
   });
 
+  // O isolamento é da estrutura (FK composta, 0399); a 0508 não o substitui.
   it("disparo de OUTRA organização (mesmo em rascunho): recusado — gestor e service_role", () => {
     const dB = disparo(ORG_B, "draft");
     expect(
@@ -109,13 +110,13 @@ describe("INSERT de fluxo com broadcast_id", () => {
         como(MGR_A, `insert into public.flows (organization_id, name, trigger_type, broadcast_id)
                       values ('${ORG_A}', 'x', 'broadcast', '${dB}');`),
       ),
-    ).toContain("flow_vinculo_invalido:disparo_fora_da_organizacao");
+    ).toContain("flows_broadcast_org_fk");
     expect(
       erroDe(() =>
         comoServiceRole(`insert into public.flows (organization_id, name, trigger_type, broadcast_id)
                           values ('${ORG_A}', 'x', 'broadcast', '${dB}');`),
       ),
-    ).toContain("flow_vinculo_invalido:disparo_fora_da_organizacao");
+    ).toContain("flows_broadcast_org_fk");
     expect(lastLine(sql(`select count(*) from public.flows where broadcast_id = '${dB}'`))).toBe("0");
   });
 });
@@ -147,8 +148,8 @@ describe("UPDATE de broadcast_id", () => {
   it("NULL → disparo de outra organização: recusado (também service_role)", () => {
     const f = automacao();
     const dB = disparo(ORG_B, "draft");
-    expect(erroDe(() => como(MGR_A, ligar(f, dB)))).toContain("flow_vinculo_invalido:disparo_fora_da_organizacao");
-    expect(erroDe(() => comoServiceRole(ligar(f, dB)))).toContain("flow_vinculo_invalido:disparo_fora_da_organizacao");
+    expect(erroDe(() => como(MGR_A, ligar(f, dB)))).toContain("flows_broadcast_org_fk");
+    expect(erroDe(() => comoServiceRole(ligar(f, dB)))).toContain("flows_broadcast_org_fk");
   });
 
   it("já ligado a um rascunho → OUTRO disparo não-rascunho: recusado; → outro rascunho: aceito", () => {

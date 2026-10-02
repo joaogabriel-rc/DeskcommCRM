@@ -45744,10 +45744,11 @@ begin
    where b.id = new.broadcast_id
      and b.organization_id = new.organization_id
      for share;
+  -- Disparo inexistente ou de OUTRA organização: quem recusa é a FK composta
+  -- `flows_broadcast_org_fk` (0399), com o erro de sempre — esta regra é sobre
+  -- o ESTADO do disparo, o isolamento já era garantido pela estrutura.
   if not found then
-    raise exception 'flow_vinculo_invalido:disparo_fora_da_organizacao'
-      using errcode = 'PT409',
-            hint = 'O fluxo só pode ser ligado a um disparo da mesma organização.';
+    return new;
   end if;
   if v_status <> 'draft' then
     raise exception 'flow_vinculo_invalido:%', v_status
