@@ -47,6 +47,13 @@ const ORG = "org-a";
 const req = (url: string, method: string, body?: unknown) =>
   new NextRequest(`https://crm.test${url}`, { method, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
+/** O client em memória com a RPC trocada: devolver um ERRO do banco é o que o caso precisa. */
+type Rpc = (nome: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
+function trocarRpc(nome: string, erro: { code: string; message: string }) {
+  const cliente = h.banco.client as unknown as { rpc: Rpc };
+  const original = cliente.rpc.bind(cliente);
+  cliente.rpc = async (n, args) => (n === nome ? { data: null, error: erro } : original(n, args));
+}
 const corpo = async (r: Response) =>
   (await r.json()) as { data?: Record<string, unknown>; error?: { code: string; message: string; details?: unknown } };
 
@@ -119,11 +126,7 @@ describe("salvar o grafo (PUT /flows/[id]/graph)", () => {
     cenario("draft");
     // A pergunta disse "editável"; o gatilho do banco recusa na escrita (o
     // disparo foi agendado no meio) — a RPC devolve o erro PT409.
-    const original = h.banco.client.rpc.bind(h.banco.client);
-    h.banco.client.rpc = (async (nome: string, args: Record<string, unknown>) =>
-      nome === "fn_flow_replace_graph"
-        ? { data: null, error: { code: "PT409", message: "flow_protegido:em_uso" } }
-        : original(nome, args)) as typeof h.banco.client.rpc;
+    trocarRpc("fn_flow_replace_graph", { code: "PT409", message: "flow_protegido:em_uso" });
     const r = await salvarGrafo(req("/api/v1/flows/f1/graph", "PUT", grafo), params("f1"));
     expect(r.status).toBe(409);
     expect((await corpo(r)).error?.details).toEqual({ estado: "em_uso" });
@@ -217,11 +220,7 @@ describe("duplicar (POST /broadcasts/[id]/duplicar)", () => {
   });
 
   it("disparo de outra organização (P0002): 404", async () => {
-    const original = h.banco.client.rpc.bind(h.banco.client);
-    h.banco.client.rpc = (async (nome: string, args: Record<string, unknown>) =>
-      nome === "fn_broadcast_duplicar"
-        ? { data: null, error: { code: "P0002", message: "broadcast_not_found_in_organization" } }
-        : original(nome, args)) as typeof h.banco.client.rpc;
+    trocarRpc("fn_broadcast_duplicar", { code: "P0002", message: "broadcast_not_found_in_organization" });
     expect((await duplicar(req("/api/v1/broadcasts/x/duplicar", "POST", {}), params("x"))).status).toBe(404);
   });
 });

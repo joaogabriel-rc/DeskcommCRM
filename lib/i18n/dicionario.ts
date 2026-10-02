@@ -14043,7 +14043,6 @@ export const DICIONARIO: Traducoes = {
   "Ajustar": { es: "Ajustar" },
   "Tudo o que se liga e desliga, se está ligado e onde se ajusta.": { es: "Todo lo que se activa y desactiva, si está activado y dónde se ajusta." },
   "Duplicar disparo": { es: "Duplicar envío" },
-  "Histórico": { es: "Historial" },
   "Em uso": { es: "En uso" },
   "Definição histórica — somente leitura": { es: "Definición histórica — solo lectura" },
   "Fluxo em uso — somente leitura": { es: "Flujo en uso — solo lectura" },

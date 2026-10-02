@@ -84,7 +84,6 @@ export async function POST(
     const admin = createAdminClient();
     for (const destino of destinos) {
       const origem = `${orgId}/flows/${r.flow_id_origem}/${destino.slice(pastaNova.length)}`;
-      // eslint-disable-next-line no-await-in-loop
       const { error: copiaErr } = await admin.storage.from(BUCKET).copy(origem, destino);
       if (copiaErr) {
         logger.error("[broadcasts.duplicar] cópia de imagem falhou", {
