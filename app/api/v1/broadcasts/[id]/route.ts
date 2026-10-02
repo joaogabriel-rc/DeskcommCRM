@@ -37,12 +37,13 @@ import { requireSupportWrite } from "@/lib/impersonate/support";
 import {
   criarFluxoDoDisparo,
   fluxoDoDisparo,
+  fluxoDoDisparoComUso,
   prontidaoDoFluxo,
   problemasDaMensagemGuiada,
 } from "@/lib/disparos/fluxo-do-disparo";
 import { horarioJaPassou } from "@/lib/disparos/agendamento";
 import { listarPublico, resumoDoSegmento } from "@/lib/disparos/segmento";
-import { recusaDeProtecao, usoDoFluxo } from "@/lib/flows/uso";
+import { recusaDeProtecao } from "@/lib/flows/uso";
 import type { MessageNodeConfig } from "@/lib/flows/types";
 import {
   atualizarDisparoSchema,
@@ -86,14 +87,6 @@ async function disparoTemHistorico(db: SupabaseClient, orgId: string, id: string
   return (execucoes ?? 0) > 0;
 }
 
-/** O fluxo do disparo com o estado de edição (migration 0507), para a tela. */
-async function fluxoComUso(db: SupabaseClient, orgId: string, id: string) {
-  const fluxo = await fluxoDoDisparo(db, orgId, id).catch(() => null);
-  if (!fluxo) return null;
-  const uso = await usoDoFluxo(db, fluxo.id).catch(() => null);
-  return { ...fluxo, uso };
-}
-
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -125,7 +118,7 @@ export async function GET(
     .order("updated_at", { ascending: false })
     .limit(20);
 
-  const fluxo = await fluxoComUso(supabase, authz.org.orgId, id);
+  const fluxo = await fluxoDoDisparoComUso(supabase, authz.org.orgId, id);
   return ok(
     { ...(data as unknown as DisparoRow), modo: fluxo ? "fluxo" : "guiado", fluxo, problemas: falhas ?? [] },
     { requestId },
@@ -227,7 +220,7 @@ export async function PATCH(
       requestId,
       metadata: { campos: Object.keys(patch), ...(parsed.data.modo ? { modo: parsed.data.modo } : {}) },
     });
-    const fluxoAtual = await fluxoComUso(supabase, authz.org.orgId, id);
+    const fluxoAtual = await fluxoDoDisparoComUso(supabase, authz.org.orgId, id);
     return ok(
       { ...(data as unknown as DisparoRow), modo: fluxoAtual ? "fluxo" : "guiado", fluxo: fluxoAtual },
       { requestId },
