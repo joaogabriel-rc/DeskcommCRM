@@ -44,6 +44,7 @@ vi.mock("@/hooks/disparos/useDisparos", () => ({
   useDisparo: () => ({ data: h.disparo }),
   useSalvarDisparo: () => ({ mutateAsync: h.salvar, isPending: false }),
   useAcaoDeDisparo: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDuplicarDisparo: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePreviaDePublico: () => ({ data: { total: 2 }, isLoading: false }),
 }));
 // O painel dos Fluxos e a criação de modelo não entram no caminho do botão.
@@ -141,5 +142,38 @@ describe("disparo em edição continua salvando antes de abrir", () => {
     await waitFor(() => expect(h.push).toHaveBeenCalledWith(`/app/flows/${FLUXO_ID}`));
     expect(h.salvar).toHaveBeenCalledTimes(1);
     expect(h.salvar.mock.invocationCallOrder[0]!).toBeLessThan(h.push.mock.invocationCallOrder[0]!);
+  });
+});
+
+describe("0507 · o cartão do fluxo conta o estado de edição", () => {
+  it("pausado depois que alguém entrou: o fluxo é histórico — 'Ver fluxo' e o aviso com Duplicar", () => {
+    montar(
+      disparo({
+        status: "paused",
+        fluxo: {
+          id: FLUXO_ID,
+          status: "active",
+          uso: { escopo: "disparo", estado: "historico", vivas: 0, usado: true, disparo_status: "paused" },
+        },
+      }),
+    );
+    expect(screen.getByTestId("configurar-fluxo").textContent).toContain("Ver fluxo");
+    expect(screen.getByTestId("aviso-fluxo-protegido").getAttribute("data-estado")).toBe("historico");
+    expect(screen.getByTestId("duplicar-disparo")).toBeTruthy();
+  });
+
+  it("pausado antes de alguém entrar: o fluxo segue editável — sem aviso", () => {
+    montar(
+      disparo({
+        status: "paused",
+        fluxo: {
+          id: FLUXO_ID,
+          status: "active",
+          uso: { escopo: "disparo", estado: "editavel", vivas: 0, usado: false, disparo_status: "paused" },
+        },
+      }),
+    );
+    expect(screen.getByTestId("configurar-fluxo").textContent).toContain("Abrir o Construtor de Fluxos");
+    expect(screen.queryByTestId("aviso-fluxo-protegido")).toBeNull();
   });
 });

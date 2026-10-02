@@ -42,6 +42,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { InserirVariavel } from "@/components/catalogo/InserirVariavel";
 import { ValorDoCampo } from "@/components/catalogo/SeletorDeCampo";
 import { CriarModeloOficial } from "@/components/connections/TemplatesClient";
+import { AvisoDeFluxoProtegido } from "@/components/disparos/AvisoDeFluxoProtegido";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -156,6 +157,9 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
   const modo: ModoDeDisparo = disparo.modo ?? (disparo.fluxo ? "fluxo" : "guiado");
   const editavel = disparo.status === "draft" || disparo.status === "paused";
   const rascunho = disparo.status === "draft";
+  // O FLUXO tem regra própria (migration 0507): pausado depois que alguém entrou
+  // já é histórico. Sem a resposta do servidor, vale o rascunho, como antes.
+  const fluxoEditavel = disparo.fluxo?.uso ? disparo.fluxo.uso.estado === "editavel" : rascunho;
 
   const temCriterio = temCriterioDePublico(segmento);
   const previa = usePreviaDePublico(segmento, temCriterio);
@@ -460,13 +464,14 @@ export function DisparoEditor({ inicial }: { inicial: DisparoDetalhe }) {
                 "Monte aqui o que cada contato recebe: o primeiro passo costuma ser a mensagem com o modelo aprovado, e dali saem os caminhos dos botões, esperas e condições. Este fluxo é só deste disparo — não aparece em Automações.",
               )}
             </p>
+            <AvisoDeFluxoProtegido uso={disparo.fluxo?.uso} broadcastId={disparo.id} />
             <div className="flex flex-wrap gap-2">
               <Button
                 onClick={() => void irParaConstrutor()}
                 disabled={!disparo.fluxo || salvar.isPending}
                 data-testid="configurar-fluxo"
               >
-                {rascunho ? t("Abrir o Construtor de Fluxos") : t("Ver fluxo")}
+                {fluxoEditavel ? t("Abrir o Construtor de Fluxos") : t("Ver fluxo")}
               </Button>
               {rascunho && (
                 <Button variant="ghost" onClick={() => setVoltandoParaMensagem(true)} disabled={salvar.isPending}>

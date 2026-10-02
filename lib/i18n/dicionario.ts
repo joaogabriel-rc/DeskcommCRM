@@ -14042,6 +14042,15 @@ export const DICIONARIO: Traducoes = {
   "Não dá para ver daqui": { es: "No se puede ver desde aquí" },
   "Ajustar": { es: "Ajustar" },
   "Tudo o que se liga e desliga, se está ligado e onde se ajusta.": { es: "Todo lo que se activa y desactiva, si está activado y dónde se ajusta." },
+  "Duplicar disparo": { es: "Duplicar envío" },
+  "Histórico": { es: "Historial" },
+  "Em uso": { es: "En uso" },
+  "Definição histórica — somente leitura": { es: "Definición histórica — solo lectura" },
+  "Fluxo em uso — somente leitura": { es: "Flujo en uso — solo lectura" },
+  "Ainda há contatos que podem responder aos botões deste fluxo:": { es: "Todavía hay contactos que pueden responder a los botones de este flujo:" },
+  "Contatos com o fluxo em execução agora:": { es: "Contactos con el flujo en ejecución ahora:" },
+  "Este fluxo está em uso: há contatos dentro dele agora. Ele não pode ser editado — duplique o disparo para editar uma cópia.": { es: "Este flujo está en uso: hay contactos dentro de él ahora. No se puede editar — duplica el envío para editar una copia." },
+  "Esta é a definição que o disparo usou. Ela fica como histórico e não pode ser editada — duplique o disparo para editar uma cópia.": { es: "Esta es la definición que usó el envío. Queda como historial y no se puede editar — duplica el envío para editar una copia." },
 };
 
 /**

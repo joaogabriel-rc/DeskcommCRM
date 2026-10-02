@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useT } from "@/lib/i18n/IdiomaProvider";
 import { ClockCounterClockwise } from "@/lib/ui/icons";
 import { resumoDoGatilho } from "@/lib/flows/triggers";
+import { canvasSomenteLeitura } from "@/lib/flows/uso";
 
 interface Props {
   flowId: string;
@@ -47,6 +48,9 @@ export function PublishBar({ flowId, flow, onSave, saving }: Props) {
   const isActive = flow.status === "active";
   // Fluxo de DISPARO (0399): liga e desliga com o disparo, não por aqui.
   const doDisparo = !!flow.broadcast_id;
+  // A mesma regra do canvas: disparo pergunta ao banco (0507); Automações, `active`.
+  const somenteLeitura = canvasSomenteLeitura(flow, flow.uso);
+  const estadoDoDisparo = doDisparo ? flow.uso?.estado : null;
 
   // O fluxo nasce "Sem título" (abre direto no construtor): o nome se edita aqui,
   // e é gravado ao sair do campo — sem botão a mais para um gesto de uma palavra.
@@ -74,7 +78,17 @@ export function PublishBar({ flowId, flow, onSave, saving }: Props) {
           className="h-8 w-56 font-medium"
           data-testid="nome-do-fluxo"
         />
-        <Badge variant={STATUS_VARIANT[flow.status]}>{t(STATUS_LABEL[flow.status])}</Badge>
+        {estadoDoDisparo === "historico" ? (
+          <Badge variant="outline" data-testid="estado-do-fluxo">
+            {t("Histórico")}
+          </Badge>
+        ) : estadoDoDisparo === "em_uso" ? (
+          <Badge variant="default" data-testid="estado-do-fluxo">
+            {t("Em uso")}
+          </Badge>
+        ) : (
+          <Badge variant={STATUS_VARIANT[flow.status]}>{t(STATUS_LABEL[flow.status])}</Badge>
+        )}
         {doDisparo && (
           <Link
             href={`/app/disparos/${flow.broadcast_id}`}
@@ -93,8 +107,8 @@ export function PublishBar({ flowId, flow, onSave, saving }: Props) {
           <ClockCounterClockwise size={14} aria-hidden className="mr-1.5" />
           {t("Atividade")}
         </Button>
-        {!isActive && (
-          <Button type="button" variant="outline" size="sm" onClick={onSave} disabled={saving}>
+        {!somenteLeitura && (
+          <Button type="button" variant="outline" size="sm" onClick={onSave} disabled={saving} data-testid="salvar-fluxo">
             {saving ? t("Salvando…") : t("Salvar")}
           </Button>
         )}

@@ -5,11 +5,14 @@ import { toast } from "sonner";
 import { apiClient } from "@/lib/api/client";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import type { FlowNodeRow, FlowEdgeRow } from "@/lib/flows/types";
+import type { UsoDoFluxo } from "@/lib/flows/uso";
 import type { FlowRow } from "./useFlows";
 
 export interface FlowDetailRow extends FlowRow {
   nodes: FlowNodeRow[];
   edges: FlowEdgeRow[];
+  /** Estado de edição do fluxo de disparo (migration 0507); `null` em Automações. */
+  uso?: UsoDoFluxo | null;
 }
 
 export function flowQueryKey(id: string) {

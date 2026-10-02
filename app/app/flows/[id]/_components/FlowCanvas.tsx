@@ -17,12 +17,14 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
+import { AvisoDeFluxoProtegido } from "@/components/disparos/AvisoDeFluxoProtegido";
 import { Button } from "@/components/ui/button";
 import { randomId } from "@/lib/random-id";
 import { Plus, X } from "@/lib/ui/icons";
 import { acaoPorTipo } from "@/lib/flows/acoes";
 import { conectarSaida, podarArestasDeBotaoOrfas, saidaLivre } from "@/lib/flows/arestas";
 import type { FlowNodeType } from "@/lib/flows/types";
+import { canvasSomenteLeitura } from "@/lib/flows/uso";
 import { fromReactFlow, toReactFlow, type RFEdge, type RFNode } from "@/lib/flows/ui-mappers";
 import { useFlow, useSaveFlowGraph } from "@/hooks/flows/useFlow";
 import type { FlowDetailRow } from "@/hooks/flows/useFlow";
@@ -73,7 +75,9 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
   });
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const isReadOnly = flow?.status === "active";
+  // Disparo: a regra do banco (migration 0507) — histórico ou em uso não se
+  // edita. Automações: `active` trava, como sempre.
+  const isReadOnly = canvasSomenteLeitura(flow, flow?.uso);
 
   const onNodeClick = useCallback<NodeMouseHandler<RFNode>>((_, node) => setSelectedNodeId(node.id), []);
   const onPaneClick = useCallback(() => setSelectedNodeId(null), []);
@@ -203,6 +207,7 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+      if (isReadOnly) return;
       const type = e.dataTransfer.getData("application/x-flow-node-type") as FlowNodeType | "";
       if (!type) return;
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
@@ -216,7 +221,7 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
         }),
       );
     },
-    [screenToFlowPosition, setNodes],
+    [screenToFlowPosition, setNodes, isReadOnly],
   );
 
   const onSave = useCallback(() => {
@@ -230,6 +235,9 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
   return (
     <div className="flex h-full min-h-[600px] w-full flex-col">
       {flow && <PublishBar flowId={flowId} flow={flow} onSave={onSave} saving={saveGraph.isPending} />}
+      {flow?.broadcast_id && (
+        <AvisoDeFluxoProtegido uso={flow.uso} broadcastId={flow.broadcast_id} className="mx-3 mt-3" />
+      )}
       <div className="flex flex-1 overflow-hidden">
         <div className="relative h-full flex-1" onDragOver={onDragOver} onDrop={onDrop}>
           <ReactFlow
@@ -285,20 +293,25 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
               </Button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 pt-0 lg:pt-4">
-              <NodeConfigPanel
-                key={selectedNode.id}
-                flowId={flowId}
-                node={selectedNode}
-                onChange={(patch) => updateNodeData(selectedNode.id, patch)}
-                onDelete={() => deleteNode(selectedNode.id)}
-                onDuplicate={() => duplicarNo(selectedNode.id)}
-              />
+              {/* Somente leitura: o painel continua mostrando a configuração —
+                  é o histórico que a pessoa veio ver — mas nenhum campo, botão
+                  de excluir ou de duplicar responde. */}
+              <fieldset disabled={isReadOnly} data-testid="painel-somente-leitura" data-somente-leitura={isReadOnly}>
+                <NodeConfigPanel
+                  key={selectedNode.id}
+                  flowId={flowId}
+                  node={selectedNode}
+                  onChange={(patch) => (isReadOnly ? undefined : updateNodeData(selectedNode.id, patch))}
+                  onDelete={() => (isReadOnly ? undefined : deleteNode(selectedNode.id))}
+                  onDuplicate={() => (isReadOnly ? undefined : duplicarNo(selectedNode.id))}
+                />
+              </fieldset>
             </div>
           </aside>
         )}
       </div>
 
-      <StepPicker open={pickerOpen} onOpenChange={setPickerOpen} onEscolher={adicionarPasso} />
+      <StepPicker open={pickerOpen && !isReadOnly} onOpenChange={setPickerOpen} onEscolher={adicionarPasso} />
     </div>
   );
 }
