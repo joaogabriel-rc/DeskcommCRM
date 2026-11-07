@@ -248,7 +248,9 @@ describe("lib/channels: as exceções que resolvem o tenant (número e WABA) con
     expect(funcao).toMatch(/\.limit\(2\)/);
     expect(funcao).not.toMatch(/maybeSingle\(/);
     expect(funcao).toMatch(/linhas\.length > 1\) return \{ encontrada: false, motivo: "ambigua" \}/);
-    expect(funcao).toMatch(/if \(error\) \{\s*throw new Error\(/);
+    // Falha da consulta LANÇA (a rota responde 5xx e a Meta reentrega), nunca vira
+    // "sem dono". O comportamento é medido em webhook-meta-banco-indisponivel.test.ts.
+    expect(funcao).toMatch(/consultarOuFalhar\("sessao_do_numero"/);
   });
 
   it("só o webhook universal a chama — e ele confere a assinatura antes", () => {

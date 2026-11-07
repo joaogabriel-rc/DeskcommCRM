@@ -22,6 +22,55 @@ export interface MetaWebhookSession {
 }
 
 /**
+ * A busca da sessão NÃO aconteceu — o banco não respondeu ou recusou a consulta.
+ *
+ * É diferente de "não achei", e as duas rotas do webhook dependem dessa
+ * diferença: "não achei" é 404 (token velho, canal excluído) e a Meta pode
+ * desistir; "não consegui perguntar" é 503 e a Meta TEM de reentregar. Até
+ * 06/11/2026 a busca por token devolvia `null` nos dois casos, e uma queda do
+ * Supabase de quatro horas virou 2.529 entregas recusadas com "token
+ * desconhecido" — os dois tokens eram de sessões ativas.
+ *
+ * O supabase-js não lança em falha de rede: devolve `{ error }` com a mensagem
+ * do `fetch` (ou a página HTML do 522 da Cloudflare). Por isso quem consulta
+ * precisa olhar o `error`, e é esta classe que leva a falha até a rota.
+ */
+export class FalhaAoBuscarSessaoDaMeta extends Error {
+  readonly codigo: string;
+
+  constructor(etapa: string, erro: { code?: string | null; message?: string | null } | unknown) {
+    const e = (erro ?? {}) as { code?: string | null; message?: string | null };
+    const codigo = typeof e.code === "string" && e.code ? e.code : "sem_codigo";
+    // A mensagem do banco pode ser a página inteira do 522: corta para o log.
+    const detalhe = (typeof e.message === "string" ? e.message : erro instanceof Error ? erro.message : String(erro))
+      .replace(/\s+/g, " ")
+      .slice(0, 200);
+    super(`${etapa}: ${codigo} ${detalhe}`.trim());
+    this.name = "FalhaAoBuscarSessaoDaMeta";
+    this.codigo = codigo;
+  }
+}
+
+/**
+ * Roda a consulta e transforma QUALQUER falha dela — `{ error }` devolvido ou
+ * promessa rejeitada — em `FalhaAoBuscarSessaoDaMeta`. Resultado vazio passa
+ * adiante: decidir o que é "não achei" é de quem chamou.
+ */
+async function consultarOuFalhar<R extends { error: { code?: string | null; message?: string | null } | null }>(
+  etapa: string,
+  consulta: () => PromiseLike<R>,
+): Promise<R> {
+  let r: R;
+  try {
+    r = await consulta();
+  } catch (err) {
+    throw new FalhaAoBuscarSessaoDaMeta(etapa, err);
+  }
+  if (r.error) throw new FalhaAoBuscarSessaoDaMeta(etapa, r.error);
+  return r;
+}
+
+/**
  * A sessão oficial ATIVA da organização **e o número dela**.
  *
  * O par `(organization_id, meta_phone_number_id)` é a chave com que
@@ -39,7 +88,9 @@ export interface MetaSessaoDaOrg extends MetaWebhookSession {
 
 /**
  * Sessão amarrada a este token de webhook. `null` = token desconhecido (a rota
- * responde 404 sem revelar por quê).
+ * responde 404 sem revelar por quê). **Lança `FalhaAoBuscarSessaoDaMeta` quando
+ * a consulta falha** — a rota responde 503 e a Meta reentrega; responder 404
+ * nesse caso diria "este token não existe" sobre um canal ativo.
  *
  * O token no path é o que amarra o payload a UMA organização. O App Secret da Meta
  * é do APP e vale para todas as WABAs de todos os tenants — sozinho, ele autentica
@@ -65,9 +116,11 @@ export async function metaSessionByWebhookToken(
       .select("id, organization_id, meta_waba_id")
       .eq("webhook_path_token", token)
       .eq("provider", CHANNEL_PROVIDER_META);
-  const { data } = await queryTolerantToMissingArchived(
-    () => base().is(ARCHIVED_AT, null).maybeSingle(),
-    () => base().maybeSingle(),
+  const { data } = await consultarOuFalhar("sessao_do_token", () =>
+    queryTolerantToMissingArchived(
+      () => base().is(ARCHIVED_AT, null).maybeSingle(),
+      () => base().maybeSingle(),
+    ),
   );
 
   if (!data) return null;
@@ -110,13 +163,12 @@ export async function metaSessionByPhoneNumberId(admin: Admin, phoneNumberId: st
       .select("id, organization_id, meta_waba_id")
       .eq("provider", CHANNEL_PROVIDER_META)
       .eq("meta_phone_number_id", phoneNumberId);
-  const { data, error } = await queryTolerantToMissingArchived(
-    () => base().is(ARCHIVED_AT, null).limit(2),
-    () => base().limit(2),
+  const { data } = await consultarOuFalhar("sessao_do_numero", () =>
+    queryTolerantToMissingArchived(
+      () => base().is(ARCHIVED_AT, null).limit(2),
+      () => base().limit(2),
+    ),
   );
-  if (error) {
-    throw new Error(`sessao_do_numero: ${error.code ?? "sem_codigo"} ${error.message ?? ""}`.trim());
-  }
   const linhas = (data ?? []) as Array<{ id: string; organization_id: string; meta_waba_id: string | null }>;
   if (linhas.length === 0) return { encontrada: false, motivo: "sem_sessao" };
   if (linhas.length > 1) return { encontrada: false, motivo: "ambigua" };
@@ -139,13 +191,12 @@ export async function metaSessionsByWabaId(admin: Admin, wabaId: string): Promis
       .select("id, organization_id, meta_waba_id")
       .eq("provider", CHANNEL_PROVIDER_META)
       .eq("meta_waba_id", wabaId);
-  const { data, error } = await queryTolerantToMissingArchived(
-    () => base().is(ARCHIVED_AT, null),
-    () => base(),
+  const { data } = await consultarOuFalhar("sessoes_da_waba", () =>
+    queryTolerantToMissingArchived(
+      () => base().is(ARCHIVED_AT, null),
+      () => base(),
+    ),
   );
-  if (error) {
-    throw new Error(`sessoes_da_waba: ${error.code ?? "sem_codigo"} ${error.message ?? ""}`.trim());
-  }
   return ((data ?? []) as Array<{ id: string; organization_id: string; meta_waba_id: string | null }>).map((l) => ({
     id: l.id,
     organizationId: l.organization_id,

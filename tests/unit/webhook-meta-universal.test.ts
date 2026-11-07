@@ -307,10 +307,10 @@ describe("POST — isolamento entre organizações", () => {
 });
 
 describe("POST — falha do banco", () => {
-  it("busca da sessão que falha é 500, para a Meta reentregar em vez de perder a mensagem", async () => {
+  it("busca da sessão que falha é 503, para a Meta reentregar em vez de perder a mensagem", async () => {
     falharConsulta = true;
     const res = await POST(entrega(corpo(mensagem(WABA_A, NUM_A, "wamid.1"))));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
     expect(ingestMetaInbound).not.toHaveBeenCalled();
   });
 });

@@ -19,8 +19,9 @@
  *
  * ─── Respostas ──────────────────────────────────────────────────────────────
  * GET: o `hub.challenge` em TEXTO PURO (envelopar faz a verificação da Meta falhar).
- * POST: 401 assinatura, 400 corpo fora do contrato, 500 quando a busca da sessão
- * falha (a Meta reentrega — melhor que perder a mensagem com um 200), e 200 para o
+ * POST: 401 assinatura, 400 corpo fora do contrato, 503 quando a busca da sessão
+ * falha (o banco não respondeu: a Meta reentrega — melhor que perder a mensagem
+ * com um 200), 500 quando o processamento de um evento lança, e 200 para o
  * resto, inclusive evento de número desconhecido: a Meta reentrega todo não-2xx, e
  * recusar o que não é nosso vira re-tentativa em backoff por horas.
  */
@@ -31,6 +32,7 @@ import { fail } from "@/lib/api/wrappers";
 import { appDaMeta } from "@/lib/channels/meta/app";
 import { lerEntregaDaMeta, processarEventoDaMeta } from "@/lib/channels/meta/processar-evento";
 import {
+  FalhaAoBuscarSessaoDaMeta,
   metaSessionByPhoneNumberId,
   metaSessionsByWabaId,
   type MetaWebhookSession,
@@ -135,11 +137,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
   } catch (err) {
-    logger.error("[meta.webhook] busca da sessão falhou — a Meta vai reentregar", {
+    // Duas falhas, duas respostas — as duas 5xx, porque nas duas a Meta tem de
+    // reentregar. Antes saíam ambas como `session_lookup_failed`/500, e o log não
+    // dizia se o banco caiu ou se o processamento quebrou.
+    if (err instanceof FalhaAoBuscarSessaoDaMeta) {
+      logger.error("[meta.webhook] busca da sessão falhou — a Meta vai reentregar", {
+        request_id: requestId,
+        status: 503,
+        error: err.message,
+      });
+      return fail("upstream_unavailable", "session_lookup_unavailable", 503, {
+        requestId,
+        headers: { "Retry-After": "30" },
+      });
+    }
+    logger.error("[meta.webhook] processamento do evento falhou — a Meta vai reentregar", {
       request_id: requestId,
+      status: 500,
       error: err instanceof Error ? err.message : String(err),
     });
-    return fail("internal_error", "session_lookup_failed", 500, { requestId });
+    return fail("internal_error", "event_processing_failed", 500, { requestId });
   }
 
   return NextResponse.json({ received: eventos.length, outcomes: desfechos }, { status: 200 });

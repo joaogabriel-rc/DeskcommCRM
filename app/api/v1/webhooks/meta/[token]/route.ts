@@ -37,7 +37,11 @@ import { statusUpdate } from "@/lib/channels/meta/status-update";
 import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { ingestMetaEcho } from "@/lib/channels/meta/ingest-eco";
 import { guardarPayloadDeSincronizacao } from "@/lib/channels/meta/sincronizacao";
-import { metaSessionByWebhookToken } from "@/lib/channels/meta/session";
+import {
+  FalhaAoBuscarSessaoDaMeta,
+  metaSessionByWebhookToken,
+  type MetaWebhookSession,
+} from "@/lib/channels/meta/session";
 import { processarEventoDaMeta } from "@/lib/channels/meta/processar-evento";
 import { logger } from "@/lib/logger";
 import {
@@ -54,10 +58,56 @@ interface RouteCtx {
   params: Promise<{ token: string }>;
 }
 
+/** Prefixo do hash: compara com o token atual do canal sem expor o token no log. */
+function prefixoDoToken(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex").slice(0, 8);
+}
+
+/**
+ * Três desfechos, e não dois: achou, não existe, ou NÃO DEU PARA PERGUNTAR.
+ * O terceiro era confundido com o segundo — e o 404 de "token desconhecido"
+ * saía para canais ativos sempre que o banco caía (06/11/2026: 2.529 entregas).
+ * Só a falha de busca é capturada aqui; qualquer outro erro segue para o
+ * framework, como antes.
+ */
+type BuscaDaSessao =
+  | { tipo: "achou"; sessao: MetaWebhookSession }
+  | { tipo: "nao_existe" }
+  | { tipo: "banco_indisponivel"; erro: FalhaAoBuscarSessaoDaMeta };
+
+async function buscarSessao(token: string): Promise<BuscaDaSessao> {
+  try {
+    const sessao = await metaSessionByWebhookToken(token);
+    return sessao ? { tipo: "achou", sessao } : { tipo: "nao_existe" };
+  } catch (err) {
+    if (err instanceof FalhaAoBuscarSessaoDaMeta) return { tipo: "banco_indisponivel", erro: err };
+    throw err;
+  }
+}
+
+/** 503 com `Retry-After`: a Meta reentrega o que não recebe 2xx. */
+function respostaDeBancoIndisponivel(requestId: string): NextResponse {
+  return fail("upstream_unavailable", "session_lookup_unavailable", 503, {
+    requestId,
+    headers: { "Retry-After": "30" },
+  });
+}
+
 export async function GET(req: NextRequest, ctx: RouteCtx): Promise<NextResponse> {
   const { token } = await ctx.params;
-  const session = await metaSessionByWebhookToken(token);
-  if (!session) return new NextResponse("not found", { status: 404 });
+  const busca = await buscarSessao(token);
+  if (busca.tipo === "banco_indisponivel") {
+    const requestId = randomUUID();
+    logger.error("[meta.webhook] handshake sem resposta do banco", {
+      request_id: requestId,
+      rota: "token",
+      status: 503,
+      token_sha256_8: prefixoDoToken(token),
+      erro: busca.erro.message,
+    });
+    return respostaDeBancoIndisponivel(requestId);
+  }
+  if (busca.tipo === "nao_existe") return new NextResponse("not found", { status: 404 });
 
   // Do BANCO (platform_meta_app, migration 0257), com o `.env` como piso: é a
   // credencial da INSTALAÇÃO inteira, não da organização — e um clone que ainda
@@ -78,19 +128,33 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
   const requestId = randomUUID();
   const { token } = await ctx.params;
 
-  const session = await metaSessionByWebhookToken(token);
-  if (!session) {
+  const busca = await buscarSessao(token);
+  if (busca.tipo === "banco_indisponivel") {
+    // Não é "token desconhecido": a pergunta não chegou ao banco. 503 faz a Meta
+    // reentregar; o corpo não é lido (nada foi autenticado ainda).
+    logger.error("[meta.webhook] entrega adiada: busca da sessão falhou", {
+      request_id: requestId,
+      rota: "token",
+      status: 503,
+      token_sha256_8: prefixoDoToken(token),
+      erro: busca.erro.message,
+      content_length: req.headers.get("content-length"),
+    });
+    return respostaDeBancoIndisponivel(requestId);
+  }
+  if (busca.tipo === "nao_existe") {
     // O token nunca vai ao log: o prefixo do hash basta para comparar com o
     // token atual do canal (entrega num token antigo) sem expô-lo.
     logger.warn("[meta.webhook] entrega recusada: token desconhecido", {
       request_id: requestId,
       rota: "token",
       status: 404,
-      token_sha256_8: createHash("sha256").update(token, "utf8").digest("hex").slice(0, 8),
+      token_sha256_8: prefixoDoToken(token),
       content_length: req.headers.get("content-length"),
     });
     return fail("not_found", "unknown webhook token", 404, { requestId });
   }
+  const session = busca.sessao;
 
   const rawBody = await req.text();
   // Do mesmo lugar que o handshake: BANCO primeiro, `.env` como piso (0257). Sem
