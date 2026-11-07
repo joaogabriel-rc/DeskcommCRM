@@ -34,6 +34,7 @@ import { appDaMeta } from "@/lib/channels/meta/app";
 import { lerEnvelopeMeta } from "@/lib/channels/meta/envelope";
 import { parseMetaWebhook, verificationChallenge, verifyMetaSignature } from "@/lib/channels/meta/webhook";
 import { statusUpdate } from "@/lib/channels/meta/status-update";
+import { ingestaoPedeReentrega } from "@/lib/channels/falha-do-banco";
 import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { ingestMetaEcho } from "@/lib/channels/meta/ingest-eco";
 import { guardarPayloadDeSincronizacao } from "@/lib/channels/meta/sincronizacao";
@@ -42,7 +43,11 @@ import {
   metaSessionByWebhookToken,
   type MetaWebhookSession,
 } from "@/lib/channels/meta/session";
-import { processarEventoDaMeta } from "@/lib/channels/meta/processar-evento";
+import {
+  DESFECHO_PEDE_REENTREGA,
+  desfechoDaAtualizacao,
+  processarEventoDaMeta,
+} from "@/lib/channels/meta/processar-evento";
 import { logger } from "@/lib/logger";
 import {
   emitirFalhaDeEntrega,
@@ -85,12 +90,26 @@ async function buscarSessao(token: string): Promise<BuscaDaSessao> {
   }
 }
 
-/** 503 com `Retry-After`: a Meta reentrega o que não recebe 2xx. */
-function respostaDeBancoIndisponivel(requestId: string): NextResponse {
-  return fail("upstream_unavailable", "session_lookup_unavailable", 503, {
-    requestId,
-    headers: { "Retry-After": "30" },
-  });
+/**
+ * A busca da sessão não completou.
+ *
+ * Passageira (banco fora, timeout): 503 com `Retry-After` — a Meta reentrega e a
+ * mensagem entra quando o banco volta.
+ *
+ * Estrutural (tabela/coluna inexistente, permissão, JWT): 500 SEM `Retry-After`.
+ * Continua não-2xx de propósito: sem a sessão não há organização a quem atribuir
+ * o evento, e um 2xx descartaria em silêncio TODA mensagem da instalação enquanto
+ * o schema estiver quebrado. A reentrega da Meta tem prazo — não é infinita — e é
+ * a janela para o operador corrigir; o log diz que é ação dele, não espera.
+ */
+function respostaDaBuscaQueFalhou(requestId: string, erro: FalhaAoBuscarSessaoDaMeta): NextResponse {
+  if (erro.transitoria) {
+    return fail("upstream_unavailable", "session_lookup_unavailable", 503, {
+      requestId,
+      headers: { "Retry-After": "30" },
+    });
+  }
+  return fail("internal_error", "session_lookup_failed", 500, { requestId });
 }
 
 export async function GET(req: NextRequest, ctx: RouteCtx): Promise<NextResponse> {
@@ -101,11 +120,12 @@ export async function GET(req: NextRequest, ctx: RouteCtx): Promise<NextResponse
     logger.error("[meta.webhook] handshake sem resposta do banco", {
       request_id: requestId,
       rota: "token",
-      status: 503,
+      status: busca.erro.transitoria ? 503 : 500,
+      transitoria: busca.erro.transitoria,
       token_sha256_8: prefixoDoToken(token),
       erro: busca.erro.message,
     });
-    return respostaDeBancoIndisponivel(requestId);
+    return respostaDaBuscaQueFalhou(requestId, busca.erro);
   }
   if (busca.tipo === "nao_existe") return new NextResponse("not found", { status: 404 });
 
@@ -130,17 +150,25 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
 
   const busca = await buscarSessao(token);
   if (busca.tipo === "banco_indisponivel") {
-    // Não é "token desconhecido": a pergunta não chegou ao banco. 503 faz a Meta
-    // reentregar; o corpo não é lido (nada foi autenticado ainda).
-    logger.error("[meta.webhook] entrega adiada: busca da sessão falhou", {
-      request_id: requestId,
-      rota: "token",
-      status: 503,
-      token_sha256_8: prefixoDoToken(token),
-      erro: busca.erro.message,
-      content_length: req.headers.get("content-length"),
-    });
-    return respostaDeBancoIndisponivel(requestId);
+    // Não é "token desconhecido": a pergunta não teve resposta do banco. 503 faz
+    // a Meta reentregar; estrutural vira 500 e exige ação do operador. O corpo
+    // não é lido (nada foi autenticado ainda).
+    logger.error(
+      busca.erro.transitoria
+        ? "[meta.webhook] entrega adiada: busca da sessão falhou"
+        : "[meta.webhook] busca da sessão com falha ESTRUTURAL — exige ação do operador",
+      {
+        request_id: requestId,
+        rota: "token",
+        status: busca.erro.transitoria ? 503 : 500,
+        transitoria: busca.erro.transitoria,
+        codigo: busca.erro.codigo,
+        token_sha256_8: prefixoDoToken(token),
+        erro: busca.erro.message,
+        content_length: req.headers.get("content-length"),
+      },
+    );
+    return respostaDaBuscaQueFalhou(requestId, busca.erro);
   }
   if (busca.tipo === "nao_existe") {
     // O token nunca vai ao log: o prefixo do hash basta para comparar com o
@@ -223,6 +251,13 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
    * indistinguível de "não chegou". Custou uma hora de diagnóstico no lugar errado.
    */
   const desfechos: string[] = [];
+  /**
+   * Algum evento NÃO foi gravado por causa passageira (banco fora, timeout). O
+   * lote segue — o que deu certo fica, e a reentrega o reconhece como
+   * `duplicate` —, e a resposta final vira 503 para a Meta mandar de novo. Antes
+   * a falha ia só para `outcomes` com 200, e a Meta dava a entrega por concluída.
+   */
+  let pedeReentrega = false;
 
   for (const e of eventos) {
     // O evento chega carimbado com a WABA; se não for a desta sessão, ignoramos.
@@ -253,14 +288,19 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       // as duas, com 200 na resposta (issue #236).
       const r = await ingestMetaInbound(admin, e, { organizationId: session.organizationId });
       desfechos.push(r.status);
+      if (ingestaoPedeReentrega(r)) pedeReentrega = true;
       if (r.status === "failed" || r.status === "no_session") {
-        // 2xx continua (a Meta re-entregaria em loop), mas a falha NÃO fica muda:
-        // vai ao log estruturado e ao corpo da resposta.
-        console.error("[meta.ingest] inbound não ingerido", {
+        // Falha permanente: 2xx continua (a Meta re-entregaria em loop um corpo
+        // que nunca melhora), mas a falha NÃO fica muda: vai ao log estruturado e
+        // ao corpo da resposta. Falha passageira: a resposta final vira 503.
+        logger.error("[meta.ingest] inbound não ingerido", {
+          request_id: requestId,
           status: r.status,
           reason: r.status === "failed" ? r.reason : undefined,
+          retentavel: ingestaoPedeReentrega(r),
           external_id: e.externalId,
           phone_number_id: e.phoneNumberId,
+          organization_id: session.organizationId,
         });
       }
       continue;
@@ -271,10 +311,12 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       // da recebida: ela vem do TOKEN DO PATH, e a WABA já foi conferida acima.
       const r = await ingestMetaEcho(admin, e, { organizationId: session.organizationId });
       desfechos.push(r.status);
+      if (ingestaoPedeReentrega(r)) pedeReentrega = true;
       if (r.status === "failed" || r.status === "no_session") {
         logger.error("[meta.eco] eco do app Business não ingerido", {
           status: r.status,
           reason: r.status === "failed" ? r.reason : undefined,
+          retentavel: ingestaoPedeReentrega(r),
           external_id: e.externalId,
           phone_number_id: e.phoneNumberId,
         });
@@ -293,18 +335,20 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       // A conta desconectou (ou voltou) da API: o estado da conexão segue a
       // Meta. Mesma regra da rota universal — mora em `processar-evento.ts`.
       const d = await processarEventoDaMeta(admin, e, session, now);
-      if (d) desfechos.push(d);
+      if (d === DESFECHO_PEDE_REENTREGA) pedeReentrega = true;
+      else if (d) desfechos.push(d);
       continue;
     }
 
     if (e.kind === "template_status") {
-      await admin
+      const { error } = await admin
         .from("meta_templates")
         .update({ status: e.event, rejected_reason: e.reason, updated_at: now })
         .eq("organization_id", session.organizationId)
         .eq("waba_id", e.wabaId)
         .eq("name", e.templateName)
         .eq("language", e.templateLanguage);
+      if (desfechoDaAtualizacao(error, "meta_templates", session) === DESFECHO_PEDE_REENTREGA) pedeReentrega = true;
     } else if (e.status === "failed") {
       // A recusa da plataforma chega DEPOIS do 200 (131047 fora da janela,
       // 131026 número não registrado, 132015 template pausado). O evento inteiro
@@ -316,7 +360,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       // para o sistema do integrador sobre a MESMA falha. Só a primeira
       // atualiza uma linha, e só a primeira devolve linha — `linha` é o gatilho
       // da emissão, então 0 linhas = 0 eventos.
-      const { data: linha } = await admin
+      const { data: linha, error: erroDoStatus } = await admin
         .from("messages")
         .update(statusUpdate(e, now))
         .eq("organization_id", session.organizationId)
@@ -326,6 +370,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
           "id, conversation_id, contact_id, sent_via, error_code, error_message, contacts:contact_id(phone_number)",
         )
         .maybeSingle();
+      if (desfechoDaAtualizacao(erroDoStatus, "messages", session) === DESFECHO_PEDE_REENTREGA) pedeReentrega = true;
       if (linha) {
         const falha = linha as {
           id: string;
@@ -356,12 +401,29 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       // O evento inteiro vira colunas, não só `status`: quando a Meta ACEITA o
       // template e reprova a entrega depois, o motivo só existe aqui. Ver
       // `lib/channels/meta/status-update.ts`.
-      await admin
+      const { error: erroDoStatus } = await admin
         .from("messages")
         .update(statusUpdate(e, now))
         .eq("organization_id", session.organizationId)
         .eq("external_id", e.externalId);
+      if (desfechoDaAtualizacao(erroDoStatus, "messages", session) === DESFECHO_PEDE_REENTREGA) pedeReentrega = true;
     }
+  }
+
+  if (pedeReentrega) {
+    logger.error("[meta.webhook] evento não gravado por falha passageira — a Meta vai reentregar", {
+      request_id: requestId,
+      rota: "token",
+      status: 503,
+      organization_id: session.organizationId,
+      channel_session_id: session.id,
+      outcomes: desfechos,
+    });
+    return fail("upstream_unavailable", "event_persistence_unavailable", 503, {
+      requestId,
+      headers: { "Retry-After": "30" },
+      details: { received: eventos.length, outcomes: desfechos },
+    });
   }
 
   // 200 SEMPRE que a assinatura confere, inclusive para evento que não nos

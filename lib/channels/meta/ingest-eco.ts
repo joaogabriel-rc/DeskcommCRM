@@ -44,6 +44,7 @@ import {
 import { logger } from "@/lib/logger";
 
 import { encontrarContatoPorTelefone } from "../contato-por-telefone";
+import { ehFalhaTransitoriaDoBanco } from "../falha-do-banco";
 import { marcarConversaComMensagem } from "../marcar-conversa";
 import { canonicalPhoneBR } from "../phone-variants";
 import type { ChannelTenantScope } from "../types";
@@ -53,7 +54,7 @@ import {
   lerOnboardingDoCanal,
   type DesfechoDoEco,
 } from "./ecos-em-espera";
-import { previewOf, sessionByPhoneNumberId, type IngestOutcome } from "./ingest";
+import { buscaDaSessaoPedeReentrega, previewOf, sessionByPhoneNumberId, type IngestOutcome } from "./ingest";
 import type { EchoMessageEvent } from "./webhook";
 
 type Admin = SupabaseClient;
@@ -153,7 +154,11 @@ export async function ingestMetaEcho(
     try {
       sessao = await sessionByPhoneNumberId(admin, dono.organizationId, e.phoneNumberId);
     } catch (err) {
-      return { status: "failed", reason: err instanceof Error ? err.message : "sessao_do_numero" };
+      return {
+        status: "failed",
+        reason: err instanceof Error ? err.message : "sessao_do_numero",
+        retentavel: buscaDaSessaoPedeReentrega(err),
+      };
     }
   }
   if (!sessao) return { status: "no_session" };
@@ -220,7 +225,11 @@ export async function ingerirEcoAoVivo(
     } as never,
   );
   if (erroContato || !contactId) {
-    return { status: "failed", reason: `contato: ${erroContato?.message ?? "sem id"}` };
+    return {
+      status: "failed",
+      reason: `contato: ${erroContato?.message ?? "sem id"}`,
+      retentavel: ehFalhaTransitoriaDoBanco(erroContato),
+    };
   }
 
   const { data: conversationId, error: erroConversa } = await admin.rpc(
@@ -228,7 +237,11 @@ export async function ingerirEcoAoVivo(
     { p_org: orgId, p_contact: contactId as string, p_session: sessao.id } as never,
   );
   if (erroConversa || !conversationId) {
-    return { status: "failed", reason: `conversa: ${erroConversa?.message ?? "sem id"}` };
+    return {
+      status: "failed",
+      reason: `conversa: ${erroConversa?.message ?? "sem id"}`,
+      retentavel: ehFalhaTransitoriaDoBanco(erroConversa),
+    };
   }
 
   const { data: inserida, error: erroInsert } = await admin
@@ -260,7 +273,11 @@ export async function ingerirEcoAoVivo(
   // entrega já carimbou a conversa e pausou a IA.
   if (erroInsert) {
     if (erroInsert.code === "23505") return { status: "duplicate" };
-    return { status: "failed", reason: `mensagem: ${erroInsert.message}` };
+    return {
+      status: "failed",
+      reason: `mensagem: ${erroInsert.message}`,
+      retentavel: ehFalhaTransitoriaDoBanco(erroInsert),
+    };
   }
 
   if (!opcoes.tardio || (await ecoNaoEhMaisVelhoQueAConversa(admin, orgId, conversationId as string, e))) {

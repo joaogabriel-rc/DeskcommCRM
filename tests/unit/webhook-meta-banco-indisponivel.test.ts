@@ -70,6 +70,8 @@ const PAGINA_522 =
 let sessoes: Linha[];
 let modo: ModoDoBanco;
 let consultas: Array<Record<string, unknown>>;
+/** Erro com código escolhido pelo caso (estrutural ou passageiro). Vence o `modo`. */
+let modoEstrutural: { code: string; message: string } | null;
 
 function sessao(id: string, org: string, token: string, numero: string, waba: string, extra: Linha = {}): Linha {
   return {
@@ -86,6 +88,7 @@ function sessao(id: string, org: string, token: string, numero: string, waba: st
 
 /** O desfecho de uma leitura, conforme o modo. `null` = o banco respondeu bem. */
 function falhaDoModo(): { error: { code: string; message: string } } | "rejeita" | null {
+  if (modoEstrutural) return { error: modoEstrutural };
   switch (modo) {
     case "fetch_failed":
       // É o que o supabase-js devolve quando o `fetch` não completa: não lança.
@@ -210,6 +213,7 @@ beforeEach(() => {
     sessao("s-b", ORG_B, TOKEN_B, NUM_B, WABA_B),
   ];
   modo = "ok";
+  modoEstrutural = null;
   consultas = [];
   vi.mocked(appDaMeta).mockResolvedValue({ appSecret: SEGREDO, verifyToken: VERIFY });
   vi.mocked(createAdminClient).mockImplementation(() => adminFalso() as never);
@@ -246,6 +250,20 @@ describe("busca da sessão — 'não achei' e 'não consegui perguntar' são coi
     expect((err as Error).message).toMatch(/^sessao_do_token: /);
   });
 
+  it.each([
+    ["tabela inexistente (42P01)", "42P01", false],
+    ["coluna inexistente (42703)", "42703", false],
+    ["schema cache sem a tabela (PGRST205)", "PGRST205", false],
+    ["PostgREST sem banco (PGRST000)", "PGRST000", true],
+    ["timeout (57014)", "57014", true],
+    ["sem código (rede)", "", true],
+  ])("a falha carrega a classificação — %s → transitoria = %s", async (_n, code, esperado) => {
+    modoEstrutural = { code, message: "x" };
+    const err = await metaSessionByWebhookToken(TOKEN_A).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(FalhaAoBuscarSessaoDaMeta);
+    expect((err as FalhaAoBuscarSessaoDaMeta).transitoria).toBe(esperado);
+  });
+
   it("token curto demais não chega ao banco", async () => {
     modo = "fetch_failed";
     expect(await metaSessionByWebhookToken("curto")).toBeNull();
@@ -278,6 +296,21 @@ describe("rota por token — POST", () => {
     expect(erro?.[1]).toMatchObject({ status: 503, rota: "token" });
     // O token nunca vai ao log — só o prefixo do hash.
     expect(JSON.stringify(erro)).not.toContain(TOKEN_A);
+  });
+
+  it.each([
+    ["tabela inexistente (42P01)", "42P01"],
+    ["coluna inexistente (42703)", "42703"],
+    ["schema cache sem a tabela (PGRST205)", "PGRST205"],
+  ])("falha ESTRUTURAL na busca — %s: 500 sem Retry-After, e o log pede ação do operador", async (_n, code) => {
+    modoEstrutural = { code, message: "estrutura" };
+    const res = await postNoToken(TOKEN_A, corpo(mensagem(WABA_A, NUM_A, "wamid.1")));
+    expect(res.status).toBe(500);
+    expect(res.headers.get("retry-after")).toBeNull();
+    expect(await erroDoCorpo(res)).toEqual({ code: "internal_error", message: "session_lookup_failed" });
+    expect(ingestMetaInbound).not.toHaveBeenCalled();
+    const erro = vi.mocked(logger.error).mock.calls.find(([msg]) => String(msg).includes("ESTRUTURAL"));
+    expect(erro?.[1]).toMatchObject({ status: 500, transitoria: false, codigo: code });
   });
 
   it("sessão válida: 200 e a mensagem é ingerida na organização do TOKEN", async () => {
@@ -319,6 +352,13 @@ describe("rota por token — GET (handshake)", () => {
     expect(res.headers.get("retry-after")).toBe("30");
   });
 
+  it("falha estrutural na busca: 500 sem Retry-After", async () => {
+    modoEstrutural = { code: "42P01", message: "estrutura" };
+    const res = await handshake(TOKEN_A);
+    expect(res.status).toBe(500);
+    expect(res.headers.get("retry-after")).toBeNull();
+  });
+
   it("sessão válida: devolve o challenge em texto puro", async () => {
     const res = await handshake(TOKEN_A);
     expect(res.status).toBe(200);
@@ -341,6 +381,18 @@ describe("webhook universal — o mesmo tratamento", () => {
     modo = m;
     const res = await postUniversal(corpo(statusDeModelo(WABA_A)));
     expect(res.status).toBe(503);
+  });
+
+  it.each([
+    ["tabela inexistente (42P01) na busca pelo NÚMERO", "42P01", () => corpo(mensagem(WABA_A, NUM_A, "wamid.e1"))],
+    ["coluna inexistente (42703) na busca pela WABA", "42703", () => corpo(statusDeModelo(WABA_A))],
+  ])("falha ESTRUTURAL — %s: 500 sem Retry-After", async (_n, code, c) => {
+    modoEstrutural = { code, message: "estrutura" };
+    const res = await postUniversal(c());
+    expect(res.status).toBe(500);
+    expect(res.headers.get("retry-after")).toBeNull();
+    expect(await erroDoCorpo(res)).toEqual({ code: "internal_error", message: "session_lookup_failed" });
+    expect(ingestMetaInbound).not.toHaveBeenCalled();
   });
 
   it("número sem sessão: 200 no_session (a Meta não deve reentregar o que não é nosso)", async () => {

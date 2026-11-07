@@ -33,6 +33,7 @@ import { ARCHIVED_AT, queryTolerantToMissingArchived } from "../archived";
 import { extrairAtribuicaoMeta } from "../atribuicao-de-anuncio-oficial";
 import { aplicarEfeitosPosEntrada } from "../pos-entrada";
 import { encontrarContatoPorTelefone } from "../contato-por-telefone";
+import { ehFalhaTransitoriaDoBanco } from "../falha-do-banco";
 import { marcarConversaComMensagem } from "../marcar-conversa";
 import { canonicalPhoneBR } from "../phone-variants";
 import type { ChannelTenantScope } from "../types";
@@ -59,7 +60,14 @@ export type IngestOutcome =
    * este valor entra sem mexer em decisão nenhuma lá.
    */
   | { status: "ignored"; reason: string }
-  | { status: "failed"; reason: string };
+  /**
+   * `retentavel`: a mensagem NÃO foi gravada e a causa é passageira (banco fora,
+   * timeout, conexão) — o webhook responde 5xx para a plataforma reentregar.
+   * Ausente ou `false`: a mesma entrega falharia de novo (dado inválido), e o
+   * webhook segue com 2xx e o motivo no log. Ver `lib/channels/falha-do-banco.ts`
+   * (`ingestaoPedeReentrega` lê este campo).
+   */
+  | { status: "failed"; reason: string; retentavel?: boolean };
 
 /**
  * Sessão dona do número que RECEBEU, **dentro da organização do token**.
@@ -101,12 +109,23 @@ export async function sessionByPhoneNumberId(
     () => base().is(ARCHIVED_AT, null).maybeSingle(),
     () => base().maybeSingle(),
   );
+  // O `code` segue no `cause`: é por ele que quem chama decide entre pedir
+  // reentrega (banco fora) e registrar falha permanente (schema/configuração).
   if (error) {
-    throw new Error(
-      `sessao_do_numero: ${error.code ?? "sem_codigo"} ${error.message ?? ""}`.trim(),
-    );
+    throw new Error(`sessao_do_numero: ${error.code ?? "sem_codigo"} ${error.message ?? ""}`.trim(), {
+      cause: { code: error.code ?? "" },
+    });
   }
   return data;
+}
+
+/**
+ * A busca da sessão pelo número lançou: passageira se a reentrega pode resolver.
+ * Sem `code` (promessa rejeitada, rede) conta como passageira.
+ */
+export function buscaDaSessaoPedeReentrega(err: unknown): boolean {
+  const code = ((err as { cause?: unknown } | null)?.cause as { code?: unknown } | undefined)?.code;
+  return ehFalhaTransitoriaDoBanco({ code: typeof code === "string" ? code : "" });
 }
 
 /**
@@ -163,8 +182,13 @@ export async function ingestMetaInbound(
       sessao = await sessionByPhoneNumberId(admin, dono.organizationId, e.phoneNumberId);
     } catch (err) {
       // Falhar FECHADO na ação (nada é gravado) e ABERTO na informação: o motivo
-      // sobe como `failed` e o chamador o escreve no log e no corpo.
-      return { status: "failed", reason: err instanceof Error ? err.message : "sessao_do_numero" };
+      // sobe como `failed` e o chamador o escreve no log e no corpo. Reentrega só
+      // se a causa for passageira — erro de schema não melhora reentregando.
+      return {
+        status: "failed",
+        reason: err instanceof Error ? err.message : "sessao_do_numero",
+        retentavel: buscaDaSessaoPedeReentrega(err),
+      };
     }
   }
   // Sem sessão: a mensagem é de um número que não administramos. Devolver 200 (o
@@ -212,7 +236,11 @@ export async function ingestMetaInbound(
     } as never,
   );
   if (erroContato || !contactId) {
-    return { status: "failed", reason: `contato: ${erroContato?.message ?? "sem id"}` };
+    return {
+      status: "failed",
+      reason: `contato: ${erroContato?.message ?? "sem id"}`,
+      retentavel: ehFalhaTransitoriaDoBanco(erroContato),
+    };
   }
 
   // Clique em anúncio: o `referral` vem na própria mensagem e só nela. Estampar
@@ -226,7 +254,11 @@ export async function ingestMetaInbound(
     { p_org: orgId, p_contact: contactId as string, p_session: sessao.id } as never,
   );
   if (erroConversa || !conversationId) {
-    return { status: "failed", reason: `conversa: ${erroConversa?.message ?? "sem id"}` };
+    return {
+      status: "failed",
+      reason: `conversa: ${erroConversa?.message ?? "sem id"}`,
+      retentavel: ehFalhaTransitoriaDoBanco(erroConversa),
+    };
   }
 
   const { data: inserida, error: erroInsert } = await admin
@@ -259,9 +291,15 @@ export async function ingestMetaInbound(
     .maybeSingle();
 
   // 23505 = a mesma `external_id` já entrou. Não é erro: é a Meta re-entregando.
+  // É também o que torna a reentrega segura: contato e conversa acima são upserts
+  // (reaplicar não duplica), e esta linha é a primeira escrita que não se repete.
   if (erroInsert) {
     if (erroInsert.code === "23505") return { status: "duplicate" };
-    return { status: "failed", reason: `mensagem: ${erroInsert.message}` };
+    return {
+      status: "failed",
+      reason: `mensagem: ${erroInsert.message}`,
+      retentavel: ehFalhaTransitoriaDoBanco(erroInsert),
+    };
   }
 
   // Carimba a conversa — é ISTO que move `last_message_at`, `last_inbound_at` e

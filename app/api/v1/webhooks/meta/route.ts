@@ -21,7 +21,9 @@
  * GET: o `hub.challenge` em TEXTO PURO (envelopar faz a verificação da Meta falhar).
  * POST: 401 assinatura, 400 corpo fora do contrato, 503 quando a busca da sessão
  * falha (o banco não respondeu: a Meta reentrega — melhor que perder a mensagem
- * com um 200), 500 quando o processamento de um evento lança, e 200 para o
+ * com um 200), 503 quando a gravação de um evento falha por causa passageira (o
+ * resto do lote é processado; a reentrega é segura porque a mensagem só entra uma
+ * vez), 500 quando o processamento de um evento lança, e 200 para o
  * resto, inclusive evento de número desconhecido: a Meta reentrega todo não-2xx, e
  * recusar o que não é nosso vira re-tentativa em backoff por horas.
  */
@@ -30,7 +32,11 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { fail } from "@/lib/api/wrappers";
 import { appDaMeta } from "@/lib/channels/meta/app";
-import { lerEntregaDaMeta, processarEventoDaMeta } from "@/lib/channels/meta/processar-evento";
+import {
+  DESFECHO_PEDE_REENTREGA,
+  lerEntregaDaMeta,
+  processarEventoDaMeta,
+} from "@/lib/channels/meta/processar-evento";
 import {
   FalhaAoBuscarSessaoDaMeta,
   metaSessionByPhoneNumberId,
@@ -82,6 +88,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Uma entrega costuma trazer vários eventos do mesmo número: uma busca por número.
   const porNumero = new Map<string, SessaoDoNumero>();
   const porWaba = new Map<string, MetaWebhookSession[]>();
+  // Algum evento não foi gravado por causa passageira. O lote segue — o que deu
+  // certo fica gravado, e a reentrega o reconhece como `duplicate` —, mas a
+  // resposta final é 503 para a Meta mandar de novo.
+  let pedeReentrega = false;
 
   try {
     for (const e of eventos) {
@@ -99,6 +109,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
         for (const sessao of sessoes) {
           const desfecho = await processarEventoDaMeta(admin, e, sessao, agora);
+          if (desfecho === DESFECHO_PEDE_REENTREGA) pedeReentrega = true;
           if (desfecho && e.kind === "account_update") desfechos.push(desfecho);
         }
         continue;
@@ -126,6 +137,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
 
       const desfecho = await processarEventoDaMeta(admin, e, dono.sessao, agora);
+      if (desfecho === DESFECHO_PEDE_REENTREGA) pedeReentrega = true;
       if (
         desfecho &&
         (e.kind === "inbound_message" ||
@@ -141,15 +153,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // reentregar. Antes saíam ambas como `session_lookup_failed`/500, e o log não
     // dizia se o banco caiu ou se o processamento quebrou.
     if (err instanceof FalhaAoBuscarSessaoDaMeta) {
-      logger.error("[meta.webhook] busca da sessão falhou — a Meta vai reentregar", {
-        request_id: requestId,
-        status: 503,
-        error: err.message,
-      });
-      return fail("upstream_unavailable", "session_lookup_unavailable", 503, {
-        requestId,
-        headers: { "Retry-After": "30" },
-      });
+      // Passageira: 503 + Retry-After. Estrutural (schema/configuração): 500 sem
+      // Retry-After — continua não-2xx porque sem sessão não há a quem atribuir o
+      // evento; o porquê inteiro está na rota por token (`respostaDaBuscaQueFalhou`).
+      logger.error(
+        err.transitoria
+          ? "[meta.webhook] busca da sessão falhou — a Meta vai reentregar"
+          : "[meta.webhook] busca da sessão com falha ESTRUTURAL — exige ação do operador",
+        { request_id: requestId, status: err.transitoria ? 503 : 500, codigo: err.codigo, error: err.message },
+      );
+      if (err.transitoria) {
+        return fail("upstream_unavailable", "session_lookup_unavailable", 503, {
+          requestId,
+          headers: { "Retry-After": "30" },
+        });
+      }
+      return fail("internal_error", "session_lookup_failed", 500, { requestId });
     }
     logger.error("[meta.webhook] processamento do evento falhou — a Meta vai reentregar", {
       request_id: requestId,
@@ -157,6 +176,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       error: err instanceof Error ? err.message : String(err),
     });
     return fail("internal_error", "event_processing_failed", 500, { requestId });
+  }
+
+  if (pedeReentrega) {
+    logger.error("[meta.webhook] evento não gravado por falha passageira — a Meta vai reentregar", {
+      request_id: requestId,
+      status: 503,
+      outcomes: desfechos,
+    });
+    return fail("upstream_unavailable", "event_persistence_unavailable", 503, {
+      requestId,
+      headers: { "Retry-After": "30" },
+      details: { received: eventos.length, outcomes: desfechos },
+    });
   }
 
   return NextResponse.json({ received: eventos.length, outcomes: desfechos }, { status: 200 });

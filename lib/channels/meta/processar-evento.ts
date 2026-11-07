@@ -9,6 +9,7 @@
  */
 import { appDaMeta } from "@/lib/channels/meta/app";
 import { lerEnvelopeMeta } from "@/lib/channels/meta/envelope";
+import { ehFalhaTransitoriaDoBanco, ingestaoPedeReentrega } from "@/lib/channels/falha-do-banco";
 import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { ingestMetaEcho } from "@/lib/channels/meta/ingest-eco";
 import { guardarPayloadDeSincronizacao } from "@/lib/channels/meta/sincronizacao";
@@ -91,11 +92,20 @@ export async function lerEntregaDaMeta(
 }
 
 /**
+ * O evento NÃO foi gravado e a causa é passageira (banco fora, timeout): a rota
+ * tem de responder 5xx para a Meta reentregar. Reentregar é seguro — a mensagem
+ * só entra uma vez (`unique (organization_id, external_id)`), contato e conversa
+ * são upserts, e status são atualizações que reaplicadas dão no mesmo.
+ */
+export const DESFECHO_PEDE_REENTREGA = "failed_retryable";
+
+/**
  * Processa UM evento para a sessão dona dele. Toda escrita leva o
  * `organization_id` da sessão — nunca do corpo.
  *
  * Devolve o desfecho da ingestão de mensagem recebida ou de eco do app Business
- * (vai para `outcomes` na resposta), `"waba_divergente"` quando o evento não é desta sessão, e `null` para
+ * (vai para `outcomes` na resposta), `"waba_divergente"` quando o evento não é desta sessão,
+ * `DESFECHO_PEDE_REENTREGA` quando a gravação falhou por causa passageira, e `null` para
  * os demais eventos, que não têm desfecho próprio.
  */
 export async function processarEventoDaMeta(
@@ -124,16 +134,18 @@ export async function processarEventoDaMeta(
     // carimba `last_inbound_at` — que é o que ABRE a janela de 24h.
     const r = await ingestMetaInbound(admin, e, { organizationId: sessao.organizationId });
     if (r.status === "failed" || r.status === "no_session") {
-      // 2xx continua (a Meta re-entregaria em loop), mas a falha NÃO fica muda.
+      // Falha permanente: 2xx continua (a Meta re-entregaria em loop um corpo que
+      // nunca melhora), mas a falha NÃO fica muda. Falha passageira: 5xx.
       logger.error("[meta.ingest] inbound não ingerido", {
         status: r.status,
         reason: r.status === "failed" ? r.reason : undefined,
+        retentavel: ingestaoPedeReentrega(r),
         external_id: e.externalId,
         phone_number_id: e.phoneNumberId,
         organization_id: sessao.organizationId,
       });
     }
-    return r.status;
+    return ingestaoPedeReentrega(r) ? DESFECHO_PEDE_REENTREGA : r.status;
   }
 
   if (e.kind === "echo_message") {
@@ -144,12 +156,13 @@ export async function processarEventoDaMeta(
       logger.error("[meta.eco] eco do app Business não ingerido", {
         status: r.status,
         reason: r.status === "failed" ? r.reason : undefined,
+        retentavel: ingestaoPedeReentrega(r),
         external_id: e.externalId,
         phone_number_id: e.phoneNumberId,
         organization_id: sessao.organizationId,
       });
     }
-    return r.status;
+    return ingestaoPedeReentrega(r) ? DESFECHO_PEDE_REENTREGA : r.status;
   }
 
   if (e.kind === "sync_payload") {
@@ -161,22 +174,45 @@ export async function processarEventoDaMeta(
   if (e.kind === "account_update") return aplicarMudancaDaConta(admin, e, sessao, agora);
 
   if (e.kind === "template_status") {
-    await admin
+    const { error } = await admin
       .from("meta_templates")
       .update({ status: e.event, rejected_reason: e.reason, updated_at: agora })
       .eq("organization_id", sessao.organizationId)
       .eq("waba_id", e.wabaId)
       .eq("name", e.templateName)
       .eq("language", e.templateLanguage);
-    return null;
+    return desfechoDaAtualizacao(error, "meta_templates", sessao);
   }
 
-  await admin
+  const { error } = await admin
     .from("messages")
     .update({ status: e.status === "failed" ? "failed" : "sent", updated_at: agora })
     .eq("organization_id", sessao.organizationId)
     .eq("external_id", e.externalId);
-  return null;
+  return desfechoDaAtualizacao(error, "messages", sessao);
+}
+
+/**
+ * Atualização de estado (modelo, entrega) que o banco recusou. O `{ error }` era
+ * descartado: com o banco fora, o "entregue"/"lido"/"falhou" da Meta sumia com
+ * 200. Passageira → pede reentrega (reaplicar dá no mesmo); permanente → log.
+ */
+export function desfechoDaAtualizacao(
+  error: { code?: string | null; message?: string | null } | null,
+  tabela: string,
+  sessao: MetaWebhookSession,
+): string | null {
+  if (!error) return null;
+  const retentavel = ehFalhaTransitoriaDoBanco(error);
+  logger.error("[meta.webhook] atualização de estado não gravada", {
+    tabela,
+    retentavel,
+    codigo: error.code ?? null,
+    erro: (error.message ?? "").replace(/\s+/g, " ").slice(0, 200),
+    organization_id: sessao.organizationId,
+    channel_session_id: sessao.id,
+  });
+  return retentavel ? DESFECHO_PEDE_REENTREGA : null;
 }
 
 /**

@@ -14,6 +14,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "../archived";
 import { CHANNEL_PROVIDER_META } from "../capabilities";
+import { ehFalhaTransitoriaDoBanco } from "../falha-do-banco";
 
 export interface MetaWebhookSession {
   id: string;
@@ -37,10 +38,18 @@ export interface MetaWebhookSession {
  */
 export class FalhaAoBuscarSessaoDaMeta extends Error {
   readonly codigo: string;
+  /**
+   * A reentrega pode resolver (banco fora, timeout, conexão)? `false` = falha de
+   * ESTRUTURA ou configuração (tabela/coluna inexistente, permissão, JWT): a rota
+   * não pede reentrega com 503 — ver `lib/channels/falha-do-banco.ts`.
+   */
+  readonly transitoria: boolean;
 
   constructor(etapa: string, erro: { code?: string | null; message?: string | null } | unknown) {
     const e = (erro ?? {}) as { code?: string | null; message?: string | null };
     const codigo = typeof e.code === "string" && e.code ? e.code : "sem_codigo";
+    // Promessa rejeitada (sem `code`) é rede; com `code`, quem decide é o classificador.
+    const transitoria = ehFalhaTransitoriaDoBanco({ code: typeof e.code === "string" ? e.code : "" });
     // A mensagem do banco pode ser a página inteira do 522: corta para o log.
     const detalhe = (typeof e.message === "string" ? e.message : erro instanceof Error ? erro.message : String(erro))
       .replace(/\s+/g, " ")
@@ -48,6 +57,7 @@ export class FalhaAoBuscarSessaoDaMeta extends Error {
     super(`${etapa}: ${codigo} ${detalhe}`.trim());
     this.name = "FalhaAoBuscarSessaoDaMeta";
     this.codigo = codigo;
+    this.transitoria = transitoria;
   }
 }
 
