@@ -47422,3 +47422,23 @@ create index if not exists event_log_processing_idx
 create index if not exists idx_messages_queued_created
   on public.messages (created_at)
   where status = 'queued';
+
+-- ---- as policies de organizations deixam de valer para anon (migration 9253) ----
+-- Sem `TO`, as duas valiam para `public` (inclui anon) e chamavam helpers
+-- definer sem EXECUTE para anon (0108): toda leitura anônima — o ping do
+-- /api/v1/health — gerava `permission denied for function fn_user_org_ids` no
+-- log do Postgres. Com `to authenticated`, anon vê zero linhas sem avaliar
+-- helper. Nada é concedido; using/with check intactos. Idempotente.
+do $$
+begin
+  if exists (select 1 from pg_policy
+              where polname = 'orgs_select'
+                and polrelid = 'public.organizations'::regclass) then
+    execute 'alter policy "orgs_select" on public.organizations to authenticated';
+  end if;
+  if exists (select 1 from pg_policy
+              where polname = 'orgs_write_platform_admin'
+                and polrelid = 'public.organizations'::regclass) then
+    execute 'alter policy "orgs_write_platform_admin" on public.organizations to authenticated';
+  end if;
+end $$;
