@@ -47407,3 +47407,18 @@ forçado. Inventar é pior do que demorar um instante a mais para responder.
   end if;
 end
 $pub$;
+
+-- ---- os reapers do worker param de varrer event_log e messages inteiros (migration 0510) ----
+-- Ver supabase/migrations/20261108043000_0510_reapers_do_worker_por_indice.sql
+-- para o racional e as medições. Índices PARCIAIS sobre o estado que os reapers
+-- procuram (`processing` / `queued`), quase sempre vazios. Idempotente.
+-- Sem CONCURRENTLY porque o apêndice pode rodar dentro de transação; num banco
+-- com event_log grande, crie antes com CONCURRENTLY (comando no arquivo da migration).
+
+create index if not exists event_log_processing_idx
+  on public.event_log (updated_at)
+  where status = 'processing';
+
+create index if not exists idx_messages_queued_created
+  on public.messages (created_at)
+  where status = 'queued';
