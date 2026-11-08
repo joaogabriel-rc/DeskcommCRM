@@ -48,6 +48,12 @@ vi.mock(import("@/lib/leads/atribuicao-de-anuncio"), async (importOriginal) => (
   ...(await importOriginal()),
   estamparAtribuicaoDoContato: vi.fn(async () => undefined),
 }));
+// A sincronização do aviso roda DE VERDADE; o `vi.fn` em volta só deixa um caso
+// fazê-la lançar (exceção é o que `processar-evento` alcança dela).
+vi.mock(import("@/lib/channels/health"), async (importOriginal) => {
+  const original = await importOriginal();
+  return { ...original, sincronizarSaudeDaConexao: vi.fn(original.sincronizarSaudeDaConexao) };
+});
 vi.mock(import("@/lib/channels/meta/ecos-em-espera"), async (importOriginal) => ({
   ...(await importOriginal()),
   lerOnboardingDoCanal: vi.fn(async () => null),
@@ -56,7 +62,8 @@ vi.mock(import("@/lib/channels/meta/ecos-em-espera"), async (importOriginal) => 
 import { POST as POST_TOKEN } from "@/app/api/v1/webhooks/meta/[token]/route";
 import { POST as POST_UNIVERSAL } from "@/app/api/v1/webhooks/meta/route";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
-import { ehFalhaTransitoriaDoBanco } from "@/lib/channels/falha-do-banco";
+import { classificarFalhaDoBanco, ehFalhaTransitoriaDoBanco } from "@/lib/channels/falha-do-banco";
+import { sincronizarSaudeDaConexao } from "@/lib/channels/health";
 import { aplicarEfeitosPosEntrada } from "@/lib/channels/pos-entrada";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -88,6 +95,8 @@ interface Banco {
   contatos: Map<string, string>;
   conversas: Map<string, string>;
   mensagens: Linha[];
+  /** `webhook_events_log`: o arquivo cru do evento recusado pelo próprio dado. */
+  arquivo: Linha[];
   atualizacoes: Array<{ tabela: string; patch: Linha; filtros: Linha }>;
   falhas: Record<string, Array<Erro | null>>;
 }
@@ -117,8 +126,11 @@ function adminFalso() {
     },
     from(tabela: string) {
       const filtros: Linha = {};
+      // `.neq()` de verdade: é por ele que a guarda de ordem dos status
+      // (`naoDesfazFalha`) impede o "sent" reentregue de apagar um "failed".
+      const negados: Linha = {};
       let limite = Infinity;
-      let operacao: "select" | "insert" | "update" = "select";
+      let operacao: "select" | "insert" | "update" | "upsert" = "select";
       let linhaNova: Linha | null = null;
       let patch: Linha | null = null;
 
@@ -136,10 +148,25 @@ function adminFalso() {
           banco.mensagens.push({ ...l, id });
           return Promise.resolve({ data: { id }, error: null });
         }
-        if (operacao === "update") {
-          banco.atualizacoes.push({ tabela, patch: patch!, filtros: { ...filtros } });
+        if (operacao === "insert" && tabela === "webhook_events_log") {
+          banco.arquivo.push({ ...linhaNova! });
           return Promise.resolve({ data: null, error: null });
         }
+        if (operacao === "update") {
+          banco.atualizacoes.push({ tabela, patch: patch!, filtros: { ...filtros } });
+          // Em `messages` o update vale de fato, com eq E neq — é o estado final
+          // da linha que os casos fora de ordem medem.
+          if (tabela === "messages") {
+            for (const m of banco.mensagens) {
+              const casa =
+                Object.entries(filtros).every(([c, v]) => m[c] === v) &&
+                Object.entries(negados).every(([c, v]) => m[c] !== v);
+              if (casa) Object.assign(m, patch);
+            }
+          }
+          return Promise.resolve({ data: null, error: null });
+        }
+        if (operacao === "upsert") return Promise.resolve({ data: null, error: null });
         const linhas = (tabela === "channel_sessions" ? banco.sessoes : [])
           .filter((l) => Object.entries(filtros).every(([c, v]) => l[c] === v))
           .slice(0, limite);
@@ -150,12 +177,13 @@ function adminFalso() {
         select: () => q,
         eq: (c: string, v: unknown) => ((filtros[c] = v), q),
         is: (c: string, v: unknown) => ((filtros[c] = v), q),
-        neq: () => q,
+        neq: (c: string, v: unknown) => ((negados[c] = v), q),
         in: () => q,
         gte: () => q,
         limit: (n: number) => ((limite = n), q),
         insert: (l: Linha) => ((operacao = "insert"), (linhaNova = l), q),
         update: (p: Linha) => ((operacao = "update"), (patch = p), q),
+        upsert: (l: Linha) => ((operacao = "upsert"), (linhaNova = l), q),
         maybeSingle: () => executar(true),
         single: () => executar(true),
         then: (resolve: (r: unknown) => unknown, reject?: (e: unknown) => unknown) => executar(false).then(resolve, reject),
@@ -227,6 +255,25 @@ function eco(waba: string, numero: string, wamid: string) {
   };
 }
 
+/** Mudança na conta (WABA), no formato da referência oficial do `account_update`. */
+function contaMudou(waba: string, evento: string) {
+  return {
+    id: waba,
+    changes: [
+      {
+        field: "account_update",
+        value: {
+          event: evento,
+          waba_info: { waba_id: waba, owner_business_id: "300000000000001" },
+          ...(evento === "ACCOUNT_RECONNECTED"
+            ? {}
+            : { disconnection_info: { reason: "PRIMARY_INACTIVITY", initiated_by: "SYSTEM" } }),
+        },
+      },
+    ],
+  };
+}
+
 const corpo = (...entry: unknown[]) => ({ object: "whatsapp_business_account", entry });
 
 function entrega(url: string, c: unknown): NextRequest {
@@ -258,6 +305,7 @@ beforeEach(() => {
     contatos: new Map(),
     conversas: new Map(),
     mensagens: [],
+    arquivo: [],
     atualizacoes: [],
     falhas: {},
   };
@@ -265,40 +313,43 @@ beforeEach(() => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-describe("classificador — a reentrega resolve?", () => {
+describe("classificador — três naturezas de falha", () => {
   it.each([
-    // ── passageiras: a reentrega resolve ──
-    ["sem código (fetch failed, 522)", FETCH_FAILED, true],
-    ["código do Node (ECONNRESET)", { code: "ECONNRESET", message: "socket hang up" }, true],
-    ["timeout de consulta (57014)", TIMEOUT, true],
-    ["banco reiniciando (57P03)", { code: "57P03", message: "the database system is starting up" }, true],
-    ["conexão (08006)", { code: "08006", message: "connection failure" }, true],
-    ["conexões esgotadas (53300)", { code: "53300", message: "too many connections" }, true],
-    ["deadlock (40P01)", { code: "40P01", message: "deadlock detected" }, true],
-    ["serialização (40001)", { code: "40001", message: "could not serialize access" }, true],
-    ["lock indisponível (55P03)", { code: "55P03", message: "could not obtain lock" }, true],
-    ["banco em somente leitura (25006)", { code: "25006", message: "cannot execute INSERT in a read-only transaction" }, true],
-    ["PostgREST sem banco (PGRST000)", { code: "PGRST000", message: "Could not connect with the database" }, true],
-    ["PostgREST pool esgotado (PGRST003)", { code: "PGRST003", message: "Timed out acquiring connection from connection pool" }, true],
-    // ── estruturais e de configuração: reentregar não resolve ──
-    ["tabela inexistente (42P01)", { code: "42P01", message: 'relation "public.messages" does not exist' }, false],
-    ["coluna inexistente (42703)", { code: "42703", message: 'column "x" does not exist' }, false],
-    ["função inexistente (42883)", { code: "42883", message: "function does not exist" }, false],
-    ["permissão negada (42501)", { code: "42501", message: "permission denied for table messages" }, false],
-    ["schema cache sem a coluna (PGRST204)", { code: "PGRST204", message: "Could not find the column in the schema cache" }, false],
-    ["schema cache sem a tabela (PGRST205)", { code: "PGRST205", message: "Could not find the table in the schema cache" }, false],
-    ["JWT inválido (PGRST301)", { code: "PGRST301", message: "JWT expired" }, false],
-    ["requisição malformada (PGRST100)", { code: "PGRST100", message: "parsing error in the query string" }, false],
-    // ── dado e integridade ──
-    ["check violado (23514)", CHECK_VIOLADO, false],
-    ["dado inválido (22P02)", TEXTO_INVALIDO, false],
-    ["not null (23502)", { code: "23502", message: "null value" }, false],
-    ["SQLSTATE não listado (XX000)", { code: "XX000", message: "internal error" }, false],
-  ])("%s → transitória = %s", (_n, erro, esperado) => {
-    expect(ehFalhaTransitoriaDoBanco(erro)).toBe(esperado);
+    // ── transitória: infraestrutura, a reentrega resolve → 503 ──
+    ["sem código (fetch failed, 522)", FETCH_FAILED, "transitoria"],
+    ["código do Node (ECONNRESET)", { code: "ECONNRESET", message: "socket hang up" }, "transitoria"],
+    ["timeout de consulta (57014)", TIMEOUT, "transitoria"],
+    ["banco reiniciando (57P03)", { code: "57P03", message: "the database system is starting up" }, "transitoria"],
+    ["conexão (08006)", { code: "08006", message: "connection failure" }, "transitoria"],
+    ["conexões esgotadas (53300)", { code: "53300", message: "too many connections" }, "transitoria"],
+    ["deadlock (40P01)", { code: "40P01", message: "deadlock detected" }, "transitoria"],
+    ["serialização (40001)", { code: "40001", message: "could not serialize access" }, "transitoria"],
+    ["lock indisponível (55P03)", { code: "55P03", message: "could not obtain lock" }, "transitoria"],
+    ["banco em somente leitura (25006)", { code: "25006", message: "cannot execute INSERT in a read-only transaction" }, "transitoria"],
+    ["PostgREST sem banco (PGRST000)", { code: "PGRST000", message: "Could not connect with the database" }, "transitoria"],
+    ["PostgREST pool esgotado (PGRST003)", { code: "PGRST003", message: "Timed out acquiring connection from connection pool" }, "transitoria"],
+    // ── estrutural: defeito ou configuração do CRM → 500, nunca 200 ──
+    ["tabela inexistente (42P01)", { code: "42P01", message: 'relation "public.messages" does not exist' }, "estrutural"],
+    ["coluna inexistente (42703)", { code: "42703", message: 'column "x" does not exist' }, "estrutural"],
+    ["função inexistente (42883)", { code: "42883", message: "function does not exist" }, "estrutural"],
+    ["permissão negada (42501)", { code: "42501", message: "permission denied for table messages" }, "estrutural"],
+    ["schema cache sem a coluna (PGRST204)", { code: "PGRST204", message: "Could not find the column in the schema cache" }, "estrutural"],
+    ["schema cache sem a tabela (PGRST205)", { code: "PGRST205", message: "Could not find the table in the schema cache" }, "estrutural"],
+    ["JWT inválido (PGRST301)", { code: "PGRST301", message: "JWT expired" }, "estrutural"],
+    ["requisição malformada pelo código (PGRST100)", { code: "PGRST100", message: "parsing error in the query string" }, "estrutural"],
+    ["erro interno (XX000)", { code: "XX000", message: "internal error" }, "estrutural"],
+    // ── do evento: o dado deste evento é recusado → arquiva e 200 ──
+    ["check violado (23514)", CHECK_VIOLADO, "do_evento"],
+    ["dado inválido (22P02)", TEXTO_INVALIDO, "do_evento"],
+    ["not null (23502)", { code: "23502", message: "null value" }, "do_evento"],
+    ["regra levantada pelo banco (P0001)", { code: "P0001", message: "raise exception" }, "do_evento"],
+  ])("%s → %s", (_n, erro, esperado) => {
+    expect(classificarFalhaDoBanco(erro)).toBe(esperado);
+    expect(ehFalhaTransitoriaDoBanco(erro)).toBe(esperado === "transitoria");
   });
 
   it("sem erro não é falha", () => {
+    expect(classificarFalhaDoBanco(null)).toBeNull();
     expect(ehFalhaTransitoriaDoBanco(null)).toBe(false);
   });
 });
@@ -332,38 +383,83 @@ describe.each(ROTAS)("rota %s — mensagem recebida", (_rota, post) => {
   it.each([
     ["check violado (23514)", CHECK_VIOLADO],
     ["dado inválido (22P02)", TEXTO_INVALIDO],
-  ])("erro permanente — %s: 200 com `failed` (sem reentrega em loop), e o motivo no log", async (_n, erro) => {
+  ])("recusa DO EVENTO — %s: arquiva o evento cru e só então 200 `failed`", async (_n, erro) => {
     banco.falhas["insert:messages"] = [erro];
     const res = await post(corpo(mensagens(WABA_A, NUM_A, "wamid.ruim")));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ received: 1, outcomes: ["failed"] });
+    expect(banco.mensagens).toHaveLength(0);
+    expect(banco.arquivo).toEqual([
+      expect.objectContaining({
+        organization_id: ORG_A,
+        channel_session_id: "s-a",
+        provider: CHANNEL_PROVIDER_META,
+        status: "error",
+        event_type: "inbound_message",
+        external_id: "wamid.ruim",
+        error_message: expect.stringMatching(/^do_evento: mensagem: /),
+      }),
+    ]);
+    // O conteúdo da mensagem está no arquivo — é o que permite reprocessar depois.
+    expect(JSON.parse(banco.arquivo[0]!.raw_body as string)).toMatchObject({ externalId: "wamid.ruim", text: "oi" });
     const log = vi.mocked(logger.error).mock.calls.find(([m]) => String(m).includes("inbound não ingerido"));
-    expect(log?.[1]).toMatchObject({ status: "failed", retentavel: false });
+    expect(log?.[1]).toMatchObject({ status: "failed", classe: "do_evento" });
+  });
+
+  it.each([
+    ["passageira", FETCH_FAILED, 503],
+    ["estrutural", { code: "42P01", message: 'relation "public.webhook_events_log" does not exist' }, 500],
+  ])("recusa do evento e o ARQUIVO também falha (%s): não confirma — %s", async (_n, erroDoArquivo, esperado) => {
+    banco.falhas["insert:messages"] = [CHECK_VIOLADO];
+    banco.falhas["insert:webhook_events_log"] = [erroDoArquivo];
+    const res = await post(corpo(mensagens(WABA_A, NUM_A, "wamid.semarquivo")));
+    expect(res.status).toBe(esperado);
+    expect(banco.arquivo).toHaveLength(0);
   });
 
   it.each([
     ["tabela inexistente (42P01)", { code: "42P01", message: 'relation "public.messages" does not exist' }],
     ["coluna inexistente (42703)", { code: "42703", message: 'column "media_mime" does not exist' }],
     ["schema cache sem a tabela (PGRST205)", { code: "PGRST205", message: "Could not find the table" }],
-  ])("erro ESTRUTURAL na gravação — %s: 200 com `failed`, sem reentrega sem fim", async (_n, erro) => {
+    ["permissão negada (42501)", { code: "42501", message: "permission denied for table messages" }],
+  ])("erro ESTRUTURAL na gravação — %s: 500 (nunca 200), sem Retry-After, e o log pede ação", async (_n, erro) => {
     banco.falhas["insert:messages"] = [erro];
     const res = await post(corpo(mensagens(WABA_A, NUM_A, "wamid.schema")));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
     expect(res.headers.get("retry-after")).toBeNull();
+    expect(((await res.json()) as { error: { code: string; message: string } }).error).toMatchObject({
+      code: "internal_error",
+      message: "event_persistence_failed",
+    });
+    expect(banco.mensagens).toHaveLength(0);
+    expect(banco.arquivo).toHaveLength(0);
     const log = vi.mocked(logger.error).mock.calls.find(([m]) => String(m).includes("inbound não ingerido"));
-    expect(log?.[1]).toMatchObject({ status: "failed", retentavel: false });
+    expect(log?.[1]).toMatchObject({ status: "failed", classe: "estrutural" });
+    expect(vi.mocked(logger.error).mock.calls.some(([m]) => String(m).includes("ESTRUTURAL do CRM"))).toBe(true);
   });
 
-  it("busca da sessão DENTRO da ingestão: passageira → 503; estrutural → 200 failed", async () => {
+  it("depois do conserto (migration aplicada), a reentrega da Meta grava a mensagem", async () => {
+    banco.falhas["insert:messages"] = [{ code: "42703", message: 'column "media_mime" does not exist' }];
+    expect((await post(corpo(mensagens(WABA_A, NUM_A, "wamid.conserto")))).status).toBe(500);
+    const res = await post(corpo(mensagens(WABA_A, NUM_A, "wamid.conserto")));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ received: 1, outcomes: ["ingested"] });
+    expect(banco.mensagens).toHaveLength(1);
+  });
+
+  it("busca da sessão DENTRO da ingestão: passageira → 503; estrutural → 500 (nunca 200)", async () => {
     // A 1ª leitura de channel_sessions é a da rota (token ou número); a 2ª é a da ingestão.
     banco.falhas["select:channel_sessions"] = [null, FETCH_FAILED];
     expect((await post(corpo(mensagens(WABA_A, NUM_A, "wamid.s1")))).status).toBe(503);
 
     banco.falhas["select:channel_sessions"] = [null, { code: "42703", message: 'column "meta_phone_number_id" does not exist' }];
     const res = await post(corpo(mensagens(WABA_A, NUM_A, "wamid.s2")));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ received: 1, outcomes: ["failed"] });
+    expect(res.status).toBe(500);
     expect(banco.mensagens).toHaveLength(0);
+    // Um 22xxx na NOSSA consulta não é dado do evento: também é do CRM.
+    banco.falhas["select:channel_sessions"] = [null, TEXTO_INVALIDO];
+    expect((await post(corpo(mensagens(WABA_A, NUM_A, "wamid.s3")))).status).toBe(500);
+    expect(banco.arquivo).toHaveLength(0);
   });
 
   it("reenvio do mesmo evento depois de gravado: 200 duplicate, sem segunda linha nem segundo efeito", async () => {
@@ -455,15 +551,151 @@ describe.each(ROTAS)("rota %s — eco do app Business e estado de mensagem", (_r
     ]);
   });
 
-  it.each([
-    ["dado inválido (22P02)", TEXTO_INVALIDO],
-    ["coluna inexistente (42703)", { code: "42703", message: 'column "read_at" does not exist' }],
-  ])("“entregue” recusado por erro permanente — %s: 200 (não insiste), com log", async (_n, erro) => {
-    banco.falhas["update:messages"] = [erro];
+  it("“entregue” recusado pelo próprio dado (22P02): 200 (não insiste), com log", async () => {
+    banco.falhas["update:messages"] = [TEXTO_INVALIDO];
     const res = await post(corpo(status(WABA_A, NUM_A, "wamid.nosso")));
     expect(res.status).toBe(200);
     const log = vi.mocked(logger.error).mock.calls.find(([m]) => String(m).includes("atualização de estado não gravada"));
-    expect(log?.[1]).toMatchObject({ retentavel: false, organization_id: ORG_A });
+    expect(log?.[1]).toMatchObject({ classe: "do_evento", organization_id: ORG_A });
+  });
+
+  it("“entregue” com coluna inexistente (42703): 500 — estrutural não é confirmado", async () => {
+    banco.falhas["update:messages"] = [{ code: "42703", message: 'column "read_at" does not exist' }];
+    const res = await post(corpo(status(WABA_A, NUM_A, "wamid.nosso")));
+    expect(res.status).toBe(500);
+  });
+
+  it("eco com coluna inexistente na gravação: 500", async () => {
+    banco.falhas["insert:messages"] = [{ code: "42703", message: 'column "sent_via" does not exist' }];
+    expect((await post(corpo(eco(WABA_A, NUM_A, "wamid.eco2")))).status).toBe(500);
+    expect(banco.mensagens).toHaveLength(0);
+  });
+
+  it("lote com uma falha passageira e uma estrutural: 500 vence 503", async () => {
+    banco.falhas["insert:messages"] = [FETCH_FAILED, { code: "42P01", message: "relation does not exist" }];
+    const res = await post(corpo(mensagens(WABA_A, NUM_A, "wamid.p1", "wamid.p2")));
+    expect(res.status).toBe(500);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * STATUS FORA DE ORDEM. Desde que o webhook responde 503 com o banco fora, a
+ * Meta REENTREGA — e a reentrega chega depois de entregas mais novas. O caso
+ * real: o "sent" leva 503, o "failed" da mesma mensagem entra, e o "sent"
+ * reentregue volta por último. Sem guarda ele apagava o "failed", e a mensagem
+ * que não chegou aparecia como enviada. `failed` é terminal.
+ */
+describe.each(ROTAS)("rota %s — status de entrega fora de ordem", (_rota, post) => {
+  const nossa = (s: string) =>
+    banco.mensagens.push({ id: "msg-nossa", organization_id: ORG_A, external_id: "wamid.nosso", direction: "outbound", status: s });
+  const estado = () => banco.mensagens.find((m) => m.id === "msg-nossa")?.status;
+
+  it("o “sent” reentregue depois do “failed” não desfaz a falha", async () => {
+    nossa("sending");
+    banco.falhas["update:messages"] = [TIMEOUT];
+    expect((await post(corpo(status(WABA_A, NUM_A, "wamid.nosso", "sent")))).status).toBe(503);
+    expect(estado()).toBe("sending");
+
+    expect((await post(corpo(status(WABA_A, NUM_A, "wamid.nosso", "failed")))).status).toBe(200);
+    expect(estado()).toBe("failed");
+
+    // A reentrega do "sent" chega por último: confirma (é obsoleto, não perdido)
+    // e a falha continua.
+    expect((await post(corpo(status(WABA_A, NUM_A, "wamid.nosso", "sent")))).status).toBe(200);
+    expect(estado()).toBe("failed");
+  });
+
+  it.each(["sent", "delivered", "read"])("“%s” atrasado não sobrescreve um “failed” já gravado", async (s) => {
+    nossa("failed");
+    expect((await post(corpo(status(WABA_A, NUM_A, "wamid.nosso", s)))).status).toBe(200);
+    expect(estado()).toBe("failed");
+  });
+
+  it("na ordem normal nada muda: “sent”, “delivered” e “read” levam a mensagem a enviada", async () => {
+    nossa("sending");
+    for (const s of ["sent", "delivered", "read"]) {
+      expect((await post(corpo(status(WABA_A, NUM_A, "wamid.nosso", s)))).status).toBe(200);
+    }
+    expect(estado()).toBe("sent");
+  });
+
+  it("o “failed” continua chegando a uma mensagem enviada, e a reentrega dele é idempotente", async () => {
+    nossa("sent");
+    expect((await post(corpo(status(WABA_A, NUM_A, "wamid.nosso", "failed")))).status).toBe(200);
+    expect((await post(corpo(status(WABA_A, NUM_A, "wamid.nosso", "failed")))).status).toBe(200);
+    expect(estado()).toBe("failed");
+  });
+
+  it("a guarda é por organização: o mesmo wamid “failed” na org B não trava o “sent” da org A", async () => {
+    nossa("sending");
+    banco.mensagens.push({ id: "msg-da-b", organization_id: ORG_B, external_id: "wamid.nosso", direction: "outbound", status: "failed" });
+    expect((await post(corpo(status(WABA_A, NUM_A, "wamid.nosso", "sent")))).status).toBe(200);
+    expect(estado()).toBe("sent");
+    expect(banco.mensagens.find((m) => m.id === "msg-da-b")?.status).toBe("failed");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * MUDANÇA NA CONTA. Os `{ error }` do `account_update` eram descartados: com o
+ * banco fora, a desconexão da conta respondia 200, a Meta não reenviava, e o
+ * canal seguia "Conectado" com o número fora da API.
+ */
+describe.each(ROTAS)("rota %s — account_update só confirma o que gravou", (_rota, post) => {
+  const stopped = () =>
+    banco.atualizacoes.filter((a) => a.tabela === "channel_sessions" && a.patch.status === "STOPPED");
+
+  it("desconexão gravada: 200, o canal vira STOPPED na organização da sessão", async () => {
+    const res = await post(corpo(contaMudou(WABA_A, "PARTNER_REMOVED")));
+    expect(res.status).toBe(200);
+    expect(stopped()).toEqual([
+      expect.objectContaining({ filtros: expect.objectContaining({ organization_id: ORG_A, id: "s-a" }) }),
+    ]);
+  });
+
+  it("banco fora no update do canal: 503, e a reentrega grava", async () => {
+    banco.falhas["update:channel_sessions"] = [TIMEOUT];
+    expect((await post(corpo(contaMudou(WABA_A, "PARTNER_REMOVED")))).status).toBe(503);
+    expect(sincronizarSaudeDaConexao).not.toHaveBeenCalled();
+
+    expect((await post(corpo(contaMudou(WABA_A, "PARTNER_REMOVED")))).status).toBe(200);
+    expect(sincronizarSaudeDaConexao).toHaveBeenCalledTimes(1);
+  });
+
+  it("rede caiu no update do canal (sem código): 503", async () => {
+    banco.falhas["update:channel_sessions"] = [FETCH_FAILED];
+    expect((await post(corpo(contaMudou(WABA_A, "PARTNER_REMOVED")))).status).toBe(503);
+  });
+
+  it("coluna inexistente no update do canal (42703): 500 — estrutural não é confirmado", async () => {
+    banco.falhas["update:channel_sessions"] = [{ code: "42703", message: 'column "last_status_change_at" does not exist' }];
+    expect((await post(corpo(contaMudou(WABA_A, "PARTNER_REMOVED")))).status).toBe(500);
+    expect(sincronizarSaudeDaConexao).not.toHaveBeenCalled();
+  });
+
+  it("a sincronização do aviso lança sem código (rede): 503", async () => {
+    vi.mocked(sincronizarSaudeDaConexao).mockRejectedValueOnce(new TypeError("fetch failed"));
+    expect((await post(corpo(contaMudou(WABA_A, "PARTNER_REMOVED")))).status).toBe(503);
+  });
+
+  it("a sincronização do aviso lança com erro estrutural (42P01): 500", async () => {
+    vi.mocked(sincronizarSaudeDaConexao).mockRejectedValueOnce(
+      Object.assign(new Error('relation "agent_inbox_items" does not exist'), { code: "42P01" }),
+    );
+    expect((await post(corpo(contaMudou(WABA_A, "PARTNER_REMOVED")))).status).toBe(500);
+  });
+
+  it("reconexão: a sincronização lança → 503; gravada → 200", async () => {
+    vi.mocked(sincronizarSaudeDaConexao).mockRejectedValueOnce(new TypeError("fetch failed"));
+    expect((await post(corpo(contaMudou(WABA_A, "ACCOUNT_RECONNECTED")))).status).toBe(503);
+    expect((await post(corpo(contaMudou(WABA_A, "ACCOUNT_RECONNECTED")))).status).toBe(200);
+  });
+
+  it("evento de conta que não nos interessa continua 200 sem escrever nada", async () => {
+    const res = await post(corpo(contaMudou(WABA_A, "VERIFIED_ACCOUNT")));
+    expect(res.status).toBe(200);
+    expect(stopped()).toHaveLength(0);
   });
 });
 
@@ -487,6 +719,16 @@ describe("isolamento entre organizações", () => {
     const res = await postToken(TOKEN_A, corpo(mensagens(WABA_B, NUM_B, "wamid.cruzado")));
     expect(res.status).toBe(200);
     expect(banco.mensagens).toHaveLength(0);
+  });
+
+  it("universal: evento recusado da org A é arquivado só na org A — o evento da org B não vai junto", async () => {
+    banco.falhas["insert:messages"] = [CHECK_VIOLADO];
+    const res = await postUniversal(corpo(mensagens(WABA_A, NUM_A, "wamid.ra"), mensagens(WABA_B, NUM_B, "wamid.rb")));
+    expect(res.status).toBe(200);
+    expect(banco.arquivo).toHaveLength(1);
+    expect(banco.arquivo[0]).toMatchObject({ organization_id: ORG_A, channel_session_id: "s-a", external_id: "wamid.ra" });
+    expect(banco.arquivo[0]!.raw_body as string).not.toContain("wamid.rb");
+    expect(banco.mensagens).toEqual([expect.objectContaining({ organization_id: ORG_B, external_id: "wamid.rb" })]);
   });
 
   it("universal: entrega com números de duas organizações grava cada uma na sua; a falha de uma pede reentrega e a outra não duplica", async () => {

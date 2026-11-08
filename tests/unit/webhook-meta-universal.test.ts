@@ -88,6 +88,9 @@ function adminFalso() {
           escritas.push(escrita);
           const u = {
             eq: (c: string, v: unknown) => ((escrita.filtros[c] = v), u),
+            // A guarda de ordem dos status (`naoDesfazFalha`) encadeia um `.neq`.
+            // Este dublê só mede ESCOPO (os `eq`), então o `neq` só segue a cadeia.
+            neq: () => u,
             then: (resolve: (r: unknown) => void) => resolve({ error: null }),
           };
           return u;

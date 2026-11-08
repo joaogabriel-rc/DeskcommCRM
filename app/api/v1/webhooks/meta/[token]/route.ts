@@ -34,7 +34,7 @@ import { appDaMeta } from "@/lib/channels/meta/app";
 import { lerEnvelopeMeta } from "@/lib/channels/meta/envelope";
 import { parseMetaWebhook, verificationChallenge, verifyMetaSignature } from "@/lib/channels/meta/webhook";
 import { statusUpdate } from "@/lib/channels/meta/status-update";
-import { ingestaoPedeReentrega } from "@/lib/channels/falha-do-banco";
+import { classeDaIngestao } from "@/lib/channels/falha-do-banco";
 import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { ingestMetaEcho } from "@/lib/channels/meta/ingest-eco";
 import { guardarPayloadDeSincronizacao } from "@/lib/channels/meta/sincronizacao";
@@ -44,9 +44,11 @@ import {
   type MetaWebhookSession,
 } from "@/lib/channels/meta/session";
 import {
-  DESFECHO_PEDE_REENTREGA,
   desfechoDaAtualizacao,
+  desfechoDaFalhaDeIngestao,
+  naoDesfazFalha,
   processarEventoDaMeta,
+  respostaPedida,
 } from "@/lib/channels/meta/processar-evento";
 import { logger } from "@/lib/logger";
 import {
@@ -252,12 +254,18 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
    */
   const desfechos: string[] = [];
   /**
-   * Algum evento NÃO foi gravado por causa passageira (banco fora, timeout). O
-   * lote segue — o que deu certo fica, e a reentrega o reconhece como
-   * `duplicate` —, e a resposta final vira 503 para a Meta mandar de novo. Antes
-   * a falha ia só para `outcomes` com 200, e a Meta dava a entrega por concluída.
+   * 200 só quando todo evento ficou DURÁVEL em algum lugar — gravado, duplicado,
+   * recusado de propósito ou arquivado cru. Senão: 503 (banco fora, a reentrega
+   * resolve) ou 500 (defeito/configuração do CRM, ou nem o arquivo entrou); 500
+   * vence 503. O lote segue até o fim — o que deu certo fica, e a reentrega o
+   * reconhece como `duplicate`. Antes a falha ia só para `outcomes` com 200, e a
+   * Meta dava a entrega por concluída.
    */
-  let pedeReentrega = false;
+  let respostaExigida: 503 | 500 | null = null;
+  const exigir = (desfecho: string | null) => {
+    const r = respostaPedida(desfecho);
+    if (r === 500 || (r === 503 && respostaExigida === null)) respostaExigida = r;
+  };
 
   for (const e of eventos) {
     // O evento chega carimbado com a WABA; se não for a desta sessão, ignoramos.
@@ -288,21 +296,21 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       // as duas, com 200 na resposta (issue #236).
       const r = await ingestMetaInbound(admin, e, { organizationId: session.organizationId });
       desfechos.push(r.status);
-      if (ingestaoPedeReentrega(r)) pedeReentrega = true;
       if (r.status === "failed" || r.status === "no_session") {
-        // Falha permanente: 2xx continua (a Meta re-entregaria em loop um corpo
-        // que nunca melhora), mas a falha NÃO fica muda: vai ao log estruturado e
-        // ao corpo da resposta. Falha passageira: a resposta final vira 503.
+        // A falha NÃO fica muda: vai ao log estruturado e ao corpo da resposta.
+        // O que ela pede à rota (503, 500, ou 200 depois de arquivar o evento
+        // cru) é decidido pela classe — ver `desfechoDaFalhaDeIngestao`.
         logger.error("[meta.ingest] inbound não ingerido", {
           request_id: requestId,
           status: r.status,
           reason: r.status === "failed" ? r.reason : undefined,
-          retentavel: ingestaoPedeReentrega(r),
+          classe: classeDaIngestao(r),
           external_id: e.externalId,
           phone_number_id: e.phoneNumberId,
           organization_id: session.organizationId,
         });
       }
+      exigir(await desfechoDaFalhaDeIngestao(admin, e, session, r));
       continue;
     }
 
@@ -311,16 +319,16 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       // da recebida: ela vem do TOKEN DO PATH, e a WABA já foi conferida acima.
       const r = await ingestMetaEcho(admin, e, { organizationId: session.organizationId });
       desfechos.push(r.status);
-      if (ingestaoPedeReentrega(r)) pedeReentrega = true;
       if (r.status === "failed" || r.status === "no_session") {
         logger.error("[meta.eco] eco do app Business não ingerido", {
           status: r.status,
           reason: r.status === "failed" ? r.reason : undefined,
-          retentavel: ingestaoPedeReentrega(r),
+          classe: classeDaIngestao(r),
           external_id: e.externalId,
           phone_number_id: e.phoneNumberId,
         });
       }
+      exigir(await desfechoDaFalhaDeIngestao(admin, e, session, r));
       continue;
     }
 
@@ -335,7 +343,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       // A conta desconectou (ou voltou) da API: o estado da conexão segue a
       // Meta. Mesma regra da rota universal — mora em `processar-evento.ts`.
       const d = await processarEventoDaMeta(admin, e, session, now);
-      if (d === DESFECHO_PEDE_REENTREGA) pedeReentrega = true;
+      if (respostaPedida(d)) exigir(d);
       else if (d) desfechos.push(d);
       continue;
     }
@@ -348,7 +356,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
         .eq("waba_id", e.wabaId)
         .eq("name", e.templateName)
         .eq("language", e.templateLanguage);
-      if (desfechoDaAtualizacao(error, "meta_templates", session) === DESFECHO_PEDE_REENTREGA) pedeReentrega = true;
+      exigir(desfechoDaAtualizacao(error, "meta_templates", session));
     } else if (e.status === "failed") {
       // A recusa da plataforma chega DEPOIS do 200 (131047 fora da janela,
       // 131026 número não registrado, 132015 template pausado). O evento inteiro
@@ -370,7 +378,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
           "id, conversation_id, contact_id, sent_via, error_code, error_message, contacts:contact_id(phone_number)",
         )
         .maybeSingle();
-      if (desfechoDaAtualizacao(erroDoStatus, "messages", session) === DESFECHO_PEDE_REENTREGA) pedeReentrega = true;
+      exigir(desfechoDaAtualizacao(erroDoStatus, "messages", session));
       if (linha) {
         const falha = linha as {
           id: string;
@@ -401,16 +409,20 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       // O evento inteiro vira colunas, não só `status`: quando a Meta ACEITA o
       // template e reprova a entrega depois, o motivo só existe aqui. Ver
       // `lib/channels/meta/status-update.ts`.
-      const { error: erroDoStatus } = await admin
-        .from("messages")
-        .update(statusUpdate(e, now))
-        .eq("organization_id", session.organizationId)
-        .eq("external_id", e.externalId);
-      if (desfechoDaAtualizacao(erroDoStatus, "messages", session) === DESFECHO_PEDE_REENTREGA) pedeReentrega = true;
+      // `failed` é terminal: a reentrega de um "sent"/"delivered" que levou 503
+      // não pode apagar a falha gravada depois dele. Ver `naoDesfazFalha`.
+      const { error: erroDoStatus } = await naoDesfazFalha(
+        admin
+          .from("messages")
+          .update(statusUpdate(e, now))
+          .eq("organization_id", session.organizationId)
+          .eq("external_id", e.externalId),
+      );
+      exigir(desfechoDaAtualizacao(erroDoStatus, "messages", session));
     }
   }
 
-  if (pedeReentrega) {
+  if (respostaExigida === 503) {
     logger.error("[meta.webhook] evento não gravado por falha passageira — a Meta vai reentregar", {
       request_id: requestId,
       rota: "token",
@@ -422,6 +434,20 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
     return fail("upstream_unavailable", "event_persistence_unavailable", 503, {
       requestId,
       headers: { "Retry-After": "30" },
+      details: { received: eventos.length, outcomes: desfechos },
+    });
+  }
+  if (respostaExigida === 500) {
+    logger.error("[meta.webhook] evento não gravado por falha ESTRUTURAL do CRM — exige ação do operador", {
+      request_id: requestId,
+      rota: "token",
+      status: 500,
+      organization_id: session.organizationId,
+      channel_session_id: session.id,
+      outcomes: desfechos,
+    });
+    return fail("internal_error", "event_persistence_failed", 500, {
+      requestId,
       details: { received: eventos.length, outcomes: desfechos },
     });
   }

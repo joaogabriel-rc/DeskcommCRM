@@ -33,7 +33,7 @@ import { ARCHIVED_AT, queryTolerantToMissingArchived } from "../archived";
 import { extrairAtribuicaoMeta } from "../atribuicao-de-anuncio-oficial";
 import { aplicarEfeitosPosEntrada } from "../pos-entrada";
 import { encontrarContatoPorTelefone } from "../contato-por-telefone";
-import { ehFalhaTransitoriaDoBanco } from "../falha-do-banco";
+import { classificarFalhaDoBanco, type ClasseDaFalha } from "../falha-do-banco";
 import { marcarConversaComMensagem } from "../marcar-conversa";
 import { canonicalPhoneBR } from "../phone-variants";
 import type { ChannelTenantScope } from "../types";
@@ -61,13 +61,12 @@ export type IngestOutcome =
    */
   | { status: "ignored"; reason: string }
   /**
-   * `retentavel`: a mensagem NÃO foi gravada e a causa é passageira (banco fora,
-   * timeout, conexão) — o webhook responde 5xx para a plataforma reentregar.
-   * Ausente ou `false`: a mesma entrega falharia de novo (dado inválido), e o
-   * webhook segue com 2xx e o motivo no log. Ver `lib/channels/falha-do-banco.ts`
-   * (`ingestaoPedeReentrega` lê este campo).
+   * `classe`: POR QUE a mensagem não foi gravada — e o que o webhook responde.
+   * `transitoria` (banco fora) → 503; `estrutural` (schema/configuração do CRM)
+   * → 500; `do_evento` (dado recusado) → 200 só depois de arquivar o evento cru.
+   * Ver `lib/channels/falha-do-banco.ts` (`classeDaIngestao` lê este campo).
    */
-  | { status: "failed"; reason: string; retentavel?: boolean };
+  | { status: "failed"; reason: string; classe?: ClasseDaFalha };
 
 /**
  * Sessão dona do número que RECEBEU, **dentro da organização do token**.
@@ -120,12 +119,15 @@ export async function sessionByPhoneNumberId(
 }
 
 /**
- * A busca da sessão pelo número lançou: passageira se a reentrega pode resolver.
- * Sem `code` (promessa rejeitada, rede) conta como passageira.
+ * A busca da sessão pelo número lançou: passageira ou do CRM. Nunca `do_evento`
+ * — a consulta é nossa, o evento só deu o número; um 22xxx aqui é defeito do
+ * CRM. Sem `code` (promessa rejeitada, rede) conta como passageira.
  */
-export function buscaDaSessaoPedeReentrega(err: unknown): boolean {
+export function classeDaBuscaDaSessao(err: unknown): ClasseDaFalha {
   const code = ((err as { cause?: unknown } | null)?.cause as { code?: unknown } | undefined)?.code;
-  return ehFalhaTransitoriaDoBanco({ code: typeof code === "string" ? code : "" });
+  return classificarFalhaDoBanco({ code: typeof code === "string" ? code : "" }) === "transitoria"
+    ? "transitoria"
+    : "estrutural";
 }
 
 /**
@@ -187,7 +189,7 @@ export async function ingestMetaInbound(
       return {
         status: "failed",
         reason: err instanceof Error ? err.message : "sessao_do_numero",
-        retentavel: buscaDaSessaoPedeReentrega(err),
+        classe: classeDaBuscaDaSessao(err),
       };
     }
   }
@@ -239,7 +241,7 @@ export async function ingestMetaInbound(
     return {
       status: "failed",
       reason: `contato: ${erroContato?.message ?? "sem id"}`,
-      retentavel: ehFalhaTransitoriaDoBanco(erroContato),
+      classe: classificarFalhaDoBanco(erroContato) ?? "estrutural",
     };
   }
 
@@ -257,7 +259,7 @@ export async function ingestMetaInbound(
     return {
       status: "failed",
       reason: `conversa: ${erroConversa?.message ?? "sem id"}`,
-      retentavel: ehFalhaTransitoriaDoBanco(erroConversa),
+      classe: classificarFalhaDoBanco(erroConversa) ?? "estrutural",
     };
   }
 
@@ -298,7 +300,7 @@ export async function ingestMetaInbound(
     return {
       status: "failed",
       reason: `mensagem: ${erroInsert.message}`,
-      retentavel: ehFalhaTransitoriaDoBanco(erroInsert),
+      classe: classificarFalhaDoBanco(erroInsert) ?? "estrutural",
     };
   }
 

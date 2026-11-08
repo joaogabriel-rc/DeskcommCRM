@@ -44,7 +44,7 @@ import {
 import { logger } from "@/lib/logger";
 
 import { encontrarContatoPorTelefone } from "../contato-por-telefone";
-import { ehFalhaTransitoriaDoBanco } from "../falha-do-banco";
+import { classificarFalhaDoBanco } from "../falha-do-banco";
 import { marcarConversaComMensagem } from "../marcar-conversa";
 import { canonicalPhoneBR } from "../phone-variants";
 import type { ChannelTenantScope } from "../types";
@@ -54,7 +54,7 @@ import {
   lerOnboardingDoCanal,
   type DesfechoDoEco,
 } from "./ecos-em-espera";
-import { buscaDaSessaoPedeReentrega, previewOf, sessionByPhoneNumberId, type IngestOutcome } from "./ingest";
+import { classeDaBuscaDaSessao, previewOf, sessionByPhoneNumberId, type IngestOutcome } from "./ingest";
 import type { EchoMessageEvent } from "./webhook";
 
 type Admin = SupabaseClient;
@@ -157,7 +157,7 @@ export async function ingestMetaEcho(
       return {
         status: "failed",
         reason: err instanceof Error ? err.message : "sessao_do_numero",
-        retentavel: buscaDaSessaoPedeReentrega(err),
+        classe: classeDaBuscaDaSessao(err),
       };
     }
   }
@@ -228,7 +228,7 @@ export async function ingerirEcoAoVivo(
     return {
       status: "failed",
       reason: `contato: ${erroContato?.message ?? "sem id"}`,
-      retentavel: ehFalhaTransitoriaDoBanco(erroContato),
+      classe: classificarFalhaDoBanco(erroContato) ?? "estrutural",
     };
   }
 
@@ -240,7 +240,7 @@ export async function ingerirEcoAoVivo(
     return {
       status: "failed",
       reason: `conversa: ${erroConversa?.message ?? "sem id"}`,
-      retentavel: ehFalhaTransitoriaDoBanco(erroConversa),
+      classe: classificarFalhaDoBanco(erroConversa) ?? "estrutural",
     };
   }
 
@@ -276,7 +276,7 @@ export async function ingerirEcoAoVivo(
     return {
       status: "failed",
       reason: `mensagem: ${erroInsert.message}`,
-      retentavel: ehFalhaTransitoriaDoBanco(erroInsert),
+      classe: classificarFalhaDoBanco(erroInsert) ?? "estrutural",
     };
   }
 

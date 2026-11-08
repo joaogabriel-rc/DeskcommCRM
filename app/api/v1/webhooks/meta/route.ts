@@ -21,9 +21,11 @@
  * GET: o `hub.challenge` em TEXTO PURO (envelopar faz a verificação da Meta falhar).
  * POST: 401 assinatura, 400 corpo fora do contrato, 503 quando a busca da sessão
  * falha (o banco não respondeu: a Meta reentrega — melhor que perder a mensagem
- * com um 200), 503 quando a gravação de um evento falha por causa passageira (o
- * resto do lote é processado; a reentrega é segura porque a mensagem só entra uma
- * vez), 500 quando o processamento de um evento lança, e 200 para o
+ * com um 200), 503 quando a gravação de um evento falha por causa passageira, 500
+ * quando falha por defeito ou configuração do CRM (migration faltando, coluna
+ * inexistente) ou quando o processamento lança — nunca 200 para evento que não
+ * ficou durável em lugar nenhum (o resto do lote é processado; a reentrega é
+ * segura porque a mensagem só entra uma vez) —, e 200 para o
  * resto, inclusive evento de número desconhecido: a Meta reentrega todo não-2xx, e
  * recusar o que não é nosso vira re-tentativa em backoff por horas.
  */
@@ -33,9 +35,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { fail } from "@/lib/api/wrappers";
 import { appDaMeta } from "@/lib/channels/meta/app";
 import {
-  DESFECHO_PEDE_REENTREGA,
   lerEntregaDaMeta,
   processarEventoDaMeta,
+  respostaPedida,
 } from "@/lib/channels/meta/processar-evento";
 import {
   FalhaAoBuscarSessaoDaMeta,
@@ -88,10 +90,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Uma entrega costuma trazer vários eventos do mesmo número: uma busca por número.
   const porNumero = new Map<string, SessaoDoNumero>();
   const porWaba = new Map<string, MetaWebhookSession[]>();
-  // Algum evento não foi gravado por causa passageira. O lote segue — o que deu
-  // certo fica gravado, e a reentrega o reconhece como `duplicate` —, mas a
-  // resposta final é 503 para a Meta mandar de novo.
-  let pedeReentrega = false;
+  // 200 só quando todo evento ficou DURÁVEL em algum lugar. Senão 503 (banco
+  // fora) ou 500 (defeito/configuração do CRM, ou nem o arquivo cru entrou); 500
+  // vence 503. O lote segue — o que deu certo fica gravado, e a reentrega o
+  // reconhece como `duplicate`. Regra inteira em `lib/channels/falha-do-banco.ts`.
+  let respostaExigida: 503 | 500 | null = null;
+  const exigir = (desfecho: string | null) => {
+    const r = respostaPedida(desfecho);
+    if (r === 500 || (r === 503 && respostaExigida === null)) respostaExigida = r;
+  };
 
   try {
     for (const e of eventos) {
@@ -109,7 +116,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
         for (const sessao of sessoes) {
           const desfecho = await processarEventoDaMeta(admin, e, sessao, agora);
-          if (desfecho === DESFECHO_PEDE_REENTREGA) pedeReentrega = true;
+          exigir(desfecho);
           if (desfecho && e.kind === "account_update") desfechos.push(desfecho);
         }
         continue;
@@ -137,7 +144,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
 
       const desfecho = await processarEventoDaMeta(admin, e, dono.sessao, agora);
-      if (desfecho === DESFECHO_PEDE_REENTREGA) pedeReentrega = true;
+      exigir(desfecho);
       if (
         desfecho &&
         (e.kind === "inbound_message" ||
@@ -178,7 +185,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return fail("internal_error", "event_processing_failed", 500, { requestId });
   }
 
-  if (pedeReentrega) {
+  if (respostaExigida === 503) {
     logger.error("[meta.webhook] evento não gravado por falha passageira — a Meta vai reentregar", {
       request_id: requestId,
       status: 503,
@@ -187,6 +194,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return fail("upstream_unavailable", "event_persistence_unavailable", 503, {
       requestId,
       headers: { "Retry-After": "30" },
+      details: { received: eventos.length, outcomes: desfechos },
+    });
+  }
+  if (respostaExigida === 500) {
+    logger.error("[meta.webhook] evento não gravado por falha ESTRUTURAL do CRM — exige ação do operador", {
+      request_id: requestId,
+      status: 500,
+      outcomes: desfechos,
+    });
+    return fail("internal_error", "event_persistence_failed", 500, {
+      requestId,
       details: { received: eventos.length, outcomes: desfechos },
     });
   }
