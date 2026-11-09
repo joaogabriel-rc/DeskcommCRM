@@ -45766,6 +45766,50 @@ create trigger trg_flows_vinculo_ao_disparo
   before insert or update of broadcast_id, organization_id on public.flows
   for each row execute function public.fn_trg_flow_vinculo_ao_disparo();
 
+-- ---- o evento de mensagem carrega a marca conteudo_indisponivel (migration 9254) ----
+-- Mensagem do WhatsApp oficial cujo conteúdo a Cloud API não entrega entra como
+-- `text` com rótulo e `metadata.conteudo_indisponivel = true`; o payload do
+-- evento passa a levar a marca para o dispatcher pular os handlers que
+-- respondem ao conteúdo. Corpo = última definição + a marca; para toda outra
+-- mensagem o payload sai igual. Ver a migration para o racional. Idempotente.
+create or replace function public.fn_emit_message_event() returns trigger
+language plpgsql set search_path to 'public', 'pg_temp' as $$
+declare
+  v_event text;
+begin
+  if new.direction = 'inbound' then
+    if exists (select 1 from public.conversations c
+               where c.id = new.conversation_id and c.organization_id = new.organization_id and c.is_group) then
+      v_event := 'message.group_received';
+    else
+      v_event := 'message.received';
+    end if;
+  else
+    v_event := case new.status
+                 when 'sending' then 'message.sending'
+                 when 'sent' then 'message.sent'
+                 when 'failed' then 'message.failed'
+                 else 'message.outbound'
+               end;
+  end if;
+
+  perform public.fn_log_event(
+    new.organization_id, v_event,
+    jsonb_build_object(
+      'message_id', new.id, 'conversation_id', new.conversation_id,
+      'contact_id', new.contact_id, 'direction', new.direction,
+      'type', new.type, 'status', new.status, 'external_id', new.external_id,
+      'channel_session_id', new.channel_session_id,
+      'body_preview', "left"(new.body, 280)
+    )
+    || case when new.metadata->>'conteudo_indisponivel' = 'true'
+            then jsonb_build_object('conteudo_indisponivel', true)
+            else '{}'::jsonb
+       end
+  );
+  return new;
+end$$;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria

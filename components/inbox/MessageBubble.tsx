@@ -20,6 +20,7 @@ import { MediaRenderer } from "@/components/inbox/media/MediaRenderer";
 import { ContactCard } from "@/components/inbox/media/ContactCard";
 import { LocationCard } from "@/components/inbox/media/LocationCard";
 import { localizacaoDaMensagem } from "@/lib/messaging/localizacao";
+import { lerReacao } from "@/lib/messaging/reacao";
 import {
   extractCitations,
   isAiGeneratedMessage,
@@ -33,6 +34,8 @@ interface Props {
   onResponder?: (m: Message) => void;
   /** A mensagem citada por ESTA, quando houver — desenha o fio. */
   citada?: Message | null;
+  /** Numa reação, a mensagem reagida (achada na lista já carregada pelo `external_id`). */
+  alvoDaReacao?: Message | null;
   /**
    * QUEM está lendo a conversa. É o que separa "Você" de "Atendente": a coluna
    * `sent_via='user'` só diz *"um humano digitou no CRM"*, nunca QUAL humano.
@@ -69,6 +72,7 @@ export function MessageBubble({
   debugCitations,
   onResponder,
   citada,
+  alvoDaReacao,
   viewerUserId,
   onEditar,
   onApagar,
@@ -103,6 +107,9 @@ export function MessageBubble({
   const isContact = message.type === "contact";
   // Pino com coordenadas: o cartão substitui o corpo, que é só o mesmo link em texto.
   const localizacao = localizacaoDaMensagem(message);
+  // Reação: o emoji e um trecho da mensagem reagida. Sem esta leitura a bolha
+  // ficava vazia — a reação não tem corpo.
+  const reacao = message.type === "reaction" ? lerReacao(message.metadata) : null;
   // Figurinha sem caption: sem moldura de bolha (padrão WhatsApp).
   const isBareSticker = hasMedia && message.type === "sticker" && !message.body;
   // Apagada pelo autor ("apagar para todos"). A linha continua no histórico —
@@ -386,7 +393,31 @@ export function MessageBubble({
 
             {localizacao && <LocationCard localizacao={localizacao} />}
 
-            {message.body && !isContact && !localizacao && (
+            {reacao && (
+              <div data-testid="reacao" className="space-y-1">
+                <p className="leading-snug">
+                  {reacao.emoji && <span className="mr-1 text-lg" aria-hidden>{reacao.emoji}</span>}
+                  <span className="opacity-80">
+                    {reacao.emoji ? t("Reagiu a uma mensagem") : t("Removeu a reação")}
+                  </span>
+                </p>
+                {alvoDaReacao && (
+                  <div
+                    data-testid="reacao-alvo"
+                    className={cn(
+                      "line-clamp-2 wrap-anywhere border-l-2 border-current/30 pl-2 opacity-70",
+                      Boolean(alvoDaReacao.revoked_at) && "italic",
+                    )}
+                  >
+                    {alvoDaReacao.revoked_at
+                      ? t("Esta mensagem foi apagada")
+                      : alvoDaReacao.body?.trim() || t("(sem texto)")}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {message.body && !isContact && !localizacao && !reacao && (
               <p className="whitespace-pre-wrap wrap-anywhere leading-snug">{message.body}</p>
             )}
           </>

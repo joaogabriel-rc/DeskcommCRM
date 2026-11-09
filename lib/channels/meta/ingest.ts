@@ -34,6 +34,7 @@ import { extrairAtribuicaoMeta } from "../atribuicao-de-anuncio-oficial";
 import { aplicarEfeitosPosEntrada } from "../pos-entrada";
 import { encontrarContatoPorTelefone } from "../contato-por-telefone";
 import { classificarFalhaDoBanco, type ClasseDaFalha } from "../falha-do-banco";
+import { aplicarAlteracoesPendentes } from "./alteracao-de-mensagem";
 import { marcarConversaComMensagem } from "../marcar-conversa";
 import { canonicalPhoneBR } from "../phone-variants";
 import type { ChannelTenantScope } from "../types";
@@ -147,6 +148,35 @@ async function findContactByVariants(
   waId: string,
 ): Promise<{ id: string; phone_number: string } | null> {
   return encontrarContatoPorTelefone(admin as never, orgId, waId);
+}
+
+/**
+ * O `metadata` de uma mensagem do canal oficial — a recebida e o eco.
+ *
+ * `meta_original` é o item como a Meta mandou, com todas as chaves, inclusive
+ * as que este CRM ainda não lê: é o que permite entender depois uma mensagem
+ * que entrou como rótulo. A anonimização LGPD zera `messages.metadata` inteiro
+ * (`fn_lgpd_cascade_redact_contact`), então o original sai junto com o resto.
+ */
+export function metadataDaMeta(
+  e: Pick<InboundMessageEvent, "media" | "sharedContact" | "bruto" | "extras" | "conteudoIndisponivel">,
+): Record<string, unknown> {
+  return {
+    ...(e.extras ?? {}),
+    ...(e.media ? { meta_media_id: e.media.id, voice: e.media.voice } : {}),
+    ...(e.sharedContact ? { shared_contact: e.sharedContact } : {}),
+    ...(e.conteudoIndisponivel ? { conteudo_indisponivel: true } : {}),
+    ...(e.bruto ? { meta_original: e.bruto } : {}),
+  };
+}
+
+/** A aplicação das alterações pendentes falhou: o mesmo desfecho de qualquer gravação. */
+function falhaDasPendencias(erro: { code?: string | null; message?: string | null }): IngestOutcome {
+  return {
+    status: "failed",
+    reason: `alteracoes_pendentes: ${erro.message ?? "sem mensagem"}`,
+    classe: classificarFalhaDoBanco(erro) ?? "estrutural",
+  };
 }
 
 /**
@@ -284,10 +314,7 @@ export async function ingestMetaInbound(
       media_url: e.media ? `meta-media:${e.media.id}` : null,
       media_mime: e.media?.mime ?? null,
       sent_at: e.sentAt.toISOString(),
-      metadata: {
-        ...(e.media ? { meta_media_id: e.media.id, voice: e.media.voice } : {}),
-        ...(e.sharedContact ? { shared_contact: e.sharedContact } : {}),
-      },
+      metadata: metadataDaMeta(e),
     })
     .select("id")
     .maybeSingle();
@@ -296,7 +323,13 @@ export async function ingestMetaInbound(
   // É também o que torna a reentrega segura: contato e conversa acima são upserts
   // (reaplicar não duplica), e esta linha é a primeira escrita que não se repete.
   if (erroInsert) {
-    if (erroInsert.code === "23505") return { status: "duplicate" };
+    if (erroInsert.code === "23505") {
+      // A reentrega também é a nova chance de aplicar um `revoke`/`edit` que
+      // chegou antes da original e não pôde ser aplicado na primeira vez.
+      const pendentes = await aplicarAlteracoesPendentes(admin, { organizationId: orgId, externalId: e.externalId });
+      if (pendentes.erro) return falhaDasPendencias(pendentes.erro);
+      return { status: "duplicate" };
+    }
     return {
       status: "failed",
       reason: `mensagem: ${erroInsert.message}`,
@@ -340,16 +373,27 @@ export async function ingestMetaInbound(
       );
     }
   }
-  await aplicarEfeitosPosEntrada(admin, {
-    organizationId: orgId,
-    contactId: contactId as string,
-    conversationId: conversationId as string,
-    messageId: messageId || null,
-    channelSessionId: sessao.id,
-    texto: e.text ?? null,
-    nomeDoContato: e.profileName ?? null,
-    origem: "meta_webhook",
-  });
+  // Conteúdo que a Meta não entregou (`unsupported`, tipo desconhecido): a
+  // mensagem fica registrada, mas o CRM só tem um RÓTULO dele mesmo — opt-out,
+  // demanda e o despacho da IA não rodam sobre isso. Os handlers do `event_log`
+  // que respondem ao conteúdo são barrados pela marca no evento (migration 9254).
+  if (!e.conteudoIndisponivel) {
+    await aplicarEfeitosPosEntrada(admin, {
+      organizationId: orgId,
+      contactId: contactId as string,
+      conversationId: conversationId as string,
+      messageId: messageId || null,
+      channelSessionId: sessao.id,
+      texto: e.text ?? null,
+      nomeDoContato: e.profileName ?? null,
+      origem: "meta_webhook",
+    });
+  }
+
+  // `revoke`/`edit` que chegaram antes desta mensagem. Falha aqui pede reentrega:
+  // a reentrega cai no 23505 acima e tenta de novo — os efeitos já rodaram.
+  const pendentes = await aplicarAlteracoesPendentes(admin, { organizationId: orgId, externalId: e.externalId });
+  if (pendentes.erro) return falhaDasPendencias(pendentes.erro);
 
   return {
     status: "ingested",

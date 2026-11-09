@@ -72,6 +72,9 @@ function adminQueFalhaNoCarimbo(): SupabaseClient {
       not: () => chain,
       order: () => chain,
       limit: () => chain,
+      // A busca de `revoke`/`edit` pendentes (`aplicarAlteracoesPendentes`)
+      // termina em `.in(...)`: aqui não há nenhum.
+      in: async () => ({ data: [], error: null }),
       maybeSingle: async () => ({
         data: table === "channel_sessions" ? { id: "session-1", organization_id: "org-1" } : null,
         error: null,

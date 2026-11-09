@@ -29,6 +29,8 @@ import {
   verifyGraphPartnerSignature,
 } from "./graph-parceiro/webhook";
 import { sincronizarSaudeDaConexao } from "./health";
+import { logger } from "@/lib/logger";
+import { aplicarAlteracaoDaMensagem } from "./meta/alteracao-de-mensagem";
 import { lerEnvelopeMeta } from "./meta/envelope";
 import { ingestMetaInbound } from "./meta/ingest";
 import { ingestMetaEcho } from "./meta/ingest-eco";
@@ -410,6 +412,29 @@ async function datafyInbound(
         channelSessionId: input.session.id,
       });
       desfechos.push(`eco:${r.status}`);
+      continue;
+    }
+    if (e.kind === "message_change") {
+      // Mensagem apagada ou editada (pelo contato ou pelo app): a MESMA regra do
+      // canal oficial — atualiza a original desta organização, ou guarda para
+      // quando ela chegar.
+      if (e.phoneNumberId && e.phoneNumberId !== refs.phoneNumberId) {
+        desfechos.push("outro_numero");
+        continue;
+      }
+      const r = await aplicarAlteracaoDaMensagem(admin as never, e, {
+        id: input.session.id,
+        organizationId: orgId,
+      });
+      if (r.status === "falhou") {
+        logger.error("[canal.parceiro] alteração de mensagem não gravada", {
+          organization_id: orgId,
+          channel_session_id: input.session.id,
+          tabela: r.tabela,
+          codigo: r.erro.code ?? null,
+        });
+      }
+      desfechos.push(`alteracao:${r.status}`);
       continue;
     }
     if (e.kind === "message_status") {

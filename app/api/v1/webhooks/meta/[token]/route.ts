@@ -339,9 +339,9 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       continue;
     }
 
-    if (e.kind === "account_update") {
-      // A conta desconectou (ou voltou) da API: o estado da conexão segue a
-      // Meta. Mesma regra da rota universal — mora em `processar-evento.ts`.
+    if (e.kind === "account_update" || e.kind === "message_change") {
+      // A conta desconectou (ou voltou) da API, ou uma mensagem foi apagada ou
+      // editada: mesma regra da rota universal — mora em `processar-evento.ts`.
       const d = await processarEventoDaMeta(admin, e, session, now);
       if (respostaPedida(d)) exigir(d);
       else if (d) desfechos.push(d);

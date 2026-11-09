@@ -12,6 +12,9 @@ export const automationRulesHandler: EventHandler = {
   // seletor e não chegar aqui — e aí a regra é salva, o evento acontece e nada
   // roda, sem erro nem log.
   events: [...TRIGGER_EVENTS],
+  // Responde ao CONTEÚDO: mensagem cujo conteúdo o WhatsApp oficial não entregou
+  // (só há rótulo do CRM) é pulada pelo dispatcher — ver `respondeAoConteudo`.
+  respondeAoConteudo: true,
   async handle(row) {
     return runAutomationForEvent(createAdminClient(), row);
   },

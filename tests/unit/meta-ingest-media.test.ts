@@ -44,6 +44,17 @@ function adminFalso(): SupabaseClient {
       };
     }
 
+    if (table === "webhook_events_log") {
+      // A ingestão procura `revoke`/`edit` que chegaram antes desta mensagem
+      // (`aplicarAlteracoesPendentes`). Aqui não há nenhum.
+      const pendencias: Record<string, unknown> = {
+        select: () => pendencias,
+        eq: () => pendencias,
+        in: async () => ({ data: [], error: null }),
+      };
+      return pendencias;
+    }
+
     throw new Error(`tabela inesperada: ${table}`);
   };
 

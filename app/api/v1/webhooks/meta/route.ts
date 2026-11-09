@@ -64,7 +64,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 }
 
 function numeroDo(e: MetaWebhookEvent): string | null {
-  if (e.kind === "inbound_message" || e.kind === "echo_message" || e.kind === "sync_payload") {
+  if (
+    e.kind === "inbound_message" ||
+    e.kind === "echo_message" ||
+    e.kind === "message_change" ||
+    e.kind === "sync_payload"
+  ) {
     return e.phoneNumberId || null;
   }
   if (e.kind === "message_status") return e.phoneNumberId ?? null;
@@ -149,6 +154,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         desfecho &&
         (e.kind === "inbound_message" ||
           e.kind === "echo_message" ||
+          e.kind === "message_change" ||
           e.kind === "sync_payload" ||
           desfecho === "waba_divergente")
       ) {

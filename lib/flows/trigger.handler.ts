@@ -63,6 +63,9 @@ async function contatoDoEvento(admin: SupabaseClient, row: EventRow): Promise<st
 export const flowTagTriggerHandler: EventHandler = {
   key: FLOW_TAG_TRIGGER_HANDLER_KEY,
   events: EVENTOS_DE_GATILHO,
+  // Responde ao CONTEÚDO: mensagem cujo conteúdo o WhatsApp oficial não entregou
+  // (só há rótulo do CRM) é pulada pelo dispatcher — ver `respondeAoConteudo`.
+  respondeAoConteudo: true,
   async handle(row): Promise<HandlerResult> {
     const admin = createAdminClient();
 

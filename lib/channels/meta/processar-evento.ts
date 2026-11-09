@@ -8,6 +8,7 @@
  * duas não divergirem.
  */
 import { appDaMeta } from "@/lib/channels/meta/app";
+import { aplicarAlteracaoDaMensagem } from "@/lib/channels/meta/alteracao-de-mensagem";
 import { lerEnvelopeMeta } from "@/lib/channels/meta/envelope";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
 import {
@@ -261,6 +262,14 @@ export async function processarEventoDaMeta(
   }
 
   if (e.kind === "account_update") return aplicarMudancaDaConta(admin, e, sessao, agora);
+
+  if (e.kind === "message_change") {
+    // Mensagem apagada ou editada — pelo contato ou pela empresa no app. Atualiza
+    // a original desta organização, ou guarda para quando ela chegar.
+    const r = await aplicarAlteracaoDaMensagem(admin as unknown as SupabaseClient, e, sessao);
+    if (r.status !== "falhou") return `alteracao_${r.status}`;
+    return desfechoDaAtualizacao(r.erro, r.tabela, sessao) ?? `alteracao_recusada`;
+  }
 
   if (e.kind === "template_status") {
     const { error } = await admin

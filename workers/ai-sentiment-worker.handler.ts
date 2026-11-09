@@ -14,6 +14,9 @@ export const AI_SENTIMENT_HANDLER_KEY = "ai-sentiment-worker.v1";
 export const aiSentimentHandler: EventHandler = {
   key: AI_SENTIMENT_HANDLER_KEY,
   events: ["message.received"],
+  // Responde ao CONTEÚDO: mensagem cujo conteúdo o WhatsApp oficial não entregou
+  // (só há rótulo do CRM) é pulada pelo dispatcher — ver `respondeAoConteudo`.
+  respondeAoConteudo: true,
   async handle(row): Promise<HandlerResult> {
     const result = await processSentiment(row);
     if (!result.skipped) {

@@ -53,7 +53,21 @@ export interface EventHandler {
   key: string;
   /** Event types this handler consumes (`["message.received", "message.sent"]`). */
   events: string[];
+  /**
+   * O handler RESPONDE ao conteúdo da mensagem (fluxo, automação, IA,
+   * sentimento). Quando o evento traz `conteudo_indisponivel: true` — o WhatsApp
+   * oficial não entregou o conteúdo e o CRM só tem um rótulo dele mesmo —, o
+   * dispatcher o pula como `skipped`, sem chamá-lo. Quem só registra que a
+   * mensagem chegou (aviso ao atendente, follow-up, campanha) não declara.
+   * A marca nasce em `fn_emit_message_event` (migration 9254).
+   */
+  respondeAoConteudo?: boolean;
   handle(row: EventRow): Promise<HandlerResult>;
+}
+
+/** O conteúdo deste evento de mensagem não chegou — ver `respondeAoConteudo`. */
+export function conteudoIndisponivel(row: Pick<EventRow, "payload">): boolean {
+  return row.payload?.conteudo_indisponivel === true;
 }
 
 const _handlers: EventHandler[] = [];
@@ -85,7 +99,14 @@ export async function dispatchEvent(row: EventRow): Promise<HandlerResult[]> {
   if (!matches.length) return [];
 
   const results: HandlerResult[] = [];
+  const semConteudo = conteudoIndisponivel(row);
   for (const handler of matches) {
+    if (semConteudo && handler.respondeAoConteudo) {
+      // `skipped` entra em `consumed_by` (como `ok`): o evento não volta para
+      // este handler, e o motivo fica no resultado.
+      results.push({ consumer_key: handler.key, status: "skipped", detail: "conteudo_indisponivel" });
+      continue;
+    }
     try {
       const r = await handler.handle(row);
       results.push(r);

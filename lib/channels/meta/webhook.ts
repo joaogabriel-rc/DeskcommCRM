@@ -21,6 +21,17 @@ import { parseMetaInboundContact } from "@/lib/channels/meta/contact-card";
 import { logger } from "@/lib/logger";
 import type { SharedContact } from "@/lib/messaging/contact-card";
 import type { MetaWebhookEnvelope } from "./envelope";
+import {
+  ehTipoNativo,
+  interativa,
+  localizacaoDaMeta,
+  naoSuportada,
+  pedido,
+  reacaoDaMeta,
+  respostaDeFormulario,
+  tipoDesconhecido,
+  type TipoDoCrm,
+} from "./tipos-da-meta";
 
 /** Assinatura da Meta: `sha256=<hex>` no header `X-Hub-Signature-256`. */
 /**
@@ -130,6 +141,34 @@ export interface InboundMessageEvent {
    * leitura é de `extrairAtribuicaoMeta`. Opcional porque só a ingestão o lê.
    */
   referral?: unknown;
+  /** O item de `messages[]` como a Meta mandou — vira `metadata.meta_original`. */
+  bruto?: Record<string, unknown>;
+  /** O que a conversão de tipo extraiu (pedido, formulário, localização…) — vai para `metadata`. */
+  extras?: Record<string, unknown>;
+  /** A Meta não entregou o conteúdo (`unsupported`, tipo desconhecido): só há rótulo. */
+  conteudoIndisponivel?: boolean;
+}
+
+/**
+ * Uma mensagem JÁ EXISTENTE foi apagada (`revoke`) ou editada (`edit`) — pelo
+ * contato (campo `messages`) ou pela empresa no app Business (`smb_message_echoes`).
+ * Não é mensagem nova: vira atualização da original, achada por
+ * `originalId` DENTRO da organização da sessão. Ver `alteracao-de-mensagem.ts`.
+ */
+export interface MessageChangeEvent {
+  kind: "message_change";
+  acao: "revoke" | "edit";
+  origem: "contato" | "empresa";
+  wabaId: string;
+  phoneNumberId: string;
+  /** `wamid` do PRÓPRIO evento de alteração — a chave de idempotência dele. */
+  externalId: string;
+  /** `wamid` da mensagem apagada ou editada. */
+  originalId: string;
+  sentAt: Date;
+  /** Só em `edit`: o texto novo (corpo ou legenda), quando a Meta o manda. */
+  novoTexto: string | null;
+  bruto: Record<string, unknown>;
 }
 
 /** Status de entrega de uma mensagem que ENVIAMOS (sent/delivered/read/failed). */
@@ -177,8 +216,13 @@ export interface EchoMessageEvent {
    * O item de `message_echoes[]` como a Meta mandou. Só a quarentena o lê
    * (`lib/channels/meta/ecos-em-espera.ts`): o eco suspeito é guardado bruto, com
    * as chaves que este parser ignora, e a promoção o relê por `ecoDoItem`.
+   * Também vira `metadata.meta_original` quando o eco é gravado.
    */
   bruto?: Record<string, unknown>;
+  /** O que a conversão de tipo extraiu (interativa, localização…) — vai para `metadata`. */
+  extras?: Record<string, unknown>;
+  /** A Meta não entregou o conteúdo: só há rótulo. */
+  conteudoIndisponivel?: boolean;
 }
 
 /**
@@ -247,6 +291,7 @@ export type MetaWebhookEvent =
   | MessageStatusEvent
   | InboundMessageEvent
   | EchoMessageEvent
+  | MessageChangeEvent
   | SyncPayloadEvent
   | AccountUpdateEvent;
 
@@ -325,29 +370,53 @@ function instanteDaMeta(v: unknown): Date {
  * as duas leituras não divergirem.
  */
 function corpoDaMensagem(raw: Record<string, unknown>): {
-  type: string;
+  type: TipoDoCrm;
   text: string | null;
   sharedContact: SharedContact | null;
   media: InboundMessageEvent["media"];
+  extras: Record<string, unknown>;
+  conteudoIndisponivel: boolean;
 } {
   const tipo = str(raw.type) ?? "unknown";
   const resposta = textoDaResposta(tipo, raw);
-  const corpoMidia =
-    tipo !== "contacts" && resposta === null ? (raw[tipo] as Record<string, unknown> | undefined) : undefined;
-  const sharedContact = tipo === "contacts" ? parseMetaInboundContact(raw) : null;
   // Resposta a botão chega como `button`/`interactive`, tipos que o CHECK
   // de `messages.type` não conhece — o INSERT falhava e o clique se
   // perdia. O que o contato disse é o RÓTULO que ele tocou: vira texto.
-  const tipoCrm = tipo === "contacts" ? "contact" : resposta !== null ? "text" : tipo;
+  if (resposta !== null) {
+    return { type: "text", text: resposta, sharedContact: null, media: null, extras: {}, conteudoIndisponivel: false };
+  }
+  if (tipo === "contacts") {
+    const sharedContact = parseMetaInboundContact(raw);
+    return { type: "contact", text: sharedContact?.name ?? null, sharedContact, media: null, extras: {}, conteudoIndisponivel: false };
+  }
+  // Os tipos que `messages_type_check` recusaria viram `text` legível — ver
+  // `tipos-da-meta.ts`. Nenhum caminho daqui devolve um `type` fora da lista.
+  const convertido =
+    tipo === "unsupported"
+      ? naoSuportada(raw)
+      : tipo === "order"
+        ? pedido(raw)
+        : tipo === "interactive"
+          ? str(((raw.interactive ?? {}) as Record<string, unknown>).type) === "nfm_reply"
+            ? respostaDeFormulario(raw)
+            : interativa(raw)
+          : ehTipoNativo(tipo)
+            ? null
+            : tipoDesconhecido(tipo);
+  if (convertido) return { ...convertido, sharedContact: null, media: null };
+
+  const nativo = tipo as TipoDoCrm;
+  const corpoMidia = raw[tipo] as Record<string, unknown> | undefined;
+  const extras: Record<string, unknown> = {};
+  if (nativo === "location") {
+    const location = localizacaoDaMeta(raw);
+    if (location) extras.location = location;
+  }
+  if (nativo === "reaction") extras.reaction = reacaoDaMeta(raw);
   return {
-    type: tipoCrm,
-    text:
-      resposta !== null
-        ? resposta
-        : tipoCrm === "text"
-          ? str((raw.text as Record<string, unknown>)?.body)
-          : sharedContact?.name ?? null,
-    sharedContact,
+    type: nativo,
+    text: nativo === "text" ? str((raw.text as Record<string, unknown>)?.body) : null,
+    sharedContact: null,
     media:
       corpoMidia && str(corpoMidia.id)
         ? {
@@ -357,6 +426,69 @@ function corpoDaMensagem(raw: Record<string, unknown>): {
             voice: corpoMidia.voice === true,
           }
         : null,
+    extras,
+    conteudoIndisponivel: false,
+  };
+}
+
+/**
+ * `extras` e `conteudoIndisponivel` só entram no evento quando dizem algo: a
+ * mensagem comum sai com o MESMO formato de antes da conversão de tipos.
+ */
+function extrasDoEvento(corpo: { extras: Record<string, unknown>; conteudoIndisponivel: boolean }): {
+  extras?: Record<string, unknown>;
+  conteudoIndisponivel?: true;
+} {
+  return {
+    ...(Object.keys(corpo.extras).length > 0 ? { extras: corpo.extras } : {}),
+    ...(corpo.conteudoIndisponivel ? { conteudoIndisponivel: true as const } : {}),
+  };
+}
+
+/**
+ * `revoke` / `edit` lidos como ALTERAÇÃO de uma mensagem existente — do contato
+ * (`messages[]`) ou da empresa pelo app (`message_echoes[]`). Formato da Meta:
+ * `{ type: "revoke", revoke: { original_message_id } }` e
+ * `{ type: "edit", edit: { original_message_id, message: { type, text | <mídia>.caption } } }`.
+ * Sem `original_message_id` não há o que alterar: `null`, e o evento é logado.
+ */
+export function alteracaoDaMensagem(
+  raw: Record<string, unknown>,
+  origem: { wabaId: string; phoneNumberId: string; quem: "contato" | "empresa" },
+): MessageChangeEvent | null {
+  const tipo = str(raw.type);
+  if (tipo !== "revoke" && tipo !== "edit") return null;
+  const id = str(raw.id);
+  const bloco = (raw[tipo] ?? {}) as Record<string, unknown>;
+  const originalId = str(bloco.original_message_id);
+  if (!id || !originalId) {
+    logger.warn("[meta.webhook] alteração de mensagem sem identificador — ignorada", {
+      motivo: !id ? "sem_id" : "sem_original_message_id",
+      acao: tipo,
+      origem: origem.quem,
+    });
+    return null;
+  }
+  let novoTexto: string | null = null;
+  if (tipo === "edit") {
+    const nova = (bloco.message ?? {}) as Record<string, unknown>;
+    const tipoNovo = str(nova.type) ?? "text";
+    novoTexto =
+      tipoNovo === "text"
+        ? str(((nova.text ?? {}) as Record<string, unknown>).body)
+        : str(((nova[tipoNovo] ?? {}) as Record<string, unknown>).caption);
+  }
+  return {
+    kind: "message_change",
+    acao: tipo,
+    origem: origem.quem,
+    wabaId: origem.wabaId,
+    phoneNumberId: origem.phoneNumberId,
+    externalId: id,
+    originalId,
+    sentAt: instanteDaMeta(raw.timestamp),
+    novoTexto,
+    bruto: raw,
   };
 }
 
@@ -396,6 +528,7 @@ export function ecoDoItem(
     ...(corpo.sharedContact ? { sharedContact: corpo.sharedContact } : {}),
     media: corpo.media,
     bruto: raw,
+    ...extrasDoEvento(corpo),
   };
 }
 
@@ -454,6 +587,19 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
         const meta = (v.metadata ?? {}) as Record<string, unknown>;
         const contatos = Array.isArray(v.contacts) ? (v.contacts as Record<string, unknown>[]) : [];
         for (const raw of v.messages as Record<string, unknown>[]) {
+          // `revoke`/`edit` alteram uma mensagem que já existe; antes viravam uma
+          // linha nova com `type` que o CHECK recusa, e a alteração se perdia.
+          const tipoCru = str(raw.type);
+          if (tipoCru === "revoke" || tipoCru === "edit") {
+            const alteracao = alteracaoDaMensagem(raw, {
+              wabaId,
+              phoneNumberId: str(meta.phone_number_id) ?? "",
+              quem: "contato",
+            });
+            if (alteracao) out.push(alteracao);
+            continue;
+          }
+
           const id = str(raw.id);
           const from = str(raw.from);
           if (!id || !from) continue; // payload capenga não vira linha meia-boca
@@ -474,6 +620,8 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
             ...(corpo.sharedContact ? { sharedContact: corpo.sharedContact } : {}),
             media: corpo.media,
             referral: raw.referral ?? null,
+            bruto: raw,
+            ...extrasDoEvento(corpo),
           });
         }
         continue;
@@ -487,6 +635,14 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
         const numero = str(((v.metadata ?? {}) as Record<string, unknown>).phone_number_id);
         if (!numero) continue;
         for (const raw of v.message_echoes as Record<string, unknown>[]) {
+          // A empresa apagou ou editou pelo app: alteração da original, não eco
+          // novo. `ecoDoItem` segue recusando os dois (a promoção da quarentena
+          // também passa por ele e não deve criar linha).
+          const alteracao = alteracaoDaMensagem(raw, { wabaId, phoneNumberId: numero, quem: "empresa" });
+          if (alteracao) {
+            out.push(alteracao);
+            continue;
+          }
           const eco = ecoDoItem(raw, { wabaId, phoneNumberId: numero });
           if (eco) out.push(eco);
         }

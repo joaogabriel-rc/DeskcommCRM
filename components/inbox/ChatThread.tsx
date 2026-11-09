@@ -8,6 +8,7 @@ import { useT } from "@/hooks/i18n/useT";
 import { format, isToday, isYesterday } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { lerReacao } from "@/lib/messaging/reacao";
 import { MessageBubble } from "./MessageBubble";
 import { NoteCard } from "./NoteCard";
 import { PassagemCard } from "./PassagemCard";
@@ -159,6 +160,11 @@ export function ChatThread({
    * melhor que segurar a conversa esperando por um texto de enfeite.
    */
   const porId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
+  /** As mesmas mensagens pelo `wamid`: é por ele que uma REAÇÃO aponta a mensagem reagida. */
+  const porExternalId = useMemo(
+    () => new Map(messages.filter((m) => m.external_id).map((m) => [m.external_id as string, m])),
+    [messages],
+  );
 
   const cartoes: CartaoDaPassagem[] = useMemo(
     () =>
@@ -393,6 +399,11 @@ export function ChatThread({
                   // citada é antiga demais e ficou fora da página, o fio some —
                   // que é melhor que segurar a conversa esperando.
                   citada={porId.get(item.data.reply_to_message_id ?? "") ?? null}
+                  alvoDaReacao={
+                    item.data.type === "reaction"
+                      ? (porExternalId.get(lerReacao(item.data.metadata)?.alvoExternalId ?? "") ?? null)
+                      : undefined
+                  }
                   // Sem isto o balão diz "Você" em toda mensagem digitada no
                   // CRM — inclusive nas do colega, porque `sent_via='user'` só
                   // registra que um humano digitou, nunca qual.

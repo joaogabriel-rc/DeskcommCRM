@@ -21,6 +21,9 @@ export const FLOW_REPLY_HANDLER_KEY = "flow-reply.v1";
 export const flowReplyHandler: EventHandler = {
   key: FLOW_REPLY_HANDLER_KEY,
   events: ["message.received"],
+  // Responde ao CONTEÚDO: mensagem cujo conteúdo o WhatsApp oficial não entregou
+  // (só há rótulo do CRM) é pulada pelo dispatcher — ver `respondeAoConteudo`.
+  respondeAoConteudo: true,
   async handle(row): Promise<HandlerResult> {
     const contactId = typeof row.payload.contact_id === "string" ? row.payload.contact_id : null;
     if (!contactId) return { consumer_key: FLOW_REPLY_HANDLER_KEY, status: "skipped", detail: "no_contact" };

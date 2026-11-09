@@ -54,7 +54,8 @@ import {
   lerOnboardingDoCanal,
   type DesfechoDoEco,
 } from "./ecos-em-espera";
-import { classeDaBuscaDaSessao, previewOf, sessionByPhoneNumberId, type IngestOutcome } from "./ingest";
+import { aplicarAlteracoesPendentes } from "./alteracao-de-mensagem";
+import { classeDaBuscaDaSessao, metadataDaMeta, previewOf, sessionByPhoneNumberId, type IngestOutcome } from "./ingest";
 import type { EchoMessageEvent } from "./webhook";
 
 type Admin = SupabaseClient;
@@ -260,19 +261,27 @@ export async function ingerirEcoAoVivo(
       media_url: e.media ? `meta-media:${e.media.id}` : null,
       media_mime: e.media?.mime ?? null,
       sent_at: e.sentAt.toISOString(),
-      metadata: {
-        origem: "whatsapp_business_app",
-        ...(e.media ? { meta_media_id: e.media.id, voice: e.media.voice } : {}),
-        ...(e.sharedContact ? { shared_contact: e.sharedContact } : {}),
-      },
+      // `origem` vem primeiro e não pode ser sobrescrita: é por ela que o resto do
+      // CRM reconhece uma resposta dada pelo app.
+      metadata: { ...metadataDaMeta(e), origem: "whatsapp_business_app" },
     })
     .select("id")
     .maybeSingle();
 
-  // 23505 = a Meta reentregando o mesmo eco. Nada mais a fazer: a primeira
-  // entrega já carimbou a conversa e pausou a IA.
+  // 23505 = a Meta reentregando o mesmo eco. A primeira entrega já carimbou a
+  // conversa e pausou a IA; a reentrega só retoma as alterações pendentes.
   if (erroInsert) {
-    if (erroInsert.code === "23505") return { status: "duplicate" };
+    if (erroInsert.code === "23505") {
+      const pendentes = await aplicarAlteracoesPendentes(admin, { organizationId: orgId, externalId: e.externalId });
+      if (pendentes.erro) {
+        return {
+          status: "failed",
+          reason: `alteracoes_pendentes: ${pendentes.erro.message ?? "sem mensagem"}`,
+          classe: classificarFalhaDoBanco(pendentes.erro) ?? "estrutural",
+        };
+      }
+      return { status: "duplicate" };
+    }
     return {
       status: "failed",
       reason: `mensagem: ${erroInsert.message}`,
@@ -335,6 +344,17 @@ export async function ingerirEcoAoVivo(
         detalhe: erroPersistencia.message,
       });
     }
+  }
+
+  // A empresa apagou ou editou pelo app ANTES de este eco chegar: aplica agora.
+  // Falha pede reentrega; a reentrega cai no 23505 acima e tenta de novo.
+  const pendentes = await aplicarAlteracoesPendentes(admin, { organizationId: orgId, externalId: e.externalId });
+  if (pendentes.erro) {
+    return {
+      status: "failed",
+      reason: `alteracoes_pendentes: ${pendentes.erro.message ?? "sem mensagem"}`,
+      classe: classificarFalhaDoBanco(pendentes.erro) ?? "estrutural",
+    };
   }
 
   return { status: "ingested", messageId, conversationId: conversationId as string };

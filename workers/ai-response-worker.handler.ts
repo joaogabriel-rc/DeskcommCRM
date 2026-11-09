@@ -15,6 +15,9 @@ export const AI_RESPONSE_HANDLER_KEY = "ai-response-worker.v1";
 export const aiResponseHandler: EventHandler = {
   key: AI_RESPONSE_HANDLER_KEY,
   events: ["message.received"],
+  // Responde ao CONTEÚDO: mensagem cujo conteúdo o WhatsApp oficial não entregou
+  // (só há rótulo do CRM) é pulada pelo dispatcher — ver `respondeAoConteudo`.
+  respondeAoConteudo: true,
   async handle(row): Promise<HandlerResult> {
     const result = await processMessageReceived(row);
     if (result.status === "sent_to_dispatch") {
