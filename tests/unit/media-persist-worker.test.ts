@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const uploadMock = vi.fn();
 const updateEqMock = vi.fn();
 const rpcMock = vi.fn();
+const insertMock = vi.fn();
+const orMock = vi.fn();
+/** O contato apagou a mensagem enquanto o worker baixava: o update não acha a linha. */
+let apagadaNoMeio = false;
 const messageRow = {
   id: "msg1",
   organization_id: "org1",
@@ -54,7 +58,20 @@ vi.mock("@/lib/supabase/admin", () => ({
       },
       update: (patch: Record<string, unknown>) => {
         updateEqMock(patch);
-        return { eq: () => ({ eq: async () => ({ error: null }) }) };
+        return {
+          eq: () => ({
+            eq: () => ({
+              or: (expr: string) => {
+                orMock(expr);
+                return { select: async () => ({ data: apagadaNoMeio ? [] : [{ id: "msg1" }], error: null }) };
+              },
+            }),
+          }),
+        };
+      },
+      insert: async (linha: Record<string, unknown>) => {
+        insertMock(tabela, linha);
+        return { error: null };
       },
     }),
     storage: { from: () => ({ upload: uploadMock }) },
@@ -102,6 +119,9 @@ describe("persistMessageMedia", () => {
   beforeEach(() => {
     uploadMock.mockReset().mockResolvedValue({ error: null });
     updateEqMock.mockReset();
+    insertMock.mockReset();
+    orMock.mockReset();
+    apagadaNoMeio = false;
     rpcMock.mockReset().mockResolvedValue({ error: null });
     messageRow.media_storage_path = null;
     conversationRow.is_group = false;
@@ -212,5 +232,18 @@ describe("persistMessageMedia", () => {
     expect(updateEqMock).toHaveBeenCalledWith(
       expect.objectContaining({ metadata: expect.objectContaining({ media_status: "failed" }) }),
     );
+  });
+
+  it("apagada pelo contato DURANTE o download: não regrava a linha, o arquivo vai para a fila de remoção e nada é derivado", async () => {
+    apagadaNoMeio = true;
+    const r = await persistMessageMedia(eventRow() as never);
+    expect(r).toMatchObject({ status: "skipped", detail: "apagada_pelo_contato" });
+    // a gravação final só alcança linha que não é recebida apagada
+    expect(orMock).toHaveBeenCalledWith("revoked_at.is.null,direction.neq.inbound");
+    expect(insertMock).toHaveBeenCalledWith(
+      "storage_redaction_queue",
+      expect.objectContaining({ organization_id: "org1", bucket: "whatsapp-media" }),
+    );
+    expect(rpcMock).not.toHaveBeenCalled();
   });
 });

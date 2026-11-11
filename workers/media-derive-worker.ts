@@ -251,7 +251,10 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     const text = await deriveMediaText(msg.type, buffer, msg.media_mime ?? "application/octet-stream", deps);
     await admin.from("messages")
       .update({ media_derived_text: text, media_derived_status: "ready" })
-      .eq("id", msg.id).eq("organization_id", msg.organization_id);
+      .eq("id", msg.id).eq("organization_id", msg.organization_id)
+      // Recebida apagada pelo contato no meio da transcrição não ganha o texto
+      // de volta (`lib/messaging/apagamento.ts`).
+      .or("revoked_at.is.null,direction.neq.inbound");
     return { consumer_key, status: "ok" };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);

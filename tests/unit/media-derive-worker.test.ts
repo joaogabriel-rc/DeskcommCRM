@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const downloadMock = vi.fn();
 const updateEqMock = vi.fn();
+const orMock = vi.fn();
 const messageRow = {
   id: "msg1",
   organization_id: "org1",
@@ -60,7 +61,11 @@ vi.mock("@/lib/supabase/admin", () => ({
         },
         update: (patch: Record<string, unknown>) => {
           updateEqMock(patch);
-          return { eq: () => ({ eq: async () => ({ error: null }) }) };
+          // O segundo `eq` é aguardável E aceita `.or(...)` — a gravação do texto
+          // derivado não alcança recebida apagada pelo contato.
+          const feito = { error: null };
+          const fim = { then: (r: (v: unknown) => unknown) => Promise.resolve(feito).then(r), or: async (expr: string) => (orMock(expr), feito) };
+          return { eq: () => ({ eq: () => fim }) };
         },
         then: (resolve: (v: unknown) => unknown) =>
           Promise.resolve({ data: linha ? [linha] : [], error: null }).then(resolve),
@@ -182,6 +187,8 @@ describe("deriveMessageMedia", () => {
     expect(updateEqMock).toHaveBeenCalledWith(
       expect.objectContaining({ media_derived_text: "transcrição do áudio real", media_derived_status: "ready" }),
     );
+    // O texto derivado não alcança recebida apagada pelo contato no meio da transcrição.
+    expect(orMock).toHaveBeenCalledWith("revoked_at.is.null,direction.neq.inbound");
   });
 
   it("pula se já derivado (idempotência)", async () => {

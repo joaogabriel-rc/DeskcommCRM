@@ -43,6 +43,7 @@ import { aplicarEfeitosPosEntrada } from "../pos-entrada";
 
 import { completarLocalizacao } from "./localizacao";
 import { parseZernioInbound, type ZernioIdentity, type ZernioInboundMessage } from "./webhook";
+import { apagarMensagem } from "@/lib/messaging/apagamento";
 
 export interface ZernioIngestResult {
   status: "ingested" | "duplicate" | "ignored" | "unknown_account";
@@ -683,15 +684,31 @@ export async function aplicarEdicaoZernio(
   edicao: { externalId: string; tipo: "edited" | "deleted"; body: string | null },
 ): Promise<"aplicado" | "sem_alvo"> {
   const agora = new Date().toISOString();
-  const patch =
-    edicao.tipo === "deleted"
-      ? { revoked_at: agora }
-      : // Edição sem corpo novo não zera o texto: seria trocar a versão velha
-        // (útil) por um vazio (inútil), e o evento sem corpo é justamente o
-        // caso em que não sabemos o texto novo.
-        edicao.body !== null
-        ? { body: edicao.body, edited_at: agora }
-        : { edited_at: agora };
+
+  // Apagamento: recebida apagada pelo contato perde o CONTEÚDO de todo lugar;
+  // enviada apagada pela empresa só ganha `revoked_at` (segue visível para a
+  // equipe). Regra única dos três canais: `lib/messaging/apagamento.ts`. Falha do
+  // banco LANÇA — antes o erro era descartado e o apagamento sumia em silêncio.
+  if (edicao.tipo === "deleted") {
+    const { data: alvos, error } = await admin
+      .from("messages")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("external_id", edicao.externalId);
+    if (error) throw new Error(`apagamento (busca): ${error.message}`, { cause: error });
+    const ids = ((alvos ?? []) as Array<{ id: string }>).map((a) => a.id);
+    if (ids.length === 0) return "sem_alvo";
+    for (const id of ids) {
+      const r = await apagarMensagem(admin, { organizationId, messageId: id, quando: agora, canal: "zernio" });
+      if (r.status === "falhou") throw new Error(`apagamento (${r.tabela}): ${r.erro.message ?? ""}`, { cause: r.erro });
+    }
+    return "aplicado";
+  }
+
+  // Edição sem corpo novo não zera o texto: seria trocar a versão velha (útil)
+  // por um vazio (inútil), e o evento sem corpo é justamente o caso em que não
+  // sabemos o texto novo.
+  const patch = edicao.body !== null ? { body: edicao.body, edited_at: agora } : { edited_at: agora };
 
   const { data } = await admin
     .from("messages")

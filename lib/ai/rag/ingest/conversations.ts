@@ -220,7 +220,7 @@ export async function ingestConversationsBatch(
     // a. Load messages (filter org).
     const { data: msgRows, error: msgErr } = await admin
       .from("messages")
-      .select("body, direction, sent_at")
+      .select("body, direction, sent_at, revoked_at")
       .eq("organization_id", organizationId)
       .eq("conversation_id", conv.id)
       .order("sent_at", { ascending: true });
@@ -235,7 +235,11 @@ export async function ingestConversationsBatch(
       continue;
     }
 
-    const msgs = (msgRows ?? []) as MsgRow[];
+    // Recebida apagada pelo contato não vira conhecimento da IA
+    // (`lib/messaging/apagamento.ts`).
+    const msgs = ((msgRows ?? []) as Array<MsgRow & { revoked_at?: string | null }>).filter(
+      (m) => !(m.direction === "inbound" && m.revoked_at),
+    );
     const transcript = buildTranscript(msgs);
     if (!transcript) {
       skipped++;

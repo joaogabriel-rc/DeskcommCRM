@@ -65,13 +65,20 @@ export async function persistMessageMedia(row: EventRow): Promise<HandlerResult>
   if (!msg?.media_url) return { consumer_key, status: "skipped", detail: "no media_url" };
   if (msg.media_storage_path) return { consumer_key, status: "skipped", detail: "already stored" };
 
+  // A gravação final NÃO alcança recebida apagada pelo contato
+  // (`lib/messaging/apagamento.ts`): entre a leitura acima e o fim do download o
+  // contato pode ter apagado a mensagem, e regravar aqui ressuscitaria a mídia e
+  // o `metadata` antigo (com a legenda). Devolve se a linha foi gravada.
   const markStatus = async (media_status: "stored" | "failed", patch: Record<string, unknown> = {}) => {
-    const { error: updErr } = await admin
+    const { data: gravada, error: updErr } = await admin
       .from("messages")
       .update({ metadata: { ...(msg.metadata ?? {}), media_status }, ...patch })
       .eq("id", msg.id)
-      .eq("organization_id", msg.organization_id);
+      .eq("organization_id", msg.organization_id)
+      .or("revoked_at.is.null,direction.neq.inbound")
+      .select("id");
     if (updErr) throw new Error(`message update failed: ${updErr.message}`);
+    return Array.isArray(gravada) && gravada.length > 0;
   };
 
   const isLastAttempt = row.attempts >= DRAIN_MAX_ATTEMPTS - 1;
@@ -134,11 +141,24 @@ export async function persistMessageMedia(row: EventRow): Promise<HandlerResult>
     return { consumer_key, status: "error", detail: uploadErr.message };
   }
 
-  await markStatus("stored", {
+  const gravada = await markStatus("stored", {
     media_storage_path: path,
     media_size_bytes: media.buffer.byteLength,
     media_mime: media.mime,
   });
+  if (!gravada) {
+    // Apagada pelo contato durante o download: o arquivo que acabou de subir vai
+    // para a mesma fila durável do apagamento, e nada mais é pedido.
+    const { error: filaErr } = await admin.from("storage_redaction_queue").insert({
+      organization_id: msg.organization_id,
+      bucket: "whatsapp-media",
+      object_path: path,
+    });
+    if (filaErr && filaErr.code !== "23505") {
+      return { consumer_key, status: "error", detail: `apagada_no_meio: ${filaErr.message}` };
+    }
+    return { consumer_key, status: "skipped", detail: "apagada_pelo_contato" };
+  }
 
   // Grupo nunca é derivado: a IA não serve grupos, e derivar custaria visão/
   // transcrição PAGA sem consumidor nenhum do outro lado — ninguém leria "o

@@ -11,6 +11,7 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { lancarFalhaDeIngestao } from "@/lib/waha/falha-transitoria";
+import { apagarMensagem } from "@/lib/messaging/apagamento";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -1371,10 +1372,19 @@ async function handleMessageEdited(
  * O autor apagou a mensagem ("apagar para todos").
  *
  * A linha NÃO é removida: sumir com ela apagaria o contexto das vizinhas — uma
- * resposta passaria a responder ao nada — e o histórico de quem atendeu. O
- * corpo também não é limpo aqui: quem decide o que mostrar é a tela, e apagar o
- * texto no banco impediria o próprio atendente de entender, depois, o que tinha
- * sido combinado antes do arrependimento.
+ * resposta passaria a responder ao nada — e o histórico de quem atendeu.
+ *
+ * O que muda com quem apagou (decisão do dono do produto, 10/11/2026), e mora
+ * num ponto só para os três canais (`lib/messaging/apagamento.ts`):
+ *   - RECEBIDA, apagada pelo contato: o CONTEÚDO sai de todo lugar — linha,
+ *     mídia, prévia, eventos, arquivos de webhook, RAG. Antes o corpo ficava
+ *     "para o atendente entender depois", e a mesma linha o entregava à API, ao
+ *     Realtime e à IA;
+ *   - ENVIADA, apagada pela empresa: só `revoked_at` — o texto é da empresa e
+ *     continua "Visível só aqui no CRM".
+ *
+ * Falha do banco agora LANÇA (como a ingestão): passageira vira 503, e o WAHA
+ * reentrega. Antes o erro era descartado e o apagamento se perdia em silêncio.
  */
 async function handleMessageRevoked(
   admin: Admin,
@@ -1384,11 +1394,23 @@ async function handleMessageRevoked(
   const alvo = bareWaMessageId(p.revokedMessageId ?? "");
   if (!alvo) return;
 
-  await admin
+  const { data: alvos, error } = await admin
     .from("messages")
-    .update({ revoked_at: new Date().toISOString() })
+    .select("id")
     .eq("organization_id", session.organization_id)
     .eq("external_id", alvo);
+  if (error) lancarFalhaDeIngestao("messages.revoke (busca)", error);
+
+  const quando = new Date().toISOString();
+  for (const { id } of (alvos ?? []) as Array<{ id: string }>) {
+    const r = await apagarMensagem(admin, {
+      organizationId: session.organization_id,
+      messageId: id,
+      quando,
+      canal: "waha",
+    });
+    if (r.status === "falhou") lancarFalhaDeIngestao(`messages.revoke (${r.tabela})`, r.erro);
+  }
 }
 
 /**

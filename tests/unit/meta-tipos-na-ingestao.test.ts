@@ -113,11 +113,12 @@ function proximaFalha(alvo: string): Erro | null {
   return fila && fila.length > 0 ? (fila.shift() ?? null) : null;
 }
 
-/** Lê `payload_parsed->>id` e colunas comuns. */
+/** Lê caminhos JSON (`payload_parsed->>id`, `payload_parsed->payload->>id`) e colunas comuns. */
 function valor(l: Linha, coluna: string): unknown {
-  const m = /^(\w+)->>(\w+)$/.exec(coluna);
-  if (m) return (l[m[1]!] as Linha | null | undefined)?.[m[2]!] ?? null;
-  return l[coluna];
+  if (!coluna.includes("->")) return l[coluna];
+  let v: unknown = l;
+  for (const p of coluna.split(/->>?/)) v = v && typeof v === "object" ? (v as Linha)[p] : undefined;
+  return v ?? null;
 }
 
 function adminFalso() {
@@ -141,9 +142,10 @@ function adminFalso() {
       const eq: Linha = {};
       const is: Linha = {};
       const neq: Linha = {};
+      const naoNulo: string[] = [];
       const dentro: Record<string, unknown[]> = {};
       let ou: string | null = null;
-      let operacao: "select" | "insert" | "update" | "upsert" = "select";
+      let operacao: "select" | "insert" | "update" | "upsert" | "delete" = "select";
       let nova: Linha | null = null;
       let patch: Linha | null = null;
       let devolverLinhas = false;
@@ -152,6 +154,7 @@ function adminFalso() {
         Object.entries(eq).every(([c, v]) => valor(l, c) === v) &&
         Object.entries(is).every(([c, v]) => (v === null ? l[c] == null : l[c] === v)) &&
         Object.entries(neq).every(([c, v]) => l[c] !== v) &&
+        naoNulo.every((c) => valor(l, c) != null) &&
         Object.entries(dentro).every(([c, vs]) => vs.includes(l[c])) &&
         (ou === null ||
           ou.split(",").some((cond) => {
@@ -215,7 +218,7 @@ function adminFalso() {
           });
           return Promise.resolve({ data: null, error: null });
         }
-        if (operacao === "insert" || operacao === "upsert")
+        if (operacao === "insert" || operacao === "upsert" || operacao === "delete")
           return Promise.resolve({ data: null, error: null });
         if (operacao === "update") {
           if (tabela === "messages" && banco.conflitos > 0) {
@@ -241,6 +244,11 @@ function adminFalso() {
         eq: (c: string, v: unknown) => ((eq[c] = v), q),
         is: (c: string, v: unknown) => ((is[c] = v), q),
         neq: (c: string, v: unknown) => ((neq[c] = v), q),
+        not: (c: string, op: string, v: unknown) => {
+          if (op === "is" && v === null) naoNulo.push(c);
+          return q;
+        },
+        delete: () => ((operacao = "delete"), q),
         in: (c: string, vs: unknown[]) => ((dentro[c] = vs), q),
         or: (expr: string) => ((ou = expr), q),
         gte: () => q,
@@ -509,9 +517,14 @@ describe.each(ROTAS)("rota %s — apagar e editar alteram a original", (_rota, p
       (await post(corpo(recebidas(WABA_A, NUM_A, revoke("wamid.rv", "wamid.orig"))))).status,
     ).toBe(200);
     expect(daOrg(ORG_A)).toHaveLength(1);
+    // Recebida apagada pelo contato: o conteúdo SAI (decisão de 10/11/2026,
+    // `lib/messaging/apagamento.ts`). A linha fica, com a marca de quando.
     expect(porWamid(ORG_A, "wamid.orig")).toMatchObject({
       revoked_at: iso("1790000100"),
-      body: "Endereço: Rua 1",
+      body: null,
+      metadata: expect.objectContaining({
+        apagamento: expect.objectContaining({ por: "contato", conteudo: "removido" }),
+      }),
     });
   });
 
@@ -554,8 +567,9 @@ describe.each(ROTAS)("rota %s — apagar e editar alteram a original", (_rota, p
     await post(
       corpo(recebidas(WABA_A, NUM_A, edit("wamid.ed", "wamid.orig", "outro", "1790000200"))),
     );
+    // Nem o texto antigo (apagado) nem o novo (a edição chegou depois).
     expect(porWamid(ORG_A, "wamid.orig")).toMatchObject({
-      body: "Endereço: Rua 1",
+      body: null,
       edited_at: null,
     });
   });
@@ -700,7 +714,7 @@ describe("isolamento entre organizações", () => {
       ),
     );
     expect(porWamid(ORG_A, "wamid.x")).toMatchObject({ body: "A2", revoked_at: null });
-    expect(porWamid(ORG_B, "wamid.x")).toMatchObject({ body: "B", revoked_at: iso("1790000100") });
+    expect(porWamid(ORG_B, "wamid.x")).toMatchObject({ body: null, revoked_at: iso("1790000100") });
   });
 });
 

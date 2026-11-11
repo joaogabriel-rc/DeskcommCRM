@@ -364,8 +364,9 @@ export function MessageBubble({
         ) : apagada ? (
           <div className="space-y-1">
             <p className="italic leading-snug opacity-70">{t("Esta mensagem foi apagada")}</p>
-            {/* O WhatsApp revoga o envio; o CRM conserva o corpo para auditoria
-                interna. Não revelamos texto de uma mensagem apagada pelo cliente. */}
+            {/* Enviada apagada pela empresa: o CRM conserva o corpo para a
+                equipe. Recebida apagada pelo contato: o conteúdo já foi apagado
+                no banco (`lib/messaging/apagamento.ts`) e nada é revelado aqui. */}
             {isOutbound && message.body && (
               <div className="border-t border-current/20 pt-1">
                 <p className="text-[10px] opacity-70">{t("Visível só aqui no CRM")}</p>

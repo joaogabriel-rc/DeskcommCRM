@@ -32,7 +32,7 @@ export async function loadHistoryWithBudget(
   const limit = Math.max(input.messageWindow, 1);
   const { data, error } = await supabase
     .from("messages")
-    .select("id, body, direction, sent_at")
+    .select("id, body, direction, sent_at, revoked_at")
     .eq("organization_id", input.organizationId)
     .eq("conversation_id", input.conversationId)
     .order("sent_at", { ascending: false })
@@ -45,8 +45,11 @@ export async function loadHistoryWithBudget(
     body: string | null;
     direction: string;
     sent_at: string;
+    revoked_at?: string | null;
   }>)
     .filter((m) => m.id !== input.excludeMessageId)
+    // Recebida apagada pelo contato não entra no contexto do agente.
+    .filter((m) => !(m.direction === "inbound" && m.revoked_at))
     .filter((m) => (m.body ?? "").trim().length > 0);
 
   // Sort oldest-first, then trim greedily from the back so newest messages stay.

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * A MENSAGEM QUE O CLIENTE EDITOU OU APAGOU.
@@ -24,6 +24,17 @@ import { beforeEach, describe, expect, it } from "vitest";
  */
 import { parseZernioEdicao } from "@/lib/channels/zernio/webhook";
 import { aplicarEdicaoZernio } from "@/lib/channels/zernio/ingest";
+
+// O apagamento tem teste próprio (`tests/unit/apagamento-de-mensagem.test.ts`);
+// aqui só importa que o canal ENTREGA cada alvo a ele e não engole a falha.
+const apagadas: Array<{ organizationId: string; messageId: string; canal: string }> = [];
+let resultadoDoApagamento: unknown = { status: "apagada" };
+vi.mock("@/lib/messaging/apagamento", () => ({
+  apagarMensagem: async (_a: unknown, alvo: { organizationId: string; messageId: string; canal: string }) => {
+    apagadas.push({ organizationId: alvo.organizationId, messageId: alvo.messageId, canal: alvo.canal });
+    return resultadoDoApagamento;
+  },
+}));
 
 const zEvento = (event: string, extra: Record<string, unknown> = {}) => ({
   event,
@@ -88,6 +99,7 @@ function chain(tabela: string, op: string, payload?: unknown): Record<string, un
 
 const admin = {
   from: (t: string) => ({
+    select: () => chain(t, "select"),
     update: (p: unknown) => chain(t, "update", p),
     insert: (p: unknown) => chain(t, "insert", p),
     delete: () => chain(t, "delete"),
@@ -97,6 +109,8 @@ const admin = {
 beforeEach(() => {
   ops.length = 0;
   afetadas = [{ id: "m1" }];
+  apagadas.length = 0;
+  resultadoDoApagamento = { status: "apagada" };
 });
 
 describe("aplicar na linha que já existe", () => {
@@ -112,16 +126,22 @@ describe("aplicar na linha que já existe", () => {
     expect(up?.payload).toHaveProperty("edited_at");
   });
 
-  it("apagar NÃO apaga a linha — carimba `revoked_at`", async () => {
+  it("apagar NÃO apaga a linha — entrega cada alvo ao ponto único do apagamento", async () => {
     // Sumir com a linha deixaria a resposta seguinte respondendo ao nada, e
-    // levaria junto o histórico de quem atendeu.
-    await aplicarEdicaoZernio(admin, "org", { externalId: "wamid.ABC", tipo: "deleted", body: null });
+    // levaria junto o histórico de quem atendeu. O que sai é o CONTEÚDO da
+    // recebida — e quem decide isso é `lib/messaging/apagamento.ts`, não o canal.
+    const r = await aplicarEdicaoZernio(admin, "org", { externalId: "wamid.ABC", tipo: "deleted", body: null });
+    expect(r).toBe("aplicado");
     expect(ops.some((o) => o.op === "delete")).toBe(false);
-    const up = ops.find((o) => o.op === "update");
-    expect(up?.payload).toHaveProperty("revoked_at");
-    // E não mexe no corpo: quem decide o que mostrar é a tela, e limpar aqui
-    // impediria o atendente de entender depois o que tinha sido combinado.
-    expect(up?.payload).not.toHaveProperty("body");
+    expect(ops.some((o) => o.op === "update")).toBe(false);
+    expect(apagadas).toEqual([{ organizationId: "org", messageId: "m1", canal: "zernio" }]);
+  });
+
+  it("apagamento que o banco recusa LANÇA — a rota responde 500 e o provedor reentrega", async () => {
+    resultadoDoApagamento = { status: "falhou", tabela: "event_log", erro: { code: "08006", message: "caiu" } };
+    await expect(
+      aplicarEdicaoZernio(admin, "org", { externalId: "wamid.ABC", tipo: "deleted", body: null }),
+    ).rejects.toThrow(/event_log/);
   });
 
   it("edição sem corpo novo não ZERA o texto", async () => {
@@ -136,7 +156,7 @@ describe("aplicar na linha que já existe", () => {
     // O id do provider não é garantidamente único entre tenants; sem a org,
     // uma edição de um cliente poderia reescrever a mensagem de outro.
     await aplicarEdicaoZernio(admin, "org", { externalId: "wamid.ABC", tipo: "deleted", body: null });
-    const f = Object.fromEntries(ops.find((o) => o.op === "update")!.filtros);
+    const f = Object.fromEntries(ops.find((o) => o.op === "select")!.filtros);
     expect(f).toMatchObject({ organization_id: "org", external_id: "wamid.ABC" });
   });
 

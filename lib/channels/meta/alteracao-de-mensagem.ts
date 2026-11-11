@@ -39,6 +39,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
 import type { ErroDoBancoLike } from "@/lib/channels/falha-do-banco";
 import { logger } from "@/lib/logger";
+import { apagarMensagem } from "@/lib/messaging/apagamento";
 
 import { alteracaoDaMensagem, type MessageChangeEvent } from "./webhook";
 
@@ -136,13 +137,14 @@ export function sanitizarMetadataDaAlteracao(
 
 interface Original {
   id: string;
+  direction: string;
   revoked_at: string | null;
   edited_at: string | null;
   metadata: Record<string, unknown> | null;
   updated_at: string;
 }
 
-const COLUNAS_DA_ORIGINAL = "id, revoked_at, edited_at, metadata, updated_at";
+const COLUNAS_DA_ORIGINAL = "id, direction, revoked_at, edited_at, metadata, updated_at";
 /** Outra escrita na mesma linha entre a leitura e o UPDATE: relê e tenta de novo. */
 const TENTATIVAS_POR_CONFLITO = 3;
 
@@ -174,6 +176,22 @@ async function aplicarNaOriginal(
     // Apagada não volta; edição de mensagem apagada não ressuscita o texto; edição
     // mais velha que a já gravada (reentrega fora de ordem) não desfaz a mais nova.
     if (original.revoked_at) return { status: "ja_aplicada" };
+
+    // RECEBIDA apagada pelo contato: o conteúdo sai de TODO lugar (linha, mídia,
+    // prévia, eventos, arquivos de webhook, RAG) — `lib/messaging/apagamento.ts`,
+    // o mesmo ponto dos outros canais. A ENVIADA segue abaixo: só `revoked_at` e o
+    // original reduzido, e o texto continua visível para a equipe.
+    if (e.acao === "revoke" && original.direction === "inbound") {
+      const r = await apagarMensagem(admin, {
+        organizationId,
+        messageId: original.id,
+        quando,
+        canal: CHANNEL_PROVIDER_META,
+      });
+      if (r.status === "falhou") return { status: "falhou", tabela: r.tabela, erro: r.erro };
+      return { status: r.status === "apagada" ? "aplicada" : "ja_aplicada" };
+    }
+
     if (
       e.acao === "edit" &&
       original.edited_at &&

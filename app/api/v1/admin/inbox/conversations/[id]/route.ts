@@ -3,6 +3,7 @@ import { requirePlatformAdmin } from "@/lib/auth/requirePlatformAdmin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
+import { semConteudoApagado } from "@/lib/messaging/apagamento";
 import { randomUUID } from "node:crypto";
 
 // ---------------------------------------------------------------------------
@@ -89,6 +90,8 @@ export async function GET(
       error_message,
       ack,
       sent_by_user_id,
+      metadata,
+      revoked_at,
       created_at
     `)
     .eq("conversation_id", id)
@@ -120,7 +123,7 @@ export async function GET(
       conversation,
       organization: organization ?? null,
       contact: contact ?? null,
-      messages: messages ?? [],
+      messages: (messages ?? []).map(semConteudoApagado),
     },
     { requestId },
   );

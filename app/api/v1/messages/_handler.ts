@@ -1,4 +1,5 @@
 import { assertProspectingDelivery } from "@/lib/prospecting/guard";
+import { semConteudoApagado } from "@/lib/messaging/apagamento";
 import { assertAgentOperationSupabase } from "@/lib/ai/agents/operation";
 import {
   assertApprovedReplySupabase,
@@ -311,7 +312,9 @@ export async function listMessagesHandler(
     throw new ApiError(500, "internal_error", undefined, ctx.requestId, error.message);
   }
 
-  const rows = (data ?? []) as unknown as Message[];
+  // Recebida apagada pelo contato sai sem conteúdo mesmo se a linha ainda o
+  // tiver (`lib/messaging/apagamento.ts`). A MCP lê por aqui também.
+  const rows = ((data ?? []) as unknown as Message[]).map(semConteudoApagado);
   const hasMore = rows.length > q.limit;
   const page = hasMore ? rows.slice(0, q.limit) : rows;
 
