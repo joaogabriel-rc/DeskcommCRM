@@ -16,6 +16,7 @@ import {
   type ChannelSessionRef,
 } from "@/lib/channels";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { clienteDeEscritaDeMensagens } from "@/lib/messaging/cliente-de-escrita";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -109,8 +110,15 @@ async function alterar(req: NextRequest, ctx: Ctx, acao: "edit" | "revoke"): Pro
   const update = acao === "edit" && parsed?.success
     ? { body: parsed.data.text, edited_at: new Date().toISOString() }
     : { revoked_at: new Date().toISOString() };
-  const { data: updated, error: updateError } = await supabase.from("messages")
+  // UPDATE em `messages` é só do servidor (migration 9332): o `authenticated`
+  // perdeu o UPDATE, porque o JWT desta sessão também alcança o PostgREST. A
+  // autorização é a desta rota (papel, autoria, janela, `requireSupportWrite`),
+  // e o próprio UPDATE repete as condições da autoria — quem edita é o autor,
+  // a mensagem é enviada e não está apagada — para que nada entre a leitura e a
+  // escrita mude o alvo. `organization_id` sai da sessão, nunca do corpo.
+  const { data: updated, error: updateError } = await clienteDeEscritaDeMensagens(supabase).from("messages")
     .update(update).eq("id", id).eq("organization_id", authz.org.orgId)
+    .eq("direction", "outbound").eq("sent_by_user_id", authz.user.id).is("revoked_at", null)
     .select("id, body, edited_at, revoked_at").maybeSingle();
   if (updateError || !updated) {
     return fail("internal_error", t("O WhatsApp alterou a mensagem, mas o CRM não conseguiu atualizar o histórico."), 500, { requestId });

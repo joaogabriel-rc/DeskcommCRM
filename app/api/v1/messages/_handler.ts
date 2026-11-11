@@ -1,5 +1,6 @@
 import { assertProspectingDelivery } from "@/lib/prospecting/guard";
 import { semConteudoApagado } from "@/lib/messaging/apagamento";
+import { clienteDeEscritaDeMensagens } from "@/lib/messaging/cliente-de-escrita";
 import { assertAgentOperationSupabase } from "@/lib/ai/agents/operation";
 import {
   assertApprovedReplySupabase,
@@ -372,6 +373,14 @@ export async function sendMessageHandler(
   ctx: HandlerCtx,
   input: SendMessageInput,
 ): Promise<Message> {
+  // UPDATE em `messages` é só do servidor (migration 9332): o papel
+  // `authenticated` perdeu o UPDATE, porque o mesmo JWT que chega a esta rota
+  // chega ao PostgREST — e lá não há papel, autoria nem auditoria. A
+  // autorização continua sendo a da SESSÃO original (a rota já passou por
+  // `requireRole`/`resolveAuthDual`, e a linha alterada é a que este handler
+  // acabou de inserir); cada UPDATE leva `organization_id` explícito, porque o
+  // service role não tem RLS no caminho (anti-pattern 10).
+  const mensagensDoServidor = () => clienteDeEscritaDeMensagens(supabase).from("messages");
   if (ctx.prospectingDelivery) await assertProspectingDelivery(supabase, ctx.prospectingDelivery);
   if (ctx.meetingDelivery) await assertMeetingDeliverySupabase(supabase, ctx.meetingDelivery);
   if (ctx.approvedReply) await assertApprovedReplySupabase(supabase, ctx.approvedReply);
@@ -803,7 +812,7 @@ export async function sendMessageHandler(
     contactPhoneNumber: c.contacts?.phone_number ?? "",
   }).catch(() => ({ permite: false, motivo: "pre_go_live_indisponivel" }));
   if (acessoAtual && !acessoAtual.permite) {
-    const { data: updated, error } = await supabase.from("messages").update({
+    const { data: updated, error } = await mensagensDoServidor().update({
       status: "failed",
       error_code: acessoAtual.motivo === "pre_go_live_indisponivel" ? "pre_go_live_indisponivel" : "pre_go_live",
       error_message: acessoAtual.motivo === "pre_go_live_indisponivel"
@@ -823,48 +832,48 @@ export async function sendMessageHandler(
     // e é o que o ledger do agente lê como desfecho TERMINAL — em `queued` o
     // follow-up ficaria retentando contra um número que não existe mais.
     // Vem ANTES de `isConfigured`: um canal excluído não espera configuração.
-    const { data: updated } = await supabase
-      .from("messages")
+    const { data: updated } = await mensagensDoServidor()
       .update({
         status: "failed",
         error_code: "channel_archived",
         error_message: "Este número foi excluído da Central de Conexões.",
       })
+      .eq("organization_id", ctx.organization_id)
       .eq("id", message.id)
       .select(MSG_COLS)
       .maybeSingle();
     if (updated) message = updated as unknown as Message;
   } else if (!adapter.isConfigured()) {
-    const { data: updated } = await supabase
-      .from("messages")
+    const { data: updated } = await mensagensDoServidor()
       .update({
         metadata: { ...(message.metadata ?? {}), queued_reason: adapter.codes.notConfigured },
       })
+      .eq("organization_id", ctx.organization_id)
       .eq("id", message.id)
       .select(MSG_COLS)
       .maybeSingle();
     if (updated) message = updated as unknown as Message;
   } else if (!chatId) {
-    const { data: updated } = await supabase
-      .from("messages")
+    const { data: updated } = await mensagensDoServidor()
       .update({
         status: "failed",
         error_code: "missing_phone_number",
         error_message: "Contato sem telefone para envio WhatsApp.",
       })
+      .eq("organization_id", ctx.organization_id)
       .eq("id", message.id)
       .select(MSG_COLS)
       .maybeSingle();
     if (updated) message = updated as unknown as Message;
   } else if (!c.channel_sessions || c.channel_sessions.status !== "WORKING") {
-    const { data: updated } = await supabase
-      .from("messages")
+    const { data: updated } = await mensagensDoServidor()
       .update({
         metadata: {
           ...(message.metadata ?? {}),
           queued_reason: "channel_session_not_working",
         },
       })
+      .eq("organization_id", ctx.organization_id)
       .eq("id", message.id)
       .select(MSG_COLS)
       .maybeSingle();
@@ -1060,8 +1069,7 @@ export async function sendMessageHandler(
       const limparEco = () =>
         removerEcoDoProprioEnvio(supabase, ctx.organization_id, c.id, message.id, externalId, candidatosDoEco);
       const marcarEnviada = (comId: boolean) =>
-        supabase
-          .from("messages")
+        mensagensDoServidor()
           .update({
             status: "sent",
             ...(comId ? { external_id: externalId } : {}),
@@ -1072,6 +1080,7 @@ export async function sendMessageHandler(
               ? { template_name: input.template_name, template_language: input.template_language }
               : {}),
           })
+          .eq("organization_id", ctx.organization_id)
           .eq("id", message.id)
           .select(MSG_COLS)
           .maybeSingle();
@@ -1110,11 +1119,11 @@ export async function sendMessageHandler(
       // Quem sabe é `send()`, que pode consultar o banco — então ele lança, e a
       // tradução do desfecho acontece aqui.
       if (msg.startsWith(adapter.codes.notConfigured)) {
-        const { data: emFila } = await supabase
-          .from("messages")
+        const { data: emFila } = await mensagensDoServidor()
           .update({
             metadata: { ...(message.metadata ?? {}), queued_reason: adapter.codes.notConfigured },
           })
+          .eq("organization_id", ctx.organization_id)
           .eq("id", message.id)
           .select(MSG_COLS)
           .maybeSingle();
@@ -1122,13 +1131,13 @@ export async function sendMessageHandler(
         return message;
       }
 
-      const { data: updated } = await supabase
-        .from("messages")
+      const { data: updated } = await mensagensDoServidor()
         .update({
           status: "failed",
           error_code: code,
           error_message: msg,
         })
+        .eq("organization_id", ctx.organization_id)
         .eq("id", message.id)
         .select(MSG_COLS)
         .maybeSingle();

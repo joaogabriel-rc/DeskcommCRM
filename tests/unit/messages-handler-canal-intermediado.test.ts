@@ -50,6 +50,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// UPDATE em `messages` sai pelo service role (migration 9332); aqui a escrita
+// cai no mesmo banco falso da sessão. Que em produção ela NÃO é a sessão quem
+// prova é `tests/unit/cliente-de-escrita-de-mensagens.test.ts`.
+vi.mock("@/lib/messaging/cliente-de-escrita", () => ({ clienteDeEscritaDeMensagens: (sessao: unknown) => sessao }));
+
 import { sendMessageHandler } from "@/app/api/v1/messages/_handler";
 import type { HandlerCtx } from "@/lib/api/handlers/types";
 import type { SendMessageInput } from "@/lib/schemas";

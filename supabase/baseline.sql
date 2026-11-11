@@ -5439,14 +5439,9 @@ create policy "messages_insert" on public.messages
     (organization_id in (select public.fn_user_org_ids()))
     or public.fn_is_platform_admin()
   );
-create policy "messages_update" on public.messages
-  for update using (
-    (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
-  ) with check (
-    (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
-  );
+-- `messages_update` NÃO é mais criada: UPDATE em messages é só do servidor
+-- (migration 9332, bloco no fim deste arquivo). O `drop policy if exists` acima
+-- cura o banco que ainda a tem.
 create policy "messages_delete" on public.messages
   for delete using (
     (organization_id in (select public.fn_user_org_ids()))
@@ -45809,6 +45804,80 @@ begin
   );
   return new;
 end$$;
+
+-- ---- UPDATE em messages é só do servidor, e o que foi apagado não volta (migration 9332) ----
+--
+-- `anon`, `authenticated` e PUBLIC perdem UPDATE e TRUNCATE em `messages` (tabela
+-- e colunas); a policy permissiva `messages_update` sai; e o trigger
+-- `trg_messages_imutaveis` vale para todos os papéis, service role inclusive:
+-- organização e direção não mudam, `revoked_at` não volta a nulo, e recebida
+-- apagada pelo contato não volta a ter conteúdo. O porquê de cada passo está no
+-- cabeçalho da migration 9332. O REVOKE mora AQUI, depois de todo GRANT do
+-- arquivo: o default ACL do Supabase concede tudo a esses papéis na criação, e
+-- só o revoke posterior retira (a lição da 0258). Idempotente.
+--
+-- ⚠️ ANTES DA VARREDURA anon: cria função.
+
+-- (1) sem UPDATE e sem TRUNCATE para o PostgREST
+revoke update, truncate on table public.messages from public, anon, authenticated;
+
+-- O REVOKE de tabela também retira o UPDATE concedido coluna a coluna (é a
+-- semântica do Postgres para REVOKE em tabela); o invariante da 9332 concede
+-- UPDATE em colunas e prova que este bloco o retira.
+
+-- (2) sem policy permissiva de UPDATE
+drop policy if exists "messages_update" on public.messages;
+
+-- (3) o que foi apagado não volta, para ninguém
+create or replace function public.fn_messages_imutaveis()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.organization_id is distinct from old.organization_id then
+    raise exception 'messages_imutavel: organization_id não muda (mensagem %)', old.id
+      using errcode = '23514';
+  end if;
+
+  if new.direction is distinct from old.direction then
+    raise exception 'messages_imutavel: direction não muda (mensagem %)', old.id
+      using errcode = '23514';
+  end if;
+
+  if old.revoked_at is not null and new.revoked_at is null then
+    raise exception 'messages_imutavel: apagamento não se desfaz (mensagem %)', old.id
+      using errcode = '23514';
+  end if;
+
+  -- Recebida apagada pelo contato: conteúdo só sai, nunca entra.
+  if new.direction = 'inbound' and new.revoked_at is not null then
+    if new.body is not null
+       and new.body is distinct from old.body
+       and new.body <> '[mensagem anonimizada]' then
+      raise exception 'messages_imutavel: recebida apagada não recebe texto (mensagem %)', old.id
+        using errcode = '23514';
+    end if;
+    if (new.media_url is not null and new.media_url is distinct from old.media_url)
+       or (new.media_storage_path is not null and new.media_storage_path is distinct from old.media_storage_path)
+       or (new.media_mime is not null and new.media_mime is distinct from old.media_mime)
+       or (new.media_size_bytes is not null and new.media_size_bytes is distinct from old.media_size_bytes)
+       or (new.media_derived_text is not null and new.media_derived_text is distinct from old.media_derived_text) then
+      raise exception 'messages_imutavel: recebida apagada não recebe mídia nem transcrição (mensagem %)', old.id
+        using errcode = '23514';
+    end if;
+  end if;
+
+  return new;
+end
+$$;
+
+revoke execute on function public.fn_messages_imutaveis() from public, anon;
+
+drop trigger if exists trg_messages_imutaveis on public.messages;
+create trigger trg_messages_imutaveis
+  before update on public.messages
+  for each row execute function public.fn_messages_imutaveis();
 
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --

@@ -1,0 +1,5 @@
+login da conta de teste (admin da org): HTTP 200
+reescrever o texto da recebida viva: HTTP 403 {"code":"42501","details":null,"hint":null,"message":"permission denied for table messages"} | linha mudou? não
+desfazer o apagamento da recebida e devolver texto: HTTP 403 {"code":"42501","details":null,"hint":null,"message":"permission denied for table messages"} | linha mudou? não
+marcar a enviada como lida e trocar o autor: HTTP 403 {"code":"42501","details":null,"hint":null,"message":"permission denied for table messages"} | linha mudou? não
+CONTROLE leitura pelo PostgREST: HTTP 200, 1 linha(s)

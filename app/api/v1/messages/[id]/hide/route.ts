@@ -8,6 +8,7 @@ import { fail, ok } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { requireSupportWrite } from "@/lib/impersonate/support";
+import { clienteDeEscritaDeMensagens } from "@/lib/messaging/cliente-de-escrita";
 import { createClient } from "@/lib/supabase/server";
 
 interface Ctx { params: Promise<{ id: string }> }
@@ -39,8 +40,14 @@ async function alterar(req: NextRequest, ctx: Ctx, ocultar: boolean): Promise<Re
     delete metadata.crm_hidden_at;
     delete metadata.crm_hidden_by;
   }
-  const { data: updated, error: updateError } = await supabase.from("messages")
+  // UPDATE em `messages` é só do servidor (migration 9332): o `authenticated`
+  // perdeu o UPDATE, porque o JWT desta sessão também alcança o PostgREST. A
+  // autorização é a desta rota (`manager`+, `requireSupportWrite`), e o UPDATE
+  // repete a condição do alvo — recebida e não apagada. `organization_id` sai
+  // da sessão, nunca do corpo.
+  const { data: updated, error: updateError } = await clienteDeEscritaDeMensagens(supabase).from("messages")
     .update({ metadata }).eq("id", id).eq("organization_id", authz.org.orgId)
+    .eq("direction", "inbound").is("revoked_at", null)
     .select("id, metadata").maybeSingle();
   if (updateError || !updated) {
     return fail("internal_error", t("Não foi possível atualizar a mensagem."), 500, { requestId });

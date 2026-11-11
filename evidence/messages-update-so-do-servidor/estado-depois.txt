@@ -1,0 +1,6 @@
+              body              |  status   |        fila         | oculta 
+--------------------------------+-----------+---------------------+--------
+ Prova 9332: envio pela tela    | queued    | meta_not_configured | f
+ Controle: esta mensagem NÃO fo | delivered |                     | f
+(2 rows)
+

@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// UPDATE em `messages` sai pelo service role (migration 9332); aqui a escrita
+// cai no mesmo banco falso da sessão. Que em produção ela NÃO é a sessão quem
+// prova é `tests/unit/cliente-de-escrita-de-mensagens.test.ts`.
+vi.mock("@/lib/messaging/cliente-de-escrita", () => ({ clienteDeEscritaDeMensagens: (sessao: unknown) => sessao }));
 import { NextRequest } from "next/server";
 
 const state = vi.hoisted(() => ({
@@ -19,7 +24,7 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     from: (table: string) => {
       const q = {
-        select: () => q, eq: () => q, order: () => q, limit: () => q,
+        select: () => q, eq: () => q, is: () => q, order: () => q, limit: () => q,
         update: (update: Record<string, unknown>) => {
           state.calls.push({ table, update });
           return q;
